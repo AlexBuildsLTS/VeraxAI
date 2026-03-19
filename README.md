@@ -14,9 +14,9 @@
 
 ## 🚀 Vision: The 2026 Standard for Audio Intelligence
 
-**TranscriberPro** is an enterprise-grade YouTube transcription and audio-intelligence platform engineered for the modern digital landscape. Targeting a multi-billion dollar 2026 creator and accessibility market, this application delivers lightning-fast, 95%+ accurate video-to-text conversion.
+**TranscriberPro** is an YouTube transcription and audio-intelligence platform engineered for the modern digital landscape, this project delivers fast, 95%+ accurate video-to-text conversion.
 
-Designed for content creators, educational institutions, researchers, and compliance teams, TranscriberPro utilizes multi-stage LLM processing via Anthropic's Claude to generate SEO metadata, chapter markers, and actionable insights natively within a fluid, Reanimated-driven user interface.
+Designed for content creators, educational institutions, researchers, and compliance teams, TranscriberPro utilizes multi-stage LLM processing via Gemini to generate SEO metadata, chapter markers, and actionable insights natively within a fluid, Reanimated-driven user interface.
 
 ---
 
@@ -38,7 +38,7 @@ sequenceDiagram
     participant U as User (App)
     participant S as Supabase DB
     participant E1 as Edge: process-video
-    participant E2 as Edge: process-audio-chunk
+    participant E2 as Edge: get-captions
     participant D as Deepgram Nova-2
     participant E3 as Edge: generate-ai-insights
     participant C as Anthropic Claude
@@ -51,7 +51,7 @@ sequenceDiagram
     D-->>E2: 6. Return JSON Transcript
     E2->>S: 7. Save Raw Transcript
     S->>E3: 8. Trigger Insight Engine
-    E3->>C: 9. Send Transcript Context to Claude
+    E3->>C: 9. Send Transcript Context to Gemini
     C-->>E3: 10. Return SEO/Chapters
     E3->>S: 11. Update DB & Notify Client
     S-->>U: 12. UI Updates via Realtime WebSocket
