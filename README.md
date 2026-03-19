@@ -1,4 +1,3 @@
-```markdown
 # ⚡ TranscriberPro: Enterprise Audio Intelligence Engine
 
 <div align="center">
