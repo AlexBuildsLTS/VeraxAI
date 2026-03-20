@@ -44,7 +44,13 @@ import Animated, {
 // Ambient orb
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NeuralOrb = ({ delay = 0, color = '#00F0FF' }: { delay?: number; color?: string }) => {
+const NeuralOrb = ({
+  delay = 0,
+  color = '#00F0FF',
+}: {
+  delay?: number;
+  color?: string;
+}) => {
   const pulse = useSharedValue(0);
   const { width, height } = Dimensions.get('window');
   useEffect(() => {
@@ -71,7 +77,7 @@ const NeuralOrb = ({ delay = 0, color = '#00F0FF' }: { delay?: number; color?: s
           height: 600,
           backgroundColor: color,
           borderRadius: 300,
-          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } as any : {}),
+          ...(Platform.OS === 'web' ? ({ filter: 'blur(120px)' } as any) : {}),
         },
       ]}
     />
@@ -206,8 +212,7 @@ export default function BillingScreen() {
           <View style={{ marginBottom: 32 }}>
             <Text style={styles.moduleBadge}>BILLING</Text>
             <Text style={styles.pageTitle}>
-              Resource{' '}
-              <Text style={{ color: '#8A2BE2' }}>Allocation</Text>
+              Resource <Text style={{ color: '#8A2BE2' }}>Allocation</Text>
             </Text>
             <View style={styles.headingRule} />
           </View>
@@ -227,7 +232,15 @@ export default function BillingScreen() {
                   </Text>
                 </View>
               </View>
-              <View style={[styles.tierBadge, { borderColor: meta.color + '50', backgroundColor: meta.color + '18' }]}>
+              <View
+                style={[
+                  styles.tierBadge,
+                  {
+                    borderColor: meta.color + '50',
+                    backgroundColor: meta.color + '18',
+                  },
+                ]}
+              >
                 <Text style={[styles.tierBadgeText, { color: meta.color }]}>
                   {tier.toUpperCase()}
                 </Text>
@@ -269,7 +282,9 @@ export default function BillingScreen() {
               </Text>
               {(TIER_FEATURES[tier] ?? []).map((f) => (
                 <View key={f} style={styles.featureRow}>
-                  <View style={[styles.featureDot, { backgroundColor: meta.color }]} />
+                  <View
+                    style={[styles.featureDot, { backgroundColor: meta.color }]}
+                  />
                   <Text style={styles.featureText}>{f}</Text>
                 </View>
               ))}
@@ -283,27 +298,36 @@ export default function BillingScreen() {
             <GlassCard glowColor="cyan" className="p-8 mb-5">
               <Text style={styles.upgradeTitle}>Upgrade Your Node</Text>
               <Text style={styles.upgradeSubtitle}>
-                Unlock longer videos, priority processing, and advanced AI layers.
+                Unlock longer videos, priority processing, and advanced AI
+                layers.
               </Text>
 
               {tier === 'free' && (
                 <TouchableOpacity
-                  onPress={() => Linking.openURL('https://transcriberpro.com/upgrade')}
+                  onPress={() =>
+                    Linking.openURL('https://transcriber-pro.vercel.app/')
+                  }
                   style={styles.ctaCyan}
                   activeOpacity={0.75}
                 >
                   <Star size={15} color="#00F0FF" />
-                  <Text style={styles.ctaCyanText}>Teams Plan — $29 / month</Text>
+                  <Text style={styles.ctaCyanText}>
+                    Teams Plan — $29 / month
+                  </Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity
-                onPress={() => Linking.openURL('https://transcriberpro.com/enterprise')}
+                onPress={() =>
+                  Linking.openURL('https://transcriber-pro.vercel.app/')
+                }
                 style={styles.ctaPurple}
                 activeOpacity={0.75}
               >
                 <Crown size={15} color="#8A2BE2" />
-                <Text style={styles.ctaPurpleText}>Enterprise Suite — $99 / month</Text>
+                <Text style={styles.ctaPurpleText}>
+                  Enterprise Suite — $99 / month
+                </Text>
               </TouchableOpacity>
 
               <Text style={styles.stripeHint}>
@@ -318,7 +342,12 @@ export default function BillingScreen() {
           <GlassCard glowColor="purple" className="p-8">
             <View style={styles.infoHeader}>
               <Info size={14} color="rgba(255,255,255,0.3)" />
-              <Text style={[styles.sectionLabel, { marginBottom: 0, marginLeft: 8 }]}>
+              <Text
+                style={[
+                  styles.sectionLabel,
+                  { marginBottom: 0, marginLeft: 8 },
+                ]}
+              >
                 How minutes are counted
               </Text>
             </View>
