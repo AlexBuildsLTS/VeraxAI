@@ -1,22 +1,20 @@
 /**
  * types/api/index.ts
  * Comprehensive type definitions for TranscriberPro API layer.
- * Covers Edge Functions, responses, and domain models.
+ * Standardized ExtractionMethod to match implementation.
  */
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// VIDEO PROCESSING TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export type VideoStatus =
+  | 'idle'
   | 'queued'
   | 'downloading'
-  | 'transcribing'
   | 'ai_processing'
   | 'completed'
   | 'failed';
 
 export type ExtractionMethod =
+  | 'youtube_api'
+  | 'youtube_dl'
   | 'timedtext'
   | 'watchpage_scrape'
   | 'innertube'
@@ -42,17 +40,13 @@ export type SupportedLanguage =
   | 'korean'
   | 'chinese';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EDGE FUNCTION REQUEST/RESPONSE
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export interface ProcessVideoRequest {
   video_id: string;
   video_url: string;
   language?: string;
   difficulty?: ContentDifficulty;
-  transcript_text?: string | null; // Client-side pre-fetched captions
-  audio_url?: string | null; // Client-side pre-fetched audio URL
+  transcript_text?: string | null;
+  audio_url?: string | null;
 }
 
 export interface ProcessVideoResponse {
@@ -79,21 +73,17 @@ export interface AudioResult {
   mime_type?: string;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AI INSIGHTS TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export interface Chapter {
-  timestamp: string; // "00:00" or "01:23:45"
-  title: string; // "Introduction to Machine Learning"
-  description: string; // 2-4 sentence summary
-  start_seconds?: number; // Computed from timestamp
+  timestamp: string;
+  title: string;
+  description: string;
+  start_seconds?: number;
 }
 
 export interface SeoMetadata {
   tags: string[];
   suggested_titles: string[];
-  description: string; // 150-160 chars
+  description: string;
 }
 
 export interface AiInsights {
@@ -119,16 +109,12 @@ export interface InsightsResponse {
   error?: string;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TRANSCRIPT TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export interface TranscriptSegment {
-  start: number; // Start time in seconds
-  end: number; // End time in seconds
-  text: string; // Segment text
-  speaker?: string; // Speaker ID (if diarization enabled)
-  confidence?: number; // 0-1 confidence score
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+  confidence?: number;
 }
 
 export interface TranscriptJson {
@@ -150,10 +136,6 @@ export interface Transcript {
   extraction_method: ExtractionMethod;
   created_at: string;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// VIDEO TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface Video {
   id: string;
@@ -182,10 +164,6 @@ export interface VideoWithRelations extends Video {
   ai_insights: AiInsights | null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXPORT TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export type ExportFormat = 'txt' | 'srt' | 'vtt' | 'json' | 'docx' | 'md';
 
 export interface ExportOptions {
@@ -201,10 +179,6 @@ export interface ExportResult {
   filename: string;
   mimeType: string;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// BATCH PROCESSING TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
 
 export type BatchStatus =
   | 'pending'
@@ -238,10 +212,6 @@ export interface BatchSubmitResponse {
   queued_videos: string[];
   invalid_urls: string[];
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ERROR TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ApiError {
   code: string;

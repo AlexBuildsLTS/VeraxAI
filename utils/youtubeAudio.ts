@@ -1,15 +1,16 @@
 /**
  * utils/youtubeAudio.ts
- * Client-side audio URL resolution for ANY video platform.
- * Bypasses datacenter IP blocks by running on user's residential IP.
- *
- * Priority: Direct Link → RapidAPI → Piped → Invidious → Cobalt
- * Supports: YouTube, Vimeo, TikTok, Twitter, and more via Cobalt
+ * Client-side audio URL resolution with rotating proxies and robust API fallbacks.
+ * Extracts direct audio streams from YouTube and other supported platforms.
  */
 
 import { detectPlatform, type VideoPlatform } from './youtube';
 
-const PROXY = 'https://corsproxy.io/?';
+
+const PROXIES = [
+  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://api.allorigins.win/raw?url=',
+];
 
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
@@ -30,10 +31,6 @@ const COBALT_INSTANCES = [
   'https://co.wuk.sh',
 ] as const;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// HELPER TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
 interface AudioStream {
   url?: string;
   mimeType?: string;
@@ -48,9 +45,9 @@ interface AudioResult {
   platform: VideoPlatform;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// PROXY FETCH UTILITY
-// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Executes a fetch request through a rotating list of CORS proxies.
+ */
 
 async function proxyFetch(
   url: string,
@@ -60,20 +57,28 @@ async function proxyFetch(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const proxiedUrl = `${PROXY}${encodeURIComponent(url)}`;
-    const res = await fetch(proxiedUrl, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    return res.ok ? res : null;
-  } catch {
-    clearTimeout(timeout);
-    return null;
+  for (const proxy of PROXIES) {
+    try {
+      const proxiedUrl = `${proxy}${encodeURIComponent(url)}`;
+      const res = await fetch(proxiedUrl, {
+        ...options,
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        clearTimeout(timeout);
+        return res;
+      }
+    } catch {
+      continue;
+    }
   }
+  clearTimeout(timeout);
+  return null;
 }
 
+/**
+ * Executes a direct fetch request with timeout capabilities.
+ */
 async function directFetch(
   url: string,
   options?: RequestInit,
@@ -94,17 +99,17 @@ async function directFetch(
     return null;
   }
 }
-// ═══════════════════════════════════════════════════════════════════════════════
-// YOUTUBE AUDIO METHODS
-// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Method 1: RapidAPI YouTube audio services (most reliable)
+ * Attempts audio extraction via RapidAPI providers.
+ * Corrected variable naming to prevent ReferenceErrors and added robust JSON parsing.
  */
 async function tryRapidAPI(ytId: string): Promise<string | null> {
   const apiKey = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
   if (!apiKey) {
-    console.log('[Audio] RapidAPI key not configured, skipping');
+    console.log(
+      '[Audio] RapidAPI key not configured in frontend .env, skipping',
+    );
     return null;
   }
 
@@ -130,13 +135,23 @@ async function tryRapidAPI(ytId: string): Promise<string | null> {
       if (!res) continue;
 
       const data = await res.json();
-      if (data.status === 'ok' && data.link) {
-        console.log(`[Audio] ✓ RapidAPI (${host})`);
-        return data.link;
-      }
-      if (data.url) {
-        console.log(`[Audio] ✓ RapidAPI (${host})`);
-        return data.url;
+
+      const audioUrl =
+        data.link ||
+        data.url ||
+        data.download ||
+        data.dlink ||
+        data.data?.downloadUrl ||
+        data.audio?.[0]?.url ||
+        data.result?.url ||
+        data.file;
+
+      if (
+        audioUrl &&
+        typeof audioUrl === 'string' &&
+        audioUrl.startsWith('http')
+      ) {
+        return audioUrl;
       }
     } catch (e) {
       console.log(`[Audio] RapidAPI ${host} error:`, e);
@@ -146,19 +161,17 @@ async function tryRapidAPI(ytId: string): Promise<string | null> {
 }
 
 /**
- * Method 2: Piped instances (public, free)
+ * Attempts audio extraction via public Piped API instances.
  */
 async function tryPiped(ytId: string): Promise<string | null> {
   for (const base of PIPED_INSTANCES) {
     try {
-      console.log(`[Audio] Trying Piped (${base})...`);
       const res = await proxyFetch(`${base}/streams/${ytId}`, {}, 8000);
       if (!res) continue;
 
       const data = await res.json();
       const streams: AudioStream[] = data.audioStreams ?? [];
 
-      // Prefer mp4 audio, then webm, sorted by bitrate
       const stream = streams
         .filter(
           (s) =>
@@ -168,24 +181,20 @@ async function tryPiped(ytId: string): Promise<string | null> {
         )
         .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
 
-      if (stream?.url) {
-        console.log(`[Audio] ✓ Piped (${base})`);
-        return stream.url;
-      }
+      if (stream?.url) return stream.url;
     } catch {
-      // Continue to next instance
+      continue;
     }
   }
   return null;
 }
 
 /**
- * Method 3: Invidious instances (public, free)
+ * Attempts audio extraction via public Invidious API instances.
  */
 async function tryInvidious(ytId: string): Promise<string | null> {
   for (const base of INVIDIOUS_INSTANCES) {
     try {
-      console.log(`[Audio] Trying Invidious (${base})...`);
       const res = await proxyFetch(
         `${base}/api/v1/videos/${ytId}?fields=adaptiveFormats`,
         {},
@@ -200,29 +209,20 @@ async function tryInvidious(ytId: string): Promise<string | null> {
         .filter((f) => f.url && f.type?.includes('audio'))
         .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
 
-      if (stream?.url) {
-        console.log(`[Audio] ✓ Invidious (${base})`);
-        return stream.url;
-      }
+      if (stream?.url) return stream.url;
     } catch {
-      // Continue to next instance
+      continue;
     }
   }
   return null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// UNIVERSAL AUDIO (COBALT) - Works for many platforms
-// ═══════════════════════════════════════════════════════════════════════════════
-
 /**
- * Cobalt.tools - Universal video/audio downloader
- * Supports: YouTube, Vimeo, TikTok, Twitter, Instagram, SoundCloud, etc.
+ * Attempts audio extraction via public Cobalt API instances.
  */
 async function tryCobalt(videoUrl: string): Promise<string | null> {
   for (const base of COBALT_INSTANCES) {
     try {
-      console.log(`[Audio] Trying Cobalt (${base})...`);
       const res = await directFetch(
         `${base}/api/json`,
         {
@@ -245,32 +245,21 @@ async function tryCobalt(videoUrl: string): Promise<string | null> {
 
       const data = await res.json();
 
-      if (data.status === 'stream' && data.url) {
-        console.log(`[Audio] ✓ Cobalt (${base})`);
-        return data.url;
-      }
-      if (data.status === 'redirect' && data.url) {
-        console.log(`[Audio] ✓ Cobalt redirect (${base})`);
-        return data.url;
-      }
-      if (data.audio) {
-        console.log(`[Audio] ✓ Cobalt audio (${base})`);
-        return data.audio;
-      }
+      if (data.status === 'stream' && data.url) return data.url;
+      if (data.status === 'redirect' && data.url) return data.url;
+      if (data.audio) return data.audio;
     } catch (e) {
-      console.log(`[Audio] Cobalt ${base} error:`, e);
+      continue;
     }
   }
   return null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// VIMEO AUDIO
-// ═══════════════════════════════════════════════════════════════════════════════
-
+/**
+ * Attempts audio extraction specifically for Vimeo URLs.
+ */
 async function tryVimeo(vimeoId: string): Promise<string | null> {
   try {
-    console.log(`[Audio] Trying Vimeo API...`);
     const res = await proxyFetch(
       `https://vimeo.com/api/v2/video/${vimeoId}.json`,
       {},
@@ -279,93 +268,52 @@ async function tryVimeo(vimeoId: string): Promise<string | null> {
     if (!res) return null;
 
     const data = await res.json();
-    // Vimeo API doesn't provide direct audio URLs - use Cobalt instead
     if (data[0]?.url) {
       return tryCobalt(`https://vimeo.com/${vimeoId}`);
     }
   } catch {
-    // Fall through to Cobalt
+    // Fall through
   }
   return tryCobalt(`https://vimeo.com/${vimeoId}`);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MAIN EXPORT
-// ═══════════════════════════════════════════════════════════════════════════════
-
 /**
- * Resolves audio URL for any supported video platform.
- * Runs client-side on residential IP to bypass datacenter blocks.
- *
- * @param videoUrl - Full video URL
- * @param videoId - Optional pre-extracted video ID
- * @returns Audio stream URL or null
+ * Orchestrates audio URL resolution by attempting sequential extraction methods.
+ * Unified naming convention used throughout.
  */
 export async function fetchYouTubeAudioUrl(
   videoUrl: string,
   videoId?: string,
 ): Promise<string | null> {
-  console.log('[Audio] Starting audio resolution for:', videoUrl);
-  const startTime = Date.now();
-
   const platform = detectPlatform(videoUrl);
 
-  // 🟢 ADDED: Handle direct links immediately
-  if (platform === 'direct') {
-    console.log(
-      `[Audio] Direct media link detected. Bypassing extraction (${Date.now() - startTime}ms)`,
-    );
-    return videoUrl;
-  }
+  if (platform === 'direct') return videoUrl;
 
-  // YouTube-specific methods (most reliable)
   if (platform === 'youtube') {
     const ytId = videoId || extractYouTubeIdFromUrl(videoUrl);
     if (ytId) {
-      // Try YouTube-specific methods first
       const rapidApi = await tryRapidAPI(ytId);
-      if (rapidApi) {
-        console.log(`[Audio] Resolved in ${Date.now() - startTime}ms`);
-        return rapidApi;
-      }
+      if (rapidApi) return rapidApi;
 
       const piped = await tryPiped(ytId);
-      if (piped) {
-        console.log(`[Audio] Resolved in ${Date.now() - startTime}ms`);
-        return piped;
-      }
+      if (piped) return piped;
 
       const invidious = await tryInvidious(ytId);
-      if (invidious) {
-        console.log(`[Audio] Resolved in ${Date.now() - startTime}ms`);
-        return invidious;
-      }
+      if (invidious) return invidious;
     }
   }
 
-  // Vimeo-specific
   if (platform === 'vimeo' && videoId) {
     const vimeo = await tryVimeo(videoId);
-    if (vimeo) {
-      console.log(`[Audio] Resolved in ${Date.now() - startTime}ms`);
-      return vimeo;
-    }
+    if (vimeo) return vimeo;
   }
 
-  // Universal fallback - Cobalt supports many platforms
   const cobalt = await tryCobalt(videoUrl);
-  if (cobalt) {
-    console.log(`[Audio] Resolved via Cobalt in ${Date.now() - startTime}ms`);
-    return cobalt;
-  }
+  if (cobalt) return cobalt;
 
-  console.log(`[Audio] All methods failed after ${Date.now() - startTime}ms`);
   return null;
 }
 
-/**
- * Helper to extract YouTube ID from URL
- */
 function extractYouTubeIdFromUrl(url: string): string | null {
   const match = url.match(
     /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/|m\/watch\?v=))([\w-]{11})/i,
@@ -373,9 +321,6 @@ function extractYouTubeIdFromUrl(url: string): string | null {
   return match?.[1] ?? null;
 }
 
-/**
- * Resolves audio with full metadata
- */
 export async function fetchAudioWithMetadata(
   videoUrl: string,
   videoId?: string,
@@ -384,13 +329,8 @@ export async function fetchAudioWithMetadata(
   const url = await fetchYouTubeAudioUrl(videoUrl, videoId);
 
   if (url) {
-    return {
-      url,
-      method: 'client',
-      platform,
-    };
+    return { url, method: 'client', platform };
   }
-
   return null;
 }
 

@@ -1,6 +1,6 @@
 /**
  * process-video/index.ts
- * Main orchestrator - Pass-through Architecture
+ * Main orchestrator - Streaming Proxy Architecture
  */
 import { corsHeaders } from '../_shared/cors.ts';
 import { createAdminClient } from '../_shared/supabaseAdmin.ts';
@@ -9,12 +9,11 @@ import { getCaptions } from './captions.ts';
 import { getAudioUrl } from './audio.ts';
 import { transcribeAudio } from './deepgram.ts';
 import { generateInsights } from './insights.ts';
-
-const log = {
-  info: (...args: unknown[]) => console.log('[process-video]', ...args),
-  warn: (...args: unknown[]) => console.warn('[process-video]', ...args),
-  error: (...args: unknown[]) => console.error('[process-video]', ...args),
-};
+import type {
+  ProcessVideoRequest,
+  ExtractionMethod,
+  TranscriptJson,
+} from '../../../types/api/index.ts';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -22,135 +21,87 @@ Deno.serve(async (req: Request) => {
   }
 
   const supabase = createAdminClient();
-  let videoId: string | null = null;
+  let dbRecordId: string | null = null;
 
   const updateStatus = async (status: string, error?: string) => {
-    if (!videoId) return;
-    try {
-      await supabase
-        .from('videos')
-        .update({
-          status,
-          error_message: error ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', videoId);
-      log.info(`Status → ${status}`);
-    } catch (e) {
-      log.warn('Status update failed:', e);
-    }
+    if (!dbRecordId) return;
+    await supabase
+      .from('videos')
+      .update({
+        status,
+        error_message: error ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', dbRecordId);
   };
 
   try {
-    const body = await req.json();
-    videoId = body.video_id;
-    const videoUrl: string = body.video_url ?? body.youtube_url;
-    const language: string = body.language ?? 'english';
-    const clientTranscript: string | undefined = body.transcript_text;
-    const clientAudioUrl: string | undefined = body.audio_url; // Captured from frontend
+    const body: ProcessVideoRequest & { youtube_url?: string } =
+      await req.json();
+    dbRecordId = body.video_id;
+    const videoUrl = body.video_url || body.youtube_url;
+    const language = body.language ?? 'english';
+    const clientTranscript = body.transcript_text;
 
-    if (!videoId || !videoUrl) {
-      return new Response(
-        JSON.stringify({ error: 'video_id and video_url required' }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
-        },
-      );
-    }
+    if (!dbRecordId || !videoUrl)
+      throw new Error('video_id and video_url required');
 
+    // CRITICAL: Get the 11-char YouTube ID
     const ytId = extractYouTubeId(videoUrl);
-    log.info('════════════════════════════════════════════════════════════');
-    log.info(`Processing Request: ${videoId}`);
-    log.info(`Direct Audio provided: ${!!clientAudioUrl}`);
-    log.info('════════════════════════════════════════════════════════════');
+    if (!ytId) throw new Error('Invalid YouTube URL');
 
-    // PHASE 1: CAPTIONS
-    let transcriptText: string | null = clientTranscript ?? null;
-    let transcriptJson: unknown = clientTranscript
-      ? { source: 'client', text: clientTranscript }
-      : null;
-    let method = clientTranscript ? 'client' : 'unknown';
+    console.log(`[Process] Job started for Record: ${dbRecordId}`);
 
-    if (!transcriptText && ytId) {
-      log.info('PHASE 1: Checking for captions...');
-      const captionResult = await getCaptions(ytId);
-      if (captionResult) {
-        transcriptText = captionResult.text;
-        transcriptJson = captionResult.json;
-        method = captionResult.method;
-        log.info(`PHASE 1 ✓: Found via ${method}`);
-      }
-    }
+    let transcript = '';
+    let method: ExtractionMethod = 'unknown';
+    let rawJson: TranscriptJson | unknown = null;
 
-    // PHASE 2: AUDIO FALLBACK (The Fix)
-    if (!transcriptText) {
-      log.info('PHASE 2: Starting STT Pipeline...');
+    // Phase 1: Try Captions (Fast path)
+    const captionResult = !clientTranscript ? await getCaptions(ytId) : null;
+
+    if (clientTranscript) {
+      transcript = clientTranscript;
+      method = 'client';
+    } else if (captionResult) {
+      transcript = captionResult.text;
+      method = captionResult.method as ExtractionMethod;
+      rawJson = captionResult.json;
+    } else {
+      // Phase 2: Audio STT (Fallback path)
       await updateStatus('transcribing');
+      console.log('[Process] Falling back to Deepgram Streaming...');
 
-      let finalAudioUrl = clientAudioUrl;
+      const serverAudioUrl = await getAudioUrl(videoUrl, ytId);
+      const dgResult = await transcribeAudio(serverAudioUrl);
 
-      // If client didn't provide a URL, try one last server-side resolve
-      if (!finalAudioUrl && ytId) {
-        log.info('Resolving audio URL on server...');
-        finalAudioUrl = await getAudioUrl(videoUrl, ytId);
-      }
-
-      if (!finalAudioUrl) {
-        throw new Error(
-          'Could not resolve audio URL. YouTube is blocking extraction.',
-        );
-      }
-
-      // 100% Fix: Pass the URL to Deepgram so THEY download it, not us
-      const deepgramResult = await transcribeAudio(finalAudioUrl, {
-        throwOnEmptyTranscript: true,
-      });
-      transcriptText = deepgramResult.text;
-      transcriptJson = deepgramResult.json;
+      transcript = dgResult.text;
       method = 'deepgram';
-      log.info(`PHASE 2 ✓: Deepgram transcription successful`);
+      rawJson = dgResult.json;
     }
 
-    if (!transcriptText || transcriptText.length < 50) {
-      throw new Error('Transcription resulted in empty or too-short text.');
-    }
-
-    // SAVE TRANSCRIPT
-    log.info('Saving results...');
-    const { error: tErr } = await supabase.from('transcripts').insert({
-      video_id: videoId,
-      transcript_text: transcriptText,
-      transcript_json: transcriptJson,
+    // Save Transcript
+    await supabase.from('transcripts').insert({
+      video_id: dbRecordId,
+      transcript_text: transcript,
+      transcript_json: rawJson,
       confidence_score: method === 'deepgram' ? 0.95 : 1.0,
       language_code: 'en',
       extraction_method: method,
     });
 
-    if (tErr) throw new Error(`DB Transcript Error: ${tErr.message}`);
-
-    // PHASE 3: AI INSIGHTS
+    // Phase 3: AI Insights
     await updateStatus('ai_processing');
-    const insights = await generateInsights(
-      transcriptText,
-      language,
-      'standard',
-    );
+    const insights = await generateInsights(transcript, language, 'standard');
 
-    const { error: iErr } = await supabase.from('ai_insights').upsert(
-      {
-        video_id: videoId,
-        ai_model: insights.model,
-        summary: insights.summary,
-        chapters: insights.chapters,
-        key_takeaways: insights.key_takeaways,
-        seo_metadata: insights.seo_metadata,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'video_id' },
-    );
-
-    if (iErr) log.warn('AI insight save warning:', iErr.message);
+    await supabase.from('ai_insights').upsert({
+      video_id: dbRecordId,
+      ai_model: insights.model,
+      summary: insights.summary,
+      chapters: insights.chapters,
+      key_takeaways: insights.key_takeaways,
+      seo_metadata: insights.seo_metadata,
+      updated_at: new Date().toISOString(),
+    });
 
     await updateStatus('completed');
     return new Response(JSON.stringify({ success: true, method }), {
@@ -158,12 +109,16 @@ Deno.serve(async (req: Request) => {
       status: 200,
     });
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    log.error('FATAL ERROR:', msg);
-    if (videoId) await updateStatus('failed', msg.substring(0, 250));
-    return new Response(JSON.stringify({ success: false, error: msg }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('[Process] FATAL ERROR:', errorMessage);
+    if (dbRecordId) await updateStatus('failed', errorMessage);
+    return new Response(
+      JSON.stringify({ success: false, error: errorMessage }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200, // Still return 200 so the frontend can display the message
+      },
+    );
   }
 });

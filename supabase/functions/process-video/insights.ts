@@ -7,7 +7,7 @@
  * - Medium videos (1000-5000 words): 3-6 chapters + summaries
  * - Long videos (5000+ words): 6-12 chapters + section summaries + final summary
  */
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 const InsightsSchema = {
   type: SchemaType.OBJECT,
