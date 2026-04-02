@@ -1,68 +1,64 @@
 {
   "expo": {
-    "name": "Transcriber Pro",
+    "name": "transcriber-pro",
     "slug": "transcriber-pro",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "scheme": "transcriber-pro",
+    "orientation": "portrait",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#05050A"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.transcriberpro.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera to scan QR codes and record video for transcription.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone to record audio for transcription."
+        "NSMicrophoneUsageDescription": "This app needs access to the microphone to transcribe your speech in real-time.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your library to import video files for transcription.",
+        "NSAppleMusicUsageDescription": "This app needs access to your audio files for transcription.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
-      "package": "com.transcriberpro.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/android-icon-foreground.png",
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#05050A"
       },
+      "package": "com.transcriberpro.app",
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/favicon.png"
+      "jsEngine": "jsc"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d1b9c8c7-5a0b-4f1e-9c3a-2b6e5f8a9c3d"
+      }
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
       "expo-video",
+      "expo-document-picker",
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      "expo-file-system",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
-    },
-    "extra": {
-      "router": {
-        "origin": false
-      },
-      "eas": {
-        "projectId": "1698662c-943e-4660-87e4-c1f5ceffc6bd"
-      }
-    },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/1698662c-943e-4660-87e4-c1f5ceffc6bd"
     }
   }
 }
