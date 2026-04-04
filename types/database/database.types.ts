@@ -242,6 +242,27 @@ export type Database = {
           },
         ];
       };
+      video: {
+        Row: {
+          id: number;
+          title: string;
+          youtube_url: string;
+          youtube_video_id: string | null;
+        };
+        Insert: {
+          id?: number;
+          title: string;
+          youtube_url: string;
+          youtube_video_id?: string | null;
+        };
+        Update: {
+          id?: number;
+          title?: string;
+          youtube_url?: string;
+          youtube_video_id?: string | null;
+        };
+        Relationships: [];
+      };
       videos: {
         Row: {
           audio_url: string | null;
@@ -251,6 +272,7 @@ export type Database = {
           error_message: string | null;
           id: string;
           last_retry_at: string | null;
+          platform: string | null;
           processing_completed_at: string | null;
           processing_duration_ms: number | null;
           processing_provider: string | null;
@@ -272,6 +294,7 @@ export type Database = {
           error_message?: string | null;
           id?: string;
           last_retry_at?: string | null;
+          platform?: string | null;
           processing_completed_at?: string | null;
           processing_duration_ms?: number | null;
           processing_provider?: string | null;
@@ -293,6 +316,7 @@ export type Database = {
           error_message?: string | null;
           id?: string;
           last_retry_at?: string | null;
+          platform?: string | null;
           processing_completed_at?: string | null;
           processing_duration_ms?: number | null;
           processing_provider?: string | null;

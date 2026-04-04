@@ -11,7 +11,7 @@ import {
   LayoutAnimation,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useVideoStore } from './../../store/useVideoStore';
+import { useVideoStore } from '../../store/useVideoStore';
 import { useVideoData } from '../../hooks/queries/useVideoData';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { Input } from '../../components/ui/Input';
@@ -28,12 +28,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 
-/**
- * ============================================================================
- * TYPE DEFINITIONS
- * ============================================================================
- */
-
 interface PipelineStatus {
   text: string;
   progress: string;
@@ -42,37 +36,31 @@ interface PipelineStatus {
   glow: string;
 }
 
-interface TelemetryLog {
+interface SystemLog {
   id: string;
   timestamp: string;
   message: string;
   level: 'info' | 'warn' | 'error' | 'success';
 }
 
-/**
- * ============================================================================
- * OPTIMIZED NEURAL BACKGROUND ELEMENTS
- * ============================================================================
- */
-
-const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
+const AmbientGradient = ({ delay = 0, color = '#3B82F6' }) => {
   const pulse = useSharedValue(0);
   const { width, height } = Dimensions.get('window');
 
   useEffect(() => {
     pulse.value = withDelay(
       delay,
-      withRepeat(withTiming(1, { duration: 8000 }), -1, true),
+      withRepeat(withTiming(1, { duration: 10000 }), -1, true),
     );
   }, [delay, pulse]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { scale: interpolate(pulse.value, [0, 1], [1, 1.6]) },
+      { scale: interpolate(pulse.value, [0, 1], [1, 1.4]) },
       { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
       { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
     ],
-    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.09]),
+    opacity: interpolate(pulse.value, [0, 1], [0.04, 0.08]),
   }));
 
   return (
@@ -81,64 +69,56 @@ const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
         animatedStyle,
         {
           position: 'absolute',
-          width: 600,
-          height: 600,
+          width: width * 1.5,
+          height: width * 1.5,
           backgroundColor: color,
-          borderRadius: 300,
-          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
+          borderRadius: width,
+          ...(Platform.OS === 'web' ? { filter: 'blur(140px)' } : {}),
         },
       ]}
     />
   );
 };
 
-/**
- * ============================================================================
- * MAIN ENGINE COMPONENT
- * ============================================================================
- */
-
 export default function DashboardScreen() {
   const router = useRouter();
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [logs, setLogs] = useState<TelemetryLog[]>([]);
+  const [videoUrl, setVideoUrl] = useState('');
+  const [logs, setLogs] = useState<SystemLog[]>([]);
   const [isUrlValid, setIsUrlValid] = useState(true);
   const [selectedLanguage, setSelectedLanguage] = useState('English');
 
   const OUTPUT_LANGUAGES = [
-    'English', 'Spanish', 'French', 'German', 'Italian',
-    'Portuguese', 'Dutch', 'Swedish', 'Russian', 'Japanese', 'Korean', 'Chinese',
+    'English',
+    'Spanish',
+    'French',
+    'German',
+    'Italian',
+    'Portuguese',
+    'Dutch',
+    'Swedish',
+    'Russian',
+    'Japanese',
+    'Korean',
+    'Chinese',
   ];
 
-
-  // Responsive Breakpoint Detection
   const { width: screenWidth } = Dimensions.get('window');
   const isMobile = screenWidth < 768;
 
-  // Store Extraction
-  const isProcessing = useVideoStore(
-    (state: { isProcessing: any }) => state.isProcessing,
-  );
-  const currentVideoId = useVideoStore(
-    (state: { currentVideoId: any }) => state.currentVideoId,
-  );
-  const error = useVideoStore((state: { error: any }) => state.error);
-  const processVideo = useVideoStore(
-    (state: { processVideo: any }) => state.processVideo,
-  );
+  const {
+    activeVideoId: currentVideoId,
+    isProcessing,
+    processNewVideo,
+    error: storeError,
+    clearError,
+  } = useVideoStore();
 
-  // Real-time Pipeline Query
   const { data: videoData } = useVideoData(currentVideoId);
 
-  /**
-   * --------------------------------------------------------------------------
-   * TELEMETRY LOGGING ENGINE
-   * --------------------------------------------------------------------------
-   */
   const addLog = useCallback(
-    (message: string, level: TelemetryLog['level'] = 'info') => {
-      const newLog: TelemetryLog = {
-        id: Math.random().toString(36).substr(2, 9),
+    (message: string, level: SystemLog['level'] = 'info') => {
+      const newLog: SystemLog = {
+        id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString([], {
           hour12: false,
           hour: '2-digit',
@@ -158,52 +138,62 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     if (videoData?.status) {
-      addLog(`STATUS_UPDATE: ${videoData.status.toUpperCase()}`, 'info');
-      if (videoData.status === 'completed')
-        addLog('LINK_STABILIZED: PAYLOAD_READY', 'success');
-      if (videoData.status === 'failed')
-        addLog('CRITICAL_SIGNAL_LOSS', 'error');
+      const statusFormats: Record<string, string> = {
+        queued: 'Media queued for processing.',
+        downloading: 'Fetching media assets from source.',
+        transcribing: 'Transcribing audio track.',
+        ai_processing: 'Generating AI summaries and insights.',
+        completed: 'Processing complete. Results ready.',
+        failed: 'Processing pipeline encountered a critical error.',
+      };
+
+      const level =
+        videoData.status === 'completed'
+          ? 'success'
+          : videoData.status === 'failed'
+            ? 'error'
+            : 'info';
+
+      addLog(
+        statusFormats[videoData.status] ||
+          `Status updated: ${videoData.status}`,
+        level,
+      );
     }
   }, [videoData?.status, addLog]);
 
-  const handleTranscribe = async () => {
-    // Relaxed regex to accept standard http/https links (not just YouTube)
+  const handleProcessVideo = async () => {
     const urlRegex = /^https?:\/\/.+/;
 
-    if (!youtubeUrl.trim() || !urlRegex.test(youtubeUrl)) {
+    if (!videoUrl.trim() || !urlRegex.test(videoUrl)) {
       setIsUrlValid(false);
-      addLog('MALFORMED_URL_SEQUENCE', 'warn');
+      addLog('Validation Error: Invalid URL format provided.', 'warn');
       return;
     }
 
     setIsUrlValid(true);
-    addLog('HANDSHAKE_START', 'info');
+    clearError();
+    addLog('Validating source and initiating pipeline...', 'info');
 
-    const WORKSPACE_ID = ''; // no longer needed, useVideoStore fetches it
-
-    if (processVideo) {
-      try {
-        // Send the universal URL to the Edge Function
-       await processVideo(youtubeUrl, selectedLanguage);
-        addLog('HANDSHAKE_SUCCESS', 'success');
-      } catch (err) {
-        addLog('UPLINK_TIMEOUT', 'error');
-      }
+    try {
+      await processNewVideo(videoUrl, {
+        language: selectedLanguage,
+        difficulty: 'standard',
+      });
+      addLog('Pipeline successfully initiated.', 'success');
+    } catch (err: any) {
+      addLog(`Initialization failed: ${err.message}`, 'error');
     }
   };
-  /**
-   * --------------------------------------------------------------------------
-   * PIPELINE STATUS MAPPING
-   * --------------------------------------------------------------------------
-   */
+
   const statusInfo = useMemo((): PipelineStatus | null => {
     if (!videoData && isProcessing) {
       return {
         text: 'INITIALIZING',
         progress: 'w-1/12',
-        color: 'bg-white',
-        description: 'Booting neural decryption modules...',
-        glow: 'shadow-[0_0_15px_rgba(255,255,255,0.4)]',
+        color: 'bg-blue-400',
+        description: 'Establishing connection to processing servers...',
+        glow: 'shadow-[0_0_15px_rgba(96,165,250,0.4)]',
       };
     }
 
@@ -213,69 +203,70 @@ export default function DashboardScreen() {
       queued: {
         text: 'QUEUED',
         progress: 'w-1/5',
-        color: 'bg-neon-cyan',
-        description: 'Asset assigned to next available processing node.',
-        glow: 'shadow-[0_0_15px_#00F0FF]',
+        color: 'bg-blue-500',
+        description: 'Waiting for available processing resources.',
+        glow: 'shadow-[0_0_15px_rgba(59,130,246,0.4)]',
       },
       downloading: {
-        text: 'EXTRACTING',
+        text: 'FETCHING MEDIA',
         progress: 'w-2/5',
-        color: 'bg-neon-purple',
-        description: 'Retrieving raw bitstream from source repository.',
-        glow: 'shadow-[0_0_15px_#8A2BE2]',
+        color: 'bg-indigo-500',
+        description: 'Downloading audio and video assets.',
+        glow: 'shadow-[0_0_15px_rgba(99,102,241,0.4)]',
       },
       transcribing: {
-        text: 'DECRYPTING',
+        text: 'TRANSCRIBING',
         progress: 'w-3/5',
-        color: 'bg-neon-pink',
-        description: 'Converting audio wave-patterns into text data.',
-        glow: 'shadow-[0_0_15px_#FF007F]',
+        color: 'bg-violet-500',
+        description: 'Converting speech to high-accuracy text.',
+        glow: 'shadow-[0_0_15px_rgba(139,92,246,0.4)]',
       },
       ai_processing: {
         text: 'ANALYZING',
         progress: 'w-4/5',
-        color: 'bg-neon-cyan',
-        description: 'Applying semantic mapping to transcript payload.',
-        glow: 'shadow-[0_0_15px_#00F0FF]',
+        color: 'bg-purple-500',
+        description: 'Generating chapters, summaries, and metadata.',
+        glow: 'shadow-[0_0_15px_rgba(168,85,247,0.4)]',
       },
       completed: {
-        text: 'SUCCESS',
+        text: 'COMPLETE',
         progress: 'w-full',
-        color: 'bg-neon-lime',
-        description: 'Decryption finalized. Results stored in vault.',
-        glow: 'shadow-[0_0_15px_#32FF00]',
+        color: 'bg-emerald-500',
+        description: 'All tasks finished successfully.',
+        glow: 'shadow-[0_0_15px_rgba(16,185,129,0.4)]',
       },
       failed: {
-        text: 'FAILURE',
+        text: 'FAILED',
         progress: 'w-full',
-        color: 'bg-red-500',
-        // EXPLICIT FIX: This grabs the actual database error message, or defaults to a safe string.
+        color: 'bg-rose-500',
         description:
           videoData.error_message ||
-          'Operation aborted due to backend hardware fault.',
-        glow: 'shadow-[0_0_15px_#EF4444]',
+          'An unexpected error occurred during processing.',
+        glow: 'shadow-[0_0_15px_rgba(244,63,94,0.4)]',
       },
     };
 
     return maps[videoData.status] || null;
   }, [videoData, isProcessing]);
 
-  const effectivelyLoading =
-    isProcessing &&
-    videoData?.status !== 'completed' &&
-    videoData?.status !== 'failed';
-const clearError = useVideoStore((state: { clearError: any }) => state.clearError);
+  const effectivelyLoading = Boolean(
+    isProcessing ||
+    (videoData &&
+      videoData.status !== 'completed' &&
+      videoData.status !== 'failed'),
+  );
+
   return (
-    <SafeAreaView className="flex-1 bg-[#020205]">
+    <SafeAreaView className="flex-1 bg-[#05050A]">
+      <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
+        <AmbientGradient delay={0} color="#3B82F6" />
+        <AmbientGradient delay={3000} color="#8B5CF6" />
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
       >
-        {/* AMBIENT BACKGROUND */}
-        <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
-          <NeuralOrb delay={0} color="#00F0FF" />
-          <NeuralOrb delay={2500} color="#8A2BE2" />
-        </View>
 
         <ScrollView
           contentContainerStyle={{
@@ -287,56 +278,54 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
           }}
           showsVerticalScrollIndicator={false}
         >
-          {/* HEADER SECTION */}
           <FadeIn>
             <View className="items-center mb-10 md:mb-16">
-              <View className="px-4 py-1 mb-6 border rounded-full bg-neon-cyan/10 border-neon-cyan/20">
-                <Text className="text-[8px] md:text-[9px] font-black tracking-[5px] text-neon-cyan uppercase">
-                  NorthOS
+              <View className="px-5 py-1.5 mb-6 border rounded-full bg-blue-500/10 border-blue-500/20">
+                <Text className="text-[10px] md:text-xs font-bold tracking-[4px] text-blue-400 uppercase">
+                  Transcriber Pro
                 </Text>
               </View>
 
               <Text
                 className={cn(
-                  'font-black text-white tracking-tighter uppercase text-center',
+                  'font-black text-white tracking-tight uppercase text-center',
                   isMobile
-                    ? 'text-4xl leading-[38px]'
-                    : 'text-6xl leading-[55px]',
+                    ? 'text-4xl leading-[42px]'
+                    : 'text-6xl leading-[64px]',
                 )}
               >
-                VIDEO <Text className="text-neon-cyan">TRANSCRIBER</Text>
+                Intelligent <Text className="text-blue-400">Analysis</Text>
               </Text>
-              <View className="h-[2px] w-16 md:w-20 bg-neon-cyan mt-6 md:mt-8 rounded-full shadow-[0_0_20px_#00F0FF]" />
+              <View className="h-[2px] w-16 md:w-24 bg-blue-500 mt-6 md:mt-8 rounded-full shadow-[0_0_20px_rgba(59,130,246,0.5)]" />
             </View>
           </FadeIn>
 
-
-          {/* INPUT SECTION */}
           <View className="self-center w-full max-w-2xl px-2">
-            {/* INPUT GLASS MODULE */}
             <FadeIn delay={200}>
               <GlassCard
                 glowColor="cyan"
-                className={cn('bg-white/[0.01]', isMobile ? 'p-6' : 'p-12')}
+                className={cn(
+                  'bg-white/[0.02] border-white/[0.05]',
+                  isMobile ? 'p-6' : 'p-10',
+                )}
               >
                 <Input
-                  label="VIDEO LINK"
-                  placeholder="https://www.youtube.com/..."
-                  value={youtubeUrl}
-               onChangeText={(v) => {
-  setYoutubeUrl(v);
-  if (!isUrlValid) setIsUrlValid(true);
-  clearError(); // ADD THIS
-}}
+                  label="MEDIA URL"
+                  placeholder="Paste video or audio link here..."
+                  value={videoUrl}
+                  onChangeText={(v) => {
+                    setVideoUrl(v);
+                    if (!isUrlValid) setIsUrlValid(true);
+                    if (storeError) clearError();
+                  }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!effectivelyLoading}
                 />
-
-                {/* OUTPUT LANGUAGE SELECTOR */}
-                <View className="mt-6">
-                  <Text className="text-white/20 text-[8px] font-bold uppercase tracking-[4px] mb-3">
-                    Output Language
+ {/* OUTPUT LANGUAGE SELECTOR */}
+                <View className="mt-8">
+                  <Text className="text-white/40 text-[10px] font-semibold uppercase tracking-[2px] mb-3">
+                    Target Language
                   </Text>
                   <ScrollView
                     horizontal
@@ -350,15 +339,15 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
                           key={lang}
                           onPress={() => setSelectedLanguage(lang)}
                           disabled={effectivelyLoading}
-                          className={`px-4 py-2 rounded-full border ${
+                          className={`px-5 py-2.5 rounded-xl border transition-colors ${
                             active
-                              ? 'bg-neon-cyan/15 border-neon-cyan/50'
-                              : 'bg-white/[0.03] border-white/10'
+                              ? 'bg-blue-500/20 border-blue-500/50'
+                              : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.05]'
                           }`}
                         >
                           <Text
-                            className={`text-[9px] font-bold uppercase tracking-widest ${
-                              active ? 'text-neon-cyan' : 'text-white/30'
+                            className={`text-xs font-semibold tracking-wide ${
+                              active ? 'text-blue-400' : 'text-white/50'
                             }`}
                           >
                             {lang}
@@ -370,61 +359,63 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
                 </View>
 
                 <Button
-                  title={effectivelyLoading ? 'PROCESSING...' : 'START'}
-                  onPress={handleTranscribe}
+                  title={
+                    effectivelyLoading
+                      ? 'PROCESSING REQUEST...'
+                      : 'START ANALYSIS'
+                  }
+                  onPress={handleProcessVideo}
                   isLoading={effectivelyLoading}
                   variant="primary"
-                  className="py-5 mt-4 shadow-2xl md:py-6 md:mt-6 shadow-neon-cyan/20"
+                  className="py-5 mt-8 shadow-xl md:py-6 bg-blue-600 hover:bg-blue-500 rounded-xl"
                 />
 
-                {/* ERROR FEEDBACK */}
-                {error && ( 
-                  <View className="p-6 mt-8 border bg-red-500/10 border-red-500/20 rounded-3xl">
-                    <Text className="text-red-500 font-bold text-[10px] tracking-[4px] uppercase text-center mb-2">
-                      FAULT_DETECTED
+                {storeError && (
+                  <View className="p-5 mt-6 border bg-rose-500/10 border-rose-500/20 rounded-2xl">
+                    <Text className="text-rose-400 font-bold text-xs tracking-widest uppercase mb-2">
+                      Error Encountered
                     </Text>
-                    <Text className="text-xs leading-5 text-center text-red-400/70">
-                      {error}
+                    <Text className="text-sm leading-5 text-rose-300/80">
+                      {storeError}
                     </Text>
                   </View>
                 )}
 
-                {/* PIPELINE TELEMETRY */}
                 {(currentVideoId ||
                   effectivelyLoading ||
                   videoData?.status === 'completed') &&
                   statusInfo && (
-                    <View className="pt-10 mt-12 border-t border-white/5">
-                      <View className="flex-row justify-between mb-5">
+                    <View className="pt-8 mt-10 border-t border-white/10">
+                      <View className="flex-row justify-between mb-4">
                         <View>
-                          <Text className="text-white/20 text-[9px] font-bold uppercase tracking-[4px] mb-1">
-                            Status
+                          <Text className="text-white/40 text-[10px] font-semibold uppercase tracking-[2px] mb-1">
+                            Current Stage
                           </Text>
                           <Text
                             className={cn(
-                              'font-black text-xs uppercase tracking-widest',
+                              'font-bold text-sm tracking-wider',
                               videoData?.status === 'failed'
-                                ? 'text-neon-pink'
-                                : 'text-neon-cyan',
+                                ? 'text-rose-400'
+                                : 'text-blue-400',
                             )}
                           >
                             {statusInfo.text}
                           </Text>
                         </View>
                         <View className="items-end">
-                          <Text className="text-white/20 text-[9px] font-bold uppercase mb-1">
-                            Engine
+                          <Text className="text-white/40 text-[10px] font-semibold uppercase tracking-[2px] mb-1">
+                            Job ID
                           </Text>
-                          <Text className="text-white/40 font-mono text-[9px] uppercase">
-                            {currentVideoId?.split('-')[0] || 'PENDING'}
+                          <Text className="text-white/60 font-mono text-xs uppercase">
+                            {currentVideoId?.split('-')[0] || 'INIT'}
                           </Text>
                         </View>
                       </View>
 
-                      <View className="w-full h-1 mb-4 overflow-hidden rounded-full bg-white/5">
+                      <View className="w-full h-1.5 mb-4 overflow-hidden rounded-full bg-white/10">
                         <View
                           className={cn(
-                            'h-full',
+                            'h-full rounded-full transition-all duration-500',
                             statusInfo.progress,
                             statusInfo.color,
                             statusInfo.glow,
@@ -432,13 +423,12 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
                         />
                       </View>
 
-                      {/* Displaying actual Backend Error text if it fails */}
                       <Text
                         className={cn(
-                          'text-[10px] italic font-medium tracking-wide',
+                          'text-xs font-medium',
                           videoData?.status === 'failed'
-                            ? 'text-neon-pink'
-                            : 'text-white/40',
+                            ? 'text-rose-400/80'
+                            : 'text-white/50',
                         )}
                       >
                         {statusInfo.description}
@@ -449,10 +439,10 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
                           onPress={() =>
                             router.push(`/video/${currentVideoId}` as any)
                           }
-                          className="items-center justify-center py-5 mt-10 border shadow-2xl rounded-2xl bg-neon-cyan/5 border-neon-cyan/30 shadow-neon-cyan/10"
+                          className="items-center justify-center py-4 mt-8 border rounded-xl bg-emerald-500/10 border-emerald-500/30 transition-colors hover:bg-emerald-500/20"
                         >
-                          <Text className="text-neon-cyan font-black text-[10px] tracking-[5px] uppercase">
-                            Access Payload
+                          <Text className="text-emerald-400 font-bold text-xs tracking-widest uppercase">
+                            View Results
                           </Text>
                         </TouchableOpacity>
                       )}
@@ -461,31 +451,30 @@ const clearError = useVideoStore((state: { clearError: any }) => state.clearErro
               </GlassCard>
             </FadeIn>
 
-            {/* NEURAL LOGS */}
             <FadeIn delay={400}>
-              <View className="mx-2 mt-12">
-                <Text className="text-white/20 text-[10px] font-bold uppercase tracking-[4px] mb-4 ml-4">
-                  Logs
+              <View className="mx-2 mt-10">
+                <Text className="text-white/40 text-[10px] font-semibold uppercase tracking-[2px] mb-3 ml-2">
+                  System Output
                 </Text>
-                <View className="relative p-6 overflow-hidden border bg-black/40 border-white/5 rounded-3xl">
-                  <BlurView intensity={10} className="absolute inset-0" />
+                <View className="relative p-5 overflow-hidden border bg-black/20 border-white/5 rounded-2xl min-h-[120px]">
+                  <BlurView intensity={20} className="absolute inset-0" />
                   {logs.length === 0 ? (
-                    <Text className="text-white/10 font-mono text-[10px] text-center italic uppercase">
-                      Transcribe
+                    <Text className="text-white/20 font-mono text-xs text-center mt-6">
+                      Awaiting input...
                     </Text>
                   ) : (
                     logs.map((log) => (
-                      <View key={log.id} className="flex-row mb-2">
-                        <Text className="text-white/20 font-mono text-[9px] w-16">
-                          [{log.timestamp}]
+                      <View key={log.id} className="flex-row mb-2.5">
+                        <Text className="text-white/30 font-mono text-[10px] w-20 pt-0.5">
+                          {log.timestamp}
                         </Text>
                         <Text
                           className={cn(
-                            'font-mono text-[9px] flex-1',
-                            log.level === 'info' && 'text-white/50',
-                            log.level === 'warn' && 'text-neon-purple',
-                            log.level === 'error' && 'text-neon-pink',
-                            log.level === 'success' && 'text-neon-lime',
+                            'font-mono text-xs flex-1 leading-5',
+                            log.level === 'info' && 'text-cyan/70',
+                            log.level === 'warn' && 'text-amber-400',
+                            log.level === 'error' && 'text-rose-400',
+                            log.level === 'success' && 'text-emerald-400',
                           )}
                         >
                           {log.message}

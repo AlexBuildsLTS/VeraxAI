@@ -1,156 +1,99 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { formatTranscriptTime } from '../../utils/formatters/time';
+import React, { useMemo } from 'react';
+import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { useVideoStore } from '../../store/useVideoStore';
+import { useVideoData } from '../../hooks/queries/useVideoData';
+import { GlassCard } from '../ui/GlassCard';
+import { FadeIn } from '../animations/FadeIn';
+import { cn } from '../../lib/utils';
 
-/**
- * @description Premium Transcript Component
- * Features: Deepgram word-level extraction, Speaker grouping,
- * Long-pause detection, and a Raw Payload Debugger.
- */
+export const TranscriptViewer: React.FC = () => {
+  const activeVideoId = useVideoStore((state) => state.activeVideoId);
+  const status = useVideoStore((state) => state.status);
 
-interface Word {
-  word: string;
-  punctuated_word?: string;
-  start: number;
-  end: number;
-  speaker?: number;
-}
+  // Real-time hook listening to the database
+  const { data: video, isLoading } = useVideoData(activeVideoId);
 
-interface TranscriptGroup {
-  speaker: number;
-  text: string;
-  startTime: number;
-}
+  const transcriptContent = useMemo(() => {
+    if (!video?.transcripts || video.transcripts.length === 0) return null;
+    return video.transcripts[0].transcript_text;
+  }, [video]);
 
-export const TranscriptViewer = ({
-  transcriptJson,
-}: {
-  transcriptJson: any;
-}) => {
-  const [showRaw, setShowRaw] = useState(false);
-
-  // 1. EXTRACTION LOGIC: Handles Deepgram Nova-2, Flat Arrays, or Raw Text
-  const words = useMemo(() => {
-    if (!transcriptJson) return [];
-
-    let parsed = transcriptJson;
-    if (typeof transcriptJson === 'string') {
-      try {
-        parsed = JSON.parse(transcriptJson);
-      } catch (e) {
-        return [];
-      }
-    }
-
-    // Target 1: Deepgram Standard Format
-    if (parsed?.results?.channels?.[0]?.alternatives?.[0]?.words) {
-      return parsed.results.channels[0].alternatives[0].words;
-    }
-    // Target 2: Flat Array
-    if (Array.isArray(parsed)) return parsed;
-    // Target 3: Generic 'words' wrapper
-    if (parsed?.words && Array.isArray(parsed.words)) return parsed.words;
-    // Target 4: Fallback for Whisper or raw text
-    if (parsed?.text)
-      return [{ start: 0, end: 0, word: parsed.text, speaker: 0 }];
-
-    return [];
-  }, [transcriptJson]);
-
-  // 2. GROUPING LOGIC: Merges words into paragraphs by speaker and time-gaps
-  const groupedTranscript = useMemo(() => {
-    if (words.length === 0) return [];
-
-    const groups: TranscriptGroup[] = [];
-    let currentGroup: TranscriptGroup = {
-      speaker: words[0].speaker ?? 0,
-      text: '',
-      startTime: words[0].start || 0,
-    };
-
-    words.forEach((wordObj: Word, index: number) => {
-      const isNewSpeaker =
-        wordObj.speaker !== undefined &&
-        wordObj.speaker !== currentGroup.speaker;
-      const isLongPause =
-        index > 0 && wordObj.start - words[index - 1].end > 2.0; // 2 second gap
-      const wordText = wordObj.punctuated_word || wordObj.word || '';
-
-      if (isNewSpeaker || isLongPause) {
-        // Push existing group and start new one
-        groups.push({ ...currentGroup, text: currentGroup.text.trim() });
-        currentGroup = {
-          speaker: wordObj.speaker ?? 0,
-          text: wordText,
-          startTime: wordObj.start || 0,
-        };
-      } else {
-        currentGroup.text += ` ${wordText}`;
-      }
-    });
-
-    // Push the final group
-    groups.push({ ...currentGroup, text: currentGroup.text.trim() });
-    return groups;
-  }, [words]);
-
-  // ── EMPTY / ERROR STATE ───────────────────────────────────────────
-  if (words.length === 0) {
+  if (isLoading && !video) {
     return (
-      <View className="p-8 border border-neon-pink/30 rounded-3xl bg-neon-pink/[0.02]">
-        <Text className="text-neon-pink font-black text-[10px] tracking-[4px] uppercase mb-4 text-center">
-          Payload_Stream_Empty
+      <View className="flex-1 items-center justify-center p-6">
+        <ActivityIndicator size="large" color="#00F0FF" />
+        <Text className="text-white/50 mt-4 font-mono text-[10px] uppercase tracking-[4px]">
+          Decrypting Payload...
         </Text>
-        <Text className="mb-6 text-xs leading-relaxed text-center text-white/40">
-          The node is active, but the transcript data is unreadable or not yet
-          synced from the Edge Function.
-        </Text>
-
-        <TouchableOpacity
-          onPress={() => setShowRaw(!showRaw)}
-          className="self-center px-6 py-4 border border-white/10 rounded-xl bg-white/5"
-        >
-          <Text className="text-white text-[10px] font-bold uppercase tracking-widest">
-            {showRaw ? 'Hide_Diagnostic_Data' : 'Inspect_Raw_Payload'}
-          </Text>
-        </TouchableOpacity>
-
-        {showRaw && (
-          <ScrollView className="mt-6 max-h-96 w-full p-4 bg-[#05050A] rounded-xl border border-white/10">
-            <Text className="font-mono text-[9px] text-neon-cyan/70 leading-4">
-              {JSON.stringify(transcriptJson, null, 2)}
-            </Text>
-          </ScrollView>
-        )}
       </View>
     );
   }
 
-  // ── MAIN RENDER ───────────────────────────────────────────────────
   return (
-    <View className="flex-col gap-8 pb-20">
-      {groupedTranscript.map((group, index) => (
-        <View key={index} className="flex-row items-start gap-4">
-          {/* Timestamp Column */}
-          <View className="w-16 pt-1">
-            <View className="px-2 py-1 border rounded bg-neon-cyan/5 border-neon-cyan/20">
-              <Text className="font-mono text-[10px] font-bold text-neon-cyan text-center">
-                {formatTranscriptTime(group.startTime)}
-              </Text>
-            </View>
+    <ScrollView className="flex-1 px-4" showsVerticalScrollIndicator={false}>
+      <FadeIn duration={600}>
+        <GlassCard className="mb-6 p-6 md:p-8 bg-white/[0.02]" glowColor="cyan">
+          <View className="flex-row items-center justify-between mb-6 pb-4 border-b border-white/10">
+            <Text className="text-xl font-black text-white tracking-widest uppercase">
+              Raw <Text className="text-neon-cyan">Transcript</Text>
+            </Text>
+            <StatusIndicator status={status || video?.status || 'queued'} />
           </View>
 
-          {/* Content Column */}
-          <View className="flex-1 pl-5 border-l border-white/10">
-            <Text className="mb-2 text-[8px] font-black tracking-[3px] uppercase text-white/20">
-              PART: {group.speaker}
+          {transcriptContent ? (
+            <Text className="text-slate-300 leading-8 text-base md:text-lg font-medium selection:bg-neon-cyan/30">
+              {transcriptContent}
             </Text>
-            <Text className="text-sm font-medium leading-7 text-white/90">
-              {group.text}
-            </Text>
-          </View>
-        </View>
-      ))}
+          ) : (
+            <View className="py-16 items-center">
+              <ActivityIndicator color="#8A2BE2" />
+              <Text className="text-white/40 mt-6 text-center font-mono text-[9px] uppercase tracking-widest">
+                {status === 'transcribing'
+                  ? 'Deepgram Node Active: Resolving Audio...'
+                  : 'Initializing Extraction Pipeline...'}
+              </Text>
+            </View>
+          )}
+        </GlassCard>
+      </FadeIn>
+    </ScrollView>
+  );
+};
+
+// Internal Helper for the UI
+const StatusIndicator: React.FC<{ status: string }> = ({ status }) => {
+  const config: Record<string, { color: string; text: string }> = {
+    queued: { color: 'bg-white/20 text-white', text: 'Standby' },
+    downloading: {
+      color: 'bg-neon-purple/20 text-neon-purple',
+      text: 'Extracting',
+    },
+    transcribing: {
+      color: 'bg-neon-pink/20 text-neon-pink',
+      text: 'Decrypting',
+    },
+    ai_processing: {
+      color: 'bg-neon-cyan/20 text-neon-cyan',
+      text: 'Analyzing',
+    },
+    completed: { color: 'bg-neon-lime/20 text-neon-lime', text: 'Secured' },
+    failed: { color: 'bg-red-500/20 text-red-500', text: 'Corrupted' },
+  };
+
+  const current = config[status] || config.queued;
+
+  return (
+    <View
+      className={cn(
+        'px-3 py-1.5 rounded-full border border-current',
+        current.color,
+      )}
+    >
+      <Text className="text-[9px] font-black uppercase tracking-[3px]">
+        {current.text}
+      </Text>
     </View>
   );
 };
+
+export default TranscriptViewer;

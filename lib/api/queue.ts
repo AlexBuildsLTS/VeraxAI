@@ -1,7 +1,7 @@
 //lib/api/queue.ts
 import { supabase } from '../supabase/client';
 import { Database } from '../../types/database/database.types';
-import { YouTubeValidator } from '../../utils/youtube';
+import { YouTubeValidator } from '../../utils/videoParser';
 
 type VideoInsert = Database['public']['Tables']['videos']['Insert'];
 

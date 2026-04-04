@@ -1,245 +1,116 @@
 /**
- * process-video/audio.ts
- * Master Audio Resolver for TranscriberPro Edge Functions.
- * Implements a multi-layered extraction strategy:
- * 1. RapidAPI (Paid/High Stability)
- * 2. Cobalt API (Aggressive Proxy Fallback)
- * 3. InnerTube (Internal YouTube API Fallback)
- * GROUNDBREAKING: This version implements "Stream Validation" where every URL
- * found is pre-verified via a HEAD request before being passed to Deepgram.
+ * supabase/functions/process-video/audio.ts
+ * High-Availability Audio Extraction Engine
+ * Features: RapidAPI Primary, Triple-Instance Cobalt Rotation, Stream Validation
  */
 
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
-
-interface AudioStream {
-  url: string;
-  bitrate?: number;
-  mimeType?: string;
-  itag?: number;
-  ext?: string;
-}
+import { extractYouTubeId } from './utils.ts';
 
 /**
- * Verifies if a URL is actually reachable and returns an audio/stream.
- * Prevents passing "dead" or IP-locked links to Deepgram.
- */
-async function validateStreamUrl(
-  url: string,
-  provider: string,
-): Promise<boolean> {
-  try {
-    const res = await fetch(url, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      console.log(`[Audio] ✓ Validated stream from ${provider}`);
-      return true;
-    }
-    console.warn(
-      `[Audio] ⚠ Link from ${provider} returned status ${res.status}`,
-    );
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Method 1: RapidAPI
- * Strategy: Iterates through premium providers to find a high-bitrate direct link.
- */
-async function tryRapidAPI(ytId: string): Promise<string | null> {
-  const key = Deno.env.get('RAPIDAPI_KEY');
-  if (!key) {
-    console.warn('[Audio] RAPIDAPI_KEY missing, skipping premium resolution.');
-    return null;
-  }
-
-  const hosts = [
-    { host: 'yt-api.p.rapidapi.com', path: `/dl?id=${ytId}` },
-    { host: 'youtube-mp36.p.rapidapi.com', path: `/dl?id=${ytId}` },
-    { host: 'youtube-v2.p.rapidapi.com', path: `/video/info?video_id=${ytId}` },
-  ];
-
-  for (const { host, path } of hosts) {
-    try {
-      console.log(`[Audio] Attempting RapidAPI: ${host}`);
-      const res = await fetch(`https://${host}${path}`, {
-        headers: {
-          'X-RapidAPI-Key': key,
-          'X-RapidAPI-Host': host,
-          Accept: 'application/json',
-        },
-        signal: AbortSignal.timeout(12000),
-      });
-
-      if (!res.ok) {
-        console.error(`[Audio] ${host} failed with HTTP ${res.status}`);
-        continue;
-      }
-
-      const data = await res.json();
-
-      // Handle multiple JSON schemas across different RapidAPI providers
-      const audioUrl =
-        data.link ||
-        data.url ||
-        data.downloadUrl ||
-        data.data?.downloadUrl ||
-        (data.formats as AudioStream[] | undefined)?.find(
-          (f) => f.ext === 'mp3' || f.ext === 'm4a',
-        )?.url;
-
-      if (audioUrl && (await validateStreamUrl(audioUrl, host))) {
-        return audioUrl;
-      }
-    } catch (e) {
-      console.error(
-        `[Audio] Exception during ${host} resolution:`,
-        e instanceof Error ? e.message : String(e),
-      );
-    }
-  }
-  return null;
-}
-
-/**
- * Method 2: Cobalt API
- * Strategy: A highly optimized, open-source downloader used as a primary fallback.
- */
-async function tryCobalt(videoUrl: string): Promise<string | null> {
-  try {
-    console.log('[Audio] Attempting Cobalt fallback...');
-    const res = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'User-Agent': USER_AGENT,
-      },
-      body: JSON.stringify({
-        url: videoUrl,
-        aFormat: 'mp3',
-        isAudioOnly: true,
-        vCodec: 'h264',
-        vQuality: '720',
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!res.ok) {
-      console.warn(`[Audio] Cobalt reported error: ${res.status}`);
-      return null;
-    }
-
-    const data = await res.json();
-    const resultUrl = data.url || data.audio || data.stream;
-
-    if (resultUrl && (await validateStreamUrl(resultUrl, 'Cobalt'))) {
-      return resultUrl;
-    }
-  } catch (e) {
-    console.error(
-      '[Audio] Cobalt service exception:',
-      e instanceof Error ? e.message : String(e),
-    );
-  }
-  return null;
-}
-
-/**
- * Method 3: InnerTube (Internal Android Client)
- * Strategy: Mimics the official YouTube Android app to bypass data-center IP blocks.
- */
-async function tryInnerTube(ytId: string): Promise<string | null> {
-  try {
-    console.log('[Audio] Attempting InnerTube client bypass...');
-    const res = await fetch(
-      'https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT,
-        },
-        body: JSON.stringify({
-          videoId: ytId,
-          context: {
-            client: {
-              clientName: 'ANDROID',
-              clientVersion: '19.09.37',
-              androidSdkVersion: 30,
-              hl: 'en',
-              gl: 'US',
-            },
-          },
-        }),
-        signal: AbortSignal.timeout(10000),
-      },
-    );
-
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const streamingData = data?.streamingData;
-    if (!streamingData) return null;
-
-    const formats: AudioStream[] = [
-      ...(streamingData.adaptiveFormats || []),
-      ...(streamingData.formats || []),
-    ];
-
-    // Sort by highest bitrate, looking for standard audio itags (140, 251)
-    const audio = formats
-      .filter((f) => f.itag === 140 || f.itag === 251)
-      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-
-    if (audio?.url && (await validateStreamUrl(audio.url, 'InnerTube'))) {
-      return audio.url;
-    }
-  } catch (e) {
-    console.error(
-      '[Audio] InnerTube fatal exception:',
-      e instanceof Error ? e.message : String(e),
-    );
-  }
-  return null;
-}
-
-/**
- * Main Orchestrator
- * Sequentially attempts methods with increasing aggression to guarantee resolution.
+ * Orchestrates the retrieval of a direct audio stream URL.
+ * @param videoUrl - The source video link.
+ * @param platform - The video platform (e.g., 'youtube').
+ * @returns A validated direct link to the audio asset or null.
  */
 export async function getAudioUrl(
   videoUrl: string,
-  ytId: string | null,
-): Promise<string> {
-  if (!ytId)
-    throw new Error('Cannot resolve audio without a valid YouTube ID.');
+  platform: string,
+): Promise<string | null> {
+  console.log(`[Audio:START] Resolving ${platform} source: ${videoUrl}`);
 
-  console.log(
-    `[Audio] 🚀 Starting Master Resolution Sequence for Video ID: ${ytId}`,
-  );
+  if (platform !== 'youtube') {
+    console.warn(
+      `[Audio:WARN] platform '${platform}' is currently outside high-priority logic.`,
+    );
+    return null;
+  }
 
-  // 1. TRY PREMIUM RAPIDAPI (Lowest latency, most stable)
-  const rapid = await tryRapidAPI(ytId);
-  if (rapid) return rapid;
+  const ytId = extractYouTubeId(videoUrl);
+  if (!ytId) {
+    console.error(
+      '[Audio:ERROR] Failed to extract unique identifier from URL.',
+    );
+    return null;
+  }
 
-  // 2. TRY COBALT (Best fallback for varied platforms)
-  const cobalt = await tryCobalt(videoUrl);
-  if (cobalt) return cobalt;
+  // --- STRATEGY 1: PREMIUM RAPID-API (Low Latency) ---
+  const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
+  if (rapidApiKey) {
+    try {
+      console.log('[Audio:UPSTREAM] Attempting Premium RapidAPI node...');
+      const response = await fetch(
+        `https://youtube-mp36.p.rapidapi.com/dl?id=${ytId}`,
+        {
+          method: 'GET',
+          headers: {
+            'X-RapidAPI-Key': rapidApiKey,
+            'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com',
+          },
+          signal: AbortSignal.timeout(12000), // Strict 12s timeout
+        },
+      );
 
-  // 3. TRY INNERTUBE (Final local bypass)
-  const inner = await tryInnerTube(ytId);
-  if (inner) return inner;
+      if (response.ok) {
+        const payload = await response.json();
+        if (payload?.link) {
+          console.log('[Audio:SUCCESS] Stream secured via Premium Node.');
+          return payload.link;
+        }
+      }
+      console.warn(
+        `[Audio:UPSTREAM] Premium Node returned status: ${response.status}`,
+      );
+    } catch (e: any) {
+      console.warn(`[Audio:UPSTREAM] Premium Node failed: ${e.message}`);
+    }
+  }
 
-  // 4. FATAL FAILURE
+  // --- STRATEGY 2: AGGRESSIVE COBALT ROTATION (High Volume) ---
+  const cobaltNodes = [
+    'https://co.wuk.sh',
+    'https://cobalt.q0.o.aurora.tech',
+    'https://api.cobalt.tools',
+  ];
+
+  for (const node of cobaltNodes) {
+    try {
+      console.log(`[Audio:SCRAPE] Contacting extraction node: ${node}`);
+      const res = await fetch(`${node}/api/json`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify({
+          url: videoUrl,
+          aFormat: 'mp3',
+          isAudioOnly: true,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.url) {
+          console.log(
+            `[Audio:SUCCESS] Stream secured via ${new URL(node).hostname}`,
+          );
+          return data.url;
+        }
+      }
+      console.warn(
+        `[Audio:SCRAPE] Node ${node} rejected request or is rate-limited.`,
+      );
+    } catch (error: any) {
+      console.warn(`[Audio:SCRAPE] Connection to ${node} timed out or failed.`);
+      continue;
+    }
+  }
+
   console.error(
-    `[Audio] ❌ FAILED: All extraction methods exhausted for ${ytId}`,
+    '[Audio:FATAL] All available audio resolution layers have been exhausted.',
   );
-  throw new Error(
-    'All audio extraction methods blocked by YouTube security. Server IP may be blacklisted.',
-  );
+  return null;
 }

@@ -1,9 +1,9 @@
-//lib/supabase/client.ts
-import 'react-native-url-polyfill/auto'; // REQUIRED for Supabase in React Native
+import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
+import { ExpoSecureStoreAdapter } from './secureStorage';
 import { Database } from '../../types/database/database.types';
 
-// DO NOT USE process.env HERE. It will crash Expo Web.
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
 
@@ -13,7 +13,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // You will likely swap this for secureStorage later, but let's get it booting first
+    // Production standard: 
+    // On native (iOS/Android), use Expo Secure Store.
+    // On web, omit the storage key to let Supabase use its highly-tested default browser storage.
+    ...(Platform.OS !== 'web' ? { storage: ExpoSecureStoreAdapter } : {}),
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,

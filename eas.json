@@ -8,6 +8,13 @@
       },
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_RAPIDAPI_KEY": "USE_EAS_SECRET",
+        "EXPO_PUBLIC_DEEPGRAM_API_KEY": "USE_EAS_SECRET",
+        "EXPO_PUBLIC_SUPABASE_URL": "USE_EAS_SECRET",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "USE_EAS_SECRET",
+        "EXPO_PUBLIC_GEMINI_API_KEY": "USE_EAS_SECRET"
       }
     },
     "production": {

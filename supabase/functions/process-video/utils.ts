@@ -1,121 +1,164 @@
 /**
- * process-video/utils.ts
- * Utility functions for the video processing pipeline.
+ * supabase/functions/process-video/utils.ts
+ * Enterprise Utility Suite - Hardened Production Version
+ * * FEATURES:
+ * 1. Postgres-Safe Sanitization (Removes \u0000 bytes).
+ * 2. Multi-Context YouTube ID Extraction.
+ * 3. Metrics Engine (Duration/Reading Time).
+ * 4. Strict Type Safety (Zero 'any' usage).
  */
 
 /**
- * Extracts a YouTube video ID from various URL formats.
- * @param url - The YouTube URL.
- * @returns The 11-character video ID or null if not found.
+ * YouTube JSON3 Internal Structures
  */
-
-/**
- * Parses JSON3 formatted caption data from YouTube.
- * @param jsonData - The raw JSON3 caption data.
- * @returns The extracted and cleaned text, or null if parsing fails.
- */
-export function parseJson3(jsonData: unknown): string | null {
-  try {
-    if (typeof jsonData === 'string') {
-      const parsed = JSON.parse(jsonData);
-      return extractTextFromJsonEvents(parsed);
-    }
-    if (typeof jsonData === 'object' && jsonData !== null) {
-      return extractTextFromJsonEvents(jsonData as Record<string, unknown>);
-    }
-  } catch {
-    return null;
-  }
-  return null;
+export interface Json3Segment {
+  utf8?: string;
 }
 
-export function extractYouTubeId(url: string): string | null {
-  try {
-    const parsedUrl = new URL(url);
+export interface Json3Event {
+  segs?: Json3Segment[];
+}
 
-    // Check for 'v' parameter in query string (standard watch URLs)
-    const vId = parsedUrl.searchParams.get('v');
-    if (vId && /^[\w-]{11}$/.test(vId)) {
-      return vId;
-    }
-
-    // Check for youtu.be short links
-    if (parsedUrl.hostname === 'youtu.be') {
-      const id = parsedUrl.pathname.slice(1).split('?')[0];
-      if (/^[\w-]{11}$/.test(id)) {
-        return id;
-      }
-    }
-
-    // Check for /embed/, /v/, /shorts/ paths
-    const pathMatch = parsedUrl.pathname.match(
-      /(?:embed\/|v\/|shorts\/|live\/)([\w-]{11})/,
-    );
-    if (pathMatch) {
-      return pathMatch[1];
-    }
-  } catch {
-    // Fallback to regex for non-standard URLs that can't be parsed
-  }
-
-  // Final fallback regex
-  const match = url.match(
-    /(?:embed\/|shorts\/|watch\?v=|v\/|live\/|youtu\.be\/)([\w-]{11})/,
-  );
-  return match?.[1] ?? null;
+export interface Json3Data {
+  events?: Json3Event[];
 }
 
 /**
- * Cleans and extracts plain text from a VTT caption string.
- * @param vtt - The VTT caption content as a string.
- * @returns The extracted plain text, normalized.
+ * Calculates the difference in milliseconds from a starting point.
+ * @param startTime - The performance.now() or Date.now() start marker.
  */
-export function stripVtt(vtt: string): string {
-  return (
-    vtt
-      // Remove VTT header and metadata
-      .replace(/^WEBVTT[^\n]*\n(?:[^\n]*\n)*\s*\n?/i, '')
-      // Remove timestamps and positioning data (handles both : and . separators)
-      .replace(
-        /\d{2}:\d{2}[:.]\d{2,3}\s*-->\s*\d{2}:\d{2}[:.]\d{2,3}.*?\n/g,
-        '',
-      )
-      // Remove any HTML-like tags
-      .replace(/<[^>]+>/g, '')
-      // Decode HTML entities
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&#39;/g, "'")
-      .replace(/&quot;/g, '"')
-      // Normalize whitespace and join lines
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-  );
+export function diffMs(startTime: number): number {
+  return Date.now() - startTime;
 }
 
 /**
- * Extracts and concatenates text from JSON event objects (from YouTube's json3 format).
- * @param data - The JSON object containing an 'events' array with 'segs'.
- * @returns The concatenated text, or null if input is invalid or text is too short.
+ * Estimates reading time based on a standard 225 words-per-minute metric.
+ * @param wordCount - The total number of words in the transcript.
  */
-export function extractTextFromJsonEvents(
-  data: Record<string, unknown>,
-): string | null {
-  if (!data?.events || !Array.isArray(data.events)) {
-    return null;
-  }
+export function estimateReadingTime(wordCount: number): number {
+  const wordsPerMinute = 225;
+  const time = Math.ceil(wordCount / wordsPerMinute);
+  return Math.max(1, time);
+}
 
-  const text = (data.events as any[])
-    .filter((e) => e.segs)
-    .flatMap((e) => e.segs.map((s: any) => (s.utf8 ?? '').replace(/\n/g, ' ')))
-    .join(' ')
+/**
+ * Scrubs strings for database safety.
+ * PostgreSQL rejects strings containing the null character (\u0000).
+ * This function removes null bytes and collapses excessive whitespace.
+ */
+export function sanitizeForDb(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(/\u0000/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
 
-  return text.length > 50 ? text : null;
+/**
+ * Advanced YouTube ID Extraction Engine.
+ * Supports standard, shorts, live, embed, and shortened URLs.
+ */
+export function extractYouTubeId(url: string): string | null {
+  if (!url) return null;
+
+  try {
+    const urlObj = new URL(url);
+
+    // Pattern A: Standard Query Param (?v=)
+    const vParam = urlObj.searchParams.get('v');
+    if (vParam && /^[\w-]{11}$/.test(vParam)) return vParam;
+
+    // Pattern B: Shortened Hostname (youtu.be/ID)
+    if (urlObj.hostname === 'youtu.be') {
+      const id = urlObj.pathname.slice(1).split('?')[0];
+      if (/^[\w-]{11}$/.test(id)) return id;
+    }
+
+    // Pattern C: Path-based identifiers (/embed/, /v/, /shorts/, /live/)
+    const pathSegments = urlObj.pathname.split('/');
+    const idFromPath = pathSegments.find((segment) =>
+      /^[\w-]{11}$/.test(segment),
+    );
+    if (idFromPath) return idFromPath;
+  } catch {
+    // If URL parsing fails, fallback to regex scan of the raw string
+  }
+
+  const fallbackMatch = url.match(/(?:v=|\/|youtu\.be\/)([\w-]{11})/);
+  return fallbackMatch ? fallbackMatch[1] : null;
+}
+
+/**
+ * Parses internal YouTube JSON3 caption events into high-quality text.
+ * Optimized for accuracy and minimal whitespace.
+ */
+export function parseJson3(jsonData: unknown): string | null {
+  if (!jsonData) return null;
+
+  try {
+    const data = (
+      typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData
+    ) as Json3Data;
+
+    if (!data?.events || !Array.isArray(data.events)) return null;
+
+    const extracted = data.events
+      .filter((e: Json3Event) => e.segs && Array.isArray(e.segs))
+      .flatMap((e: Json3Event) =>
+        e.segs!.map((s: Json3Segment) => (s.utf8 ?? '').replace(/\n/g, ' ')),
+      )
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return extracted.length > 50 ? extracted : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Robust VTT (Web Video Text Tracks) Stripper.
+ * Uses non-backtracking patterns to prevent ReDoS on large transcripts.
+ */
+export function stripVtt(vtt: string): string {
+  if (!vtt) return '';
+
+  return vtt
+    .replace(/^WEBVTT[\s\S]*?\n\n/i, '')
+    .replace(
+      /^\d{2,}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2,}:\d{2}:\d{2}\.\d{3}.*$/gm,
+      '',
+    )
+    .replace(/^\d{2,}:\d{2}:\d{2}\.\d{3}$/gm, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Generates Keyword Density analytics for the transcript.
+ */
+export function getKeywordDensity(text: string, limit = 10): string[] {
+  const words = text.toLowerCase().match(/\b(\w{4,})\b/g);
+  if (!words) return [];
+
+  const frequency: Record<string, number> = {};
+  words.forEach((w) => {
+    frequency[w] = (frequency[w] || 0) + 1;
+  });
+
+  return Object.entries(frequency)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([word]) => word);
 }

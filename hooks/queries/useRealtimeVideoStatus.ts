@@ -1,26 +1,40 @@
-/**
- * hooks/queries/useRealtimeVideoStatus.ts
- * Subscribes to Postgres changes for a single video row.
- * Pushes live status to Zustand and invalidates the React Query cache
- * so useVideoData stops polling the moment the job finishes.
- */
-
 import { useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
 import { useVideoStore } from '../../store/useVideoStore';
-import { videoQueryKeys, TERMINAL_VIDEO_STATUSES, VideoStatus } from './useVideoData';
+import { Database } from '../../types/database/database.types';
 
+type VideoRow = Database['public']['Tables']['videos']['Row'];
 
-export const useRealtimeVideoStatus = (videoId: string | null): void => {
-  const updateVideoStatus = useVideoStore((s) => s.updateVideoStatus);
+export const useRealtimeVideoStatus = (videoId: string | null) => {
   const queryClient = useQueryClient();
+  const { setActiveVideo, updateStatus, updateVideoData } = useVideoStore();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['video', videoId],
+    queryFn: async () => {
+      if (!videoId) return null;
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (error) throw error;
+      return data as VideoRow;
+    },
+    enabled: !!videoId,
+  });
+
+  useEffect(() => {
+    if (data) setActiveVideo(data);
+  }, [data, setActiveVideo]);
 
   useEffect(() => {
     if (!videoId) return;
 
     const channel = supabase
-      .channel(`video-status-${videoId}`)
+      .channel(`video-realtime-${videoId}`)
       .on(
         'postgres_changes',
         {
@@ -30,25 +44,25 @@ export const useRealtimeVideoStatus = (videoId: string | null): void => {
           filter: `id=eq.${videoId}`,
         },
         (payload) => {
-          const status = payload.new?.status as VideoStatus | undefined;
-          if (!status) return;
+          const updatedRow = payload.new as VideoRow;
+          
+          updateStatus(updatedRow.status, updatedRow.error_message);
+          updateVideoData(updatedRow);
 
-          // Sync Zustand so processing indicators update immediately
-          updateVideoStatus(videoId, status as Parameters<typeof updateVideoStatus>[1]);
+          queryClient.setQueryData(['video', videoId], updatedRow);
 
-          // Always invalidate so the query re-fetches latest transcript + insights
-          queryClient.invalidateQueries({ queryKey: videoQueryKeys.detail(videoId) });
-
-          // Invalidate the history list once the job reaches a terminal state
-          if (TERMINAL_VIDEO_STATUSES.has(status)) {
-            queryClient.invalidateQueries({ queryKey: ['video-history'] });
+          if (updatedRow.status === 'completed') {
+            queryClient.invalidateQueries({ queryKey: ['transcripts', videoId] });
+            queryClient.invalidateQueries({ queryKey: ['ai_insights', videoId] });
           }
-        },
+        }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [videoId, updateVideoStatus, queryClient]);
+  }, [videoId, updateStatus, updateVideoData, queryClient]);
+
+  return { data, isLoading, error };
 };

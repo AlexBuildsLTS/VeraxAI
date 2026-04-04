@@ -2,7 +2,7 @@
  * _shared/supabaseAdmin.ts
  * Service role Supabase client for Edge Functions
  */
-
+/// <reference lib="deno.window" />
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -21,6 +21,7 @@ export function createAdminClient(): SupabaseClient {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+      detectSessionInUrl: false,
     },
   });
 }
