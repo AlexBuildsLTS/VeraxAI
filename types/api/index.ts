@@ -87,7 +87,7 @@ export interface SeoMetadata {
 }
 
 export interface AiInsights {
-  model: string;
+  ai_model: string; // FIXED: Renamed from 'model' to exactly match database.types.ts and exportBuilder.ts
   language: string;
   summary: string;
   chapters: Chapter[];

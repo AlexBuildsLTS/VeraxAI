@@ -3,6 +3,9 @@ import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/useAuthStore';
 
+
+
+
 const getInitials = (name?: string) => {
   if (!name) return 'U';
   return name

@@ -1,3 +1,13 @@
+/**
+ * components/layout/AdaptiveLayout.tsx
+ * The Master Framework - Optimized for Infinite Scroll
+ * ----------------------------------------------------------------------------
+ * FIXES:
+ * 1. TypeScript Error: Removed "100vh" string which is not a valid RN type.
+ * 2. Invisible Scrollbars: CSS injected for Web using a safe string.
+ * 3. Scrolling: Forced flex: 1 and overflow: hidden on the wrapper.
+ */
+
 import React from 'react';
 import {
   View,
@@ -20,7 +30,6 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 
-// Highly optimized background pulse.
 const NeuralGlow = ({ top, right, left, bottom, color }: any) => {
   const opacity = useSharedValue(0.03);
 
@@ -33,7 +42,7 @@ const NeuralGlow = ({ top, right, left, bottom, color }: any) => {
       -1,
       true,
     );
-  }, []);
+  }, [opacity]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -75,34 +84,63 @@ export const AdaptiveLayout = ({ children }: { children: React.ReactNode }) => {
   ];
 
   return (
-    <View className="flex-1 bg-[#020205] relative overflow-hidden">
-      {/* 1. OPTIMIZED AMBIENT BACKGROUND */}
+    <View
+      className="flex-1 bg-[#020205] relative overflow-hidden"
+      // FIXED: Used "100%" instead of "100vh" to satisfy TypeScript.
+      // Flex-1 handles the height context correctly when combined with html/body styles.
+      style={{ flex: 1 }}
+    >
+      {/* GLOBAL CSS: Kills scrollbars on Web while keeping scroll functionality */}
+      {Platform.OS === 'web' && (
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+                  * {
+                    -ms-overflow-style: none !important;
+                    scrollbar-width: none !important;
+                  }
+                  *::-webkit-scrollbar {
+                    display: none !important;
+                  }
+                  html, body {
+                    overflow: hidden;
+                    height: 100%;
+                    width: 100%;
+                    margin: 0;
+                    padding: 0;
+                  }
+                `,
+          }}
+        />
+      )}
+
+      {/* 1. AMBIENT BACKGROUND */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <NeuralGlow color="#00F0FF" top="-10%" left="-10%" />
         <NeuralGlow color="#8A2BE2" bottom="-10%" right="-5%" />
       </View>
 
-      {/* 2. FLOATING UI ELEMENTS (NO HEADER WRAPPER)
-        These are absolutely positioned to sit sleekly on top of everything.
-      */}
+      {/* 2. MOBILE LOGO */}
       {!isDesktop && !isTablet && (
-        <View className="absolute top-12 left-6 z-[1000] pointer-events-box-none">
+        <View className="absolute top-12 left-6 z-[1000]" pointerEvents="none">
           <Image
             source={require('../../assets/icon.png')}
             style={{ width: 36, height: 36 }}
             resizeMode="contain"
-            // TINT COLOR DELETED. REAL IMAGE WILL SHOW.
           />
         </View>
       )}
 
-      {/* Profile Dropdown floating independently on top right */}
-      <View className="absolute top-12 right-6 z-[1000] pointer-events-box-none">
+      {/* Profile Dropdown */}
+      <View
+        className="absolute top-12 right-6 z-[1000]"
+        pointerEvents="box-none"
+      >
         <ProfileDropdown />
       </View>
 
       <View className="flex-row flex-1">
-        {/* 3. DESKTOP/TABLET SIDEBAR */}
+        {/* 3. SIDEBAR */}
         {(isDesktop || isTablet) && (
           <View
             className={cn(
@@ -118,7 +156,6 @@ export const AdaptiveLayout = ({ children }: { children: React.ReactNode }) => {
                 source={require('../../assets/icon.png')}
                 style={{ width: 40, height: 40 }}
                 resizeMode="contain"
-                // TINT COLOR DELETED HERE TOO.
               />
             </TouchableOpacity>
 
@@ -165,13 +202,16 @@ export const AdaptiveLayout = ({ children }: { children: React.ReactNode }) => {
           </View>
         )}
 
-        {/* 4. MAIN CONTENT VIEWPORT */}
-        <View className="flex-1">{children}</View>
+        {/* 4. MAIN VIEWPORT: flex-1 ensures it fills the space for inner ScrollViews */}
+        <View className="flex-1 h-full overflow-hidden">{children}</View>
       </View>
 
       {/* 5. MOBILE BOTTOM NAVIGATION */}
       {!isDesktop && !isTablet && (
-        <View className="absolute bottom-8 left-6 right-6 h-20 z-[100]">
+        <View
+          className="absolute bottom-8 left-6 right-6 h-20 z-[100]"
+          pointerEvents="box-none"
+        >
           <BlurView
             intensity={Platform.OS === 'web' ? 20 : 60}
             tint="dark"

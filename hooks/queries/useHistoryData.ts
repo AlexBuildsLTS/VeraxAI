@@ -12,6 +12,7 @@ type VideoRow = Database['public']['Tables']['videos']['Row'];
 export const useHistoryData = () => {
   return useQuery<VideoRow[]>({
     queryKey: ['video-history'],
+    
     queryFn: async () => {
       // Get the current user to ensure we only fetch their data
       const {

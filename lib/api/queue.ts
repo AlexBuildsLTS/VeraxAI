@@ -1,7 +1,7 @@
 //lib/api/queue.ts
 import { supabase } from '../supabase/client';
 import { Database } from '../../types/database/database.types';
-import { YouTubeValidator } from '../../utils/videoParser';
+import { parseVideoUrl } from '../../utils/videoParser';
 
 type VideoInsert = Database['public']['Tables']['videos']['Insert'];
 
@@ -32,7 +32,8 @@ export const submitBatchJob = async (
 
   // Create video records for each URL
   const videoInserts: VideoInsert[] = videoUrls.map((url) => {
-    const videoId = YouTubeValidator.extractId(url);
+    const parsed = parseVideoUrl(url);
+    const videoId = parsed.videoId;
     if (!videoId) throw new Error(`Invalid YouTube URL: ${url}`);
 
     return {

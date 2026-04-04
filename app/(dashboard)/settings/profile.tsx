@@ -13,13 +13,13 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
-  SafeAreaView,
   Platform,
   Dimensions,
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ArrowBigLeftDash,
   Camera,
@@ -101,7 +101,10 @@ const StatPill = ({
   value: string;
   color?: string;
 }) => (
-  <View className="items-center flex-1 p-4 border rounded-2xl border-white/5 gap-y-1" style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
+  <View
+    className="items-center flex-1 p-4 border rounded-2xl border-white/5 gap-y-1"
+    style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}
+  >
     <Icon size={16} color={color} />
     <Text className="text-[8px] font-black uppercase tracking-widest text-white/30 mt-1">
       {label}
@@ -235,11 +238,13 @@ export default function ProfileSettingsScreen() {
       setAvatarUrl(publicUrl);
 
       // Save immediately
-      await supabase.from('profiles').upsert({
-        id: user!.id,
-        avatar_url: publicUrl,
-        updated_at: new Date().toISOString(),
-      });
+      await supabase
+        .from('profiles')
+        .update({
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user!.id);
       await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
 
       pulseRing();
@@ -298,11 +303,13 @@ export default function ProfileSettingsScreen() {
       const publicUrl = urlData.publicUrl;
       setAvatarUrl(publicUrl);
 
-      await supabase.from('profiles').upsert({
-        id: user!.id,
-        avatar_url: publicUrl,
-        updated_at: new Date().toISOString(),
-      });
+      await supabase
+        .from('profiles')
+        .update({
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user!.id);
       await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
 
       pulseRing();
@@ -317,11 +324,13 @@ export default function ProfileSettingsScreen() {
 
   const handleRemoveAvatar = useCallback(async () => {
     setAvatarUrl('');
-    await supabase.from('profiles').upsert({
-      id: user!.id,
-      avatar_url: null,
-      updated_at: new Date().toISOString(),
-    });
+    await supabase
+      .from('profiles')
+      .update({
+        avatar_url: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user!.id);
     await supabase.auth.updateUser({ data: { avatar_url: null } });
   }, [user]);
 
@@ -336,12 +345,14 @@ export default function ProfileSettingsScreen() {
     setIsSaving(true);
     setSaved(false);
 
-    const { error } = await supabase.from('profiles').upsert({
-      id: user.id,
-      full_name: fullName.trim(),
-      avatar_url: avatarUrl || null,
-      updated_at: new Date().toISOString(),
-    });
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName.trim(),
+        avatar_url: avatarUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
 
     if (error) {
       Alert.alert('Sync Failed', error.message);
@@ -384,17 +395,17 @@ export default function ProfileSettingsScreen() {
       {/* Ambient background */}
       <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
         <NeuralOrb delay={0} color="#00F0FF" />
-        <NeuralOrb delay={2500} color="#8A2BE2" />
+        <NeuralOrb delay={2500} color="#FF007F" />
       </View>
 
       <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           padding: isMobile ? 20 : 60,
           paddingTop: isMobile ? 60 : 60,
           paddingBottom: 160,
         }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
       >
         {/* ── Back ─────────────────────────────────────────────────────── */}
         <TouchableOpacity
@@ -403,18 +414,19 @@ export default function ProfileSettingsScreen() {
               ? router.back()
               : router.replace('/settings' as any)
           }
-            activeOpacity={0.7}
+          className="flex-row items-center mb-10 gap-x-2"
+          activeOpacity={0.7}
         >
-          
-          <ArrowBigLeftDash size={18} color="#FF007F" />
+          <ArrowBigLeftDash size={18} color="#00F0FF" />
+          <Text className="text-[10px] font-black tracking-[4px] text-neon-cyan uppercase">
+            Return
+          </Text>
         </TouchableOpacity>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <FadeIn>
           <View className="mb-10">
-            <Text className="text-neon-cyan font-black text-[10px] tracking-[8px] uppercase mb-2">
-              
-            </Text>
+            <Text className="text-neon-cyan font-black text-[10px] tracking-[8px] uppercase mb-2"></Text>
             <Text className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase leading-[45px]">
               EDIT <Text className="text-neon-cyan">PROFILE</Text>
             </Text>
@@ -570,7 +582,10 @@ export default function ProfileSettingsScreen() {
                 <Text className="text-neon-cyan font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
                   Operative Name
                 </Text>
-                <View className="flex-row items-center px-4 border border-white/10 rounded-2xl h-14" style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                <View
+                  className="flex-row items-center px-4 border border-white/10 rounded-2xl h-14"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}
+                >
                   <User size={16} color="#A1A1AA" />
                   <View className="flex-1 ml-3">
                     <Input
@@ -589,7 +604,10 @@ export default function ProfileSettingsScreen() {
                 <Text className="text-white/30 font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
                   Registered Email
                 </Text>
-                <View className="flex-row items-center px-4 border border-white/5 rounded-2xl h-14" style={{ backgroundColor: 'rgba(255,255,255,0.01)' }}>
+                <View
+                  className="flex-row items-center px-4 border border-white/5 rounded-2xl h-14"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.01)' }}
+                >
                   <Mail size={16} color="#52525B" />
                   <Text className="flex-1 ml-3 text-sm font-medium text-white/30">
                     {user?.email ?? '—'}

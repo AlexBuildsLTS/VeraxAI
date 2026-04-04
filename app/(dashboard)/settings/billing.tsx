@@ -183,23 +183,30 @@ export default function BillingScreen() {
       </View>
 
       <ScrollView
+        style={{ flex: 1, width: '100%' }}
         contentContainerStyle={{
           padding: isMobile ? 20 : 60,
           paddingTop: isMobile ? 60 : 60,
           paddingBottom: 160,
+          flexGrow: 1,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Back ─────────────────────────────────────────────────────── */}
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          activeOpacity={0.7}
-        >
-          <ArrowBigLeftDash size={18} color="#8A2BE2" />
-          <Text style={styles.backText}>RETURN</Text>
-        </TouchableOpacity>
-
+      {/* ── Back ─────────────────────────────────────────────────────── */}
+            <TouchableOpacity
+              onPress={() =>
+                router.canGoBack()
+                  ? router.back()
+                  : router.replace('/settings' as any)
+              }
+              className="flex-row items-center mb-10 gap-x-2"
+              activeOpacity={0.7}
+            >
+              <ArrowBigLeftDash size={18} color="#5425ad" />
+              <Text className="text-[10px] font-black tracking-[4px] text-neon-purple uppercase">
+                Return
+              </Text>
+            </TouchableOpacity>
         {/* ── Heading ──────────────────────────────────────────────────── */}
         <FadeIn>
           <View style={{ marginBottom: 32 }}>

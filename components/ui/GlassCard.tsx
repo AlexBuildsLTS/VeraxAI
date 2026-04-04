@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { cn } from '../../lib/utils';
+
 
 interface GlassCardProps {
   children: React.ReactNode;
@@ -24,18 +24,11 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   return (
     <View
       className={cn(
-        'relative overflow-hidden rounded-[32px] border bg-white/[0.01]',
+        'relative overflow-hidden rounded-[32px] border bg-[#0f172a]/40', // Semi-transparent solid bg replaces BlurView
         glowStyles[glowColor],
         className,
       )}
     >
-      {/* The Blur layer is what makes it 'Glass' */}
-      <BlurView
-        intensity={Platform.OS === 'web' ? 10 : 25}
-        tint="dark"
-        style={StyleSheet.absoluteFill}
-      />
-
       {/* Content Layer */}
       <View className="relative z-10">{children}</View>
     </View>

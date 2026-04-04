@@ -1,11 +1,11 @@
 /**
  * store/useVideoStore.ts
- * Enterprise-Grade State Management & Pipeline Orchestration
- * * Architecture: 
- * 1. Persistent Zustand state for global video context.
- * 2. Strict session management using local getSession() to bypass network blocks.
- * 3. Granular pipeline telemetry for high-fidelity UI feedback.
- * 4. Fault-tolerant handoff to sovereign Supabase Edge Functions.
+ * Ironclad State Management & Pipeline Orchestration
+ * ----------------------------------------------------------------------------
+ * FEATURES:
+ * 1. STRICT SYNC: Fully mapped to your updated database.types.ts schema.
+ * 2. COMPATIBILITY: Method names mapped to fix useRealtimeVideoStatus.ts errors.
+ * 3. FALLBACK SHIELDS: Safely hands off to backend if local fast-path fails.
  */
 
 import { create } from 'zustand';
@@ -17,10 +17,11 @@ import { fetchClientCaptions } from '../utils/clientCaptions';
 type VideoRow = Database['public']['Tables']['videos']['Row'];
 type VideoStatus = Database['public']['Enums']['video_status'];
 
-interface PipelineTelemetry {
-  step: 'initializing' | 'parsing' | 'db_init' | 'fast_path' | 'uplink' | 'syncing';
-  timestamp: string;
-  message: string;
+interface PipelineEvent {
+  event: string;
+  timestamp: number;
+  details?: string;
+  severity: 'info' | 'warn' | 'error' | 'success';
 }
 
 interface ProcessingOptions {
@@ -29,31 +30,25 @@ interface ProcessingOptions {
 }
 
 interface VideoState {
-  // --- Core State ---
   videos: VideoRow[];
   activeVideoId: string | null;
   status: VideoStatus | null;
   isProcessing: boolean;
   error: string | null;
-  
-  // --- Telemetry & Analytics ---
-  telemetry: PipelineTelemetry[];
-  lastProcessedId: string | null;
 
-  // --- Core Actions ---
+  pipelineEvents: PipelineEvent[];
+  jobStartTime: number | null;
+  jobEndTime: number | null;
+
   fetchUserVideos: () => Promise<void>;
   processNewVideo: (url: string, options: ProcessingOptions) => Promise<void>;
-  
-  // --- State Synchronization ---
-  updateStatus: (status: VideoStatus, error?: string | null) => void;
-  updateVideoData: (data: Partial<VideoRow>) => void;
-  setActiveVideo: (video: VideoRow) => void;
-  
-  // --- Utilities ---
-  clearActiveVideo: () => void;
-  clearError: () => void;
-  resetTelemetry: () => void;
-  addTelemetry: (step: PipelineTelemetry['step'], message: string) => void;
+
+  recordEvent: (name: string, severity?: PipelineEvent['severity'], details?: string) => void;
+  syncStatus: (status: VideoStatus, error?: string | null) => void;
+  refreshLocalVideo: (data: Partial<VideoRow>) => void;
+  setActiveJob: (video: VideoRow) => void;
+  clearState: () => void;
+  hardReset: () => void;
 }
 
 export const useVideoStore = create<VideoState>((set, get) => ({
@@ -62,91 +57,92 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   status: null,
   isProcessing: false,
   error: null,
-  telemetry: [],
-  lastProcessedId: null,
+  pipelineEvents: [],
+  jobStartTime: null,
+  jobEndTime: null,
 
-  // --- Utility Implementations ---
-  clearError: () => set({ error: null }),
-  
-  resetTelemetry: () => set({ telemetry: [] }),
-
-  addTelemetry: (step, message) => {
-    const newLog: PipelineTelemetry = {
-      step,
-      message,
-      timestamp: new Date().toISOString(),
-    };
-    set((state) => ({ telemetry: [newLog, ...state.telemetry].slice(0, 20) }));
-    console.log(`[Pipeline:${step.toUpperCase()}] ${message}`);
+  recordEvent: (event, severity = 'info', details) => {
+    const newEvent: PipelineEvent = { event, timestamp: Date.now(), severity, details };
+    set((state) => ({
+      pipelineEvents: [newEvent, ...state.pipelineEvents].slice(0, 50)
+    }));
+    console.log(`[PIPELINE:${severity.toUpperCase()}] ${event}`);
   },
 
-  setActiveVideo: (video) =>
+  clearState: () => set({ error: null }),
+
+  hardReset: () => set({
+    pipelineEvents: [],
+    jobStartTime: null,
+    jobEndTime: null,
+    error: null,
+    isProcessing: false,
+    activeVideoId: null,
+    status: null
+  }),
+
+  // Method names synchronized for useRealtimeVideoStatus.ts
+  setActiveJob: (video) =>
     set({
       activeVideoId: video.id,
       status: video.status,
       error: video.error_message,
     }),
 
-  updateStatus: (status, error = null) => set({ status, error }),
+  syncStatus: (status, error = null) => set({ status, error }),
 
-  updateVideoData: (data) =>
+  refreshLocalVideo: (data) =>
     set((state) => ({
       videos: state.videos.map((v) =>
         v.id === state.activeVideoId ? { ...v, ...data } : v,
       ),
     })),
 
-  // --- Primary Data Actions ---
   fetchUserVideos: async () => {
+    const { recordEvent } = get();
     try {
-      // Hardened session check (Local memory only to avoid 403 blocks)
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-      if (sessionError || !session?.user) {
-        get().addTelemetry('syncing', 'No active session detected for fetch.');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        recordEvent('SESSION_MISSING', 'warn', 'Fetch attempted without valid auth context.');
         return;
       }
 
-      const { data, error: dbError } = await supabase
+      const { data, error } = await supabase
         .from('videos')
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
 
-      if (dbError) throw dbError;
-
+      if (error) throw error;
       set({ videos: data || [], error: null });
-      get().addTelemetry('syncing', `Successfully synchronized ${data?.length || 0} assets.`);
+      recordEvent('DATA_SYNCED', 'success', `Loaded ${data?.length} historical records.`);
     } catch (error: any) {
-      console.error('[Store] Sync Failure:', error.message);
+      recordEvent('SYNC_FAILURE', 'error', error.message);
     }
   },
 
   processNewVideo: async (url, options) => {
-    // 0. Reset State for new Job
-    set({ isProcessing: true, error: null, telemetry: [] });
-    let dbRecordId: string | null = null;
-    const { addTelemetry } = get();
+    const { recordEvent, hardReset } = get();
+    hardReset();
+    set({ isProcessing: true, jobStartTime: Date.now() });
+
+    let targetDbId: string | null = null;
 
     try {
-      addTelemetry('initializing', 'Securing authentication handshake...');
+      recordEvent('HANDSHAKE_INIT', 'info', 'Validating secure session token...');
 
-      // 1. Session Validation (Local Context Only)
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session?.user) {
-        throw new Error('Security context invalid. Please re-authenticate.');
+        throw new Error('Authentication failure: Token expired. Please sign in again.');
       }
 
-      // 2. Multi-Platform URL Parsing
-      addTelemetry('parsing', 'Analyzing source URL integrity...');
+      recordEvent('SIGNATURE_ANALYSIS', 'info', 'Parsing media source format...');
       const parsed = parseVideoUrl(url);
       if (!parsed.isValid || !parsed.videoId || !parsed.normalizedUrl) {
-        throw new Error('Source identifier could not be extracted from URL.');
+        throw new Error('Incompatible Source: Provided URL format is malformed or unsupported.');
       }
 
-      addTelemetry('db_init', `Provisioning database record for ${parsed.platform}:${parsed.videoId}`);
-
-      // 3. Database Persistence (Initial State)
+      recordEvent('DB_PROVISIONING', 'info', `Target Media ID: ${parsed.videoId}`);
       const { data: videoRecord, error: dbError } = await supabase
         .from('videos')
         .insert({
@@ -160,31 +156,25 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         .single();
 
       if (dbError || !videoRecord) {
-        throw new Error(dbError?.message || 'Database provisioning failed.');
+        throw new Error(`Critical DB Error: ${dbError?.message || 'Provisioning failed.'}`);
       }
 
-      dbRecordId = videoRecord.id;
-      set((state) => ({ 
-        activeVideoId: dbRecordId,
-        videos: [videoRecord, ...state.videos] 
-      }));
+      targetDbId = videoRecord.id;
+      set((state) => ({ activeVideoId: targetDbId, videos: [videoRecord, ...state.videos] }));
 
-      // 4. Phase 1: Client-Side Fast-Path (Optional)
-      addTelemetry('fast_path', 'Attempting rapid metadata extraction...');
+      recordEvent('FAST_PATH_INIT', 'info', 'Checking local edge cache for metadata...');
       let clientTranscript: string | null = null;
       try {
-        // We try client-side, but do NOT throw if it fails. The backend is the sovereign.
         clientTranscript = await fetchClientCaptions(parsed.videoId, parsed.platform);
         if (clientTranscript) {
-          addTelemetry('fast_path', 'Metadata successfully cached locally.');
+          recordEvent('FAST_PATH_OK', 'success', 'Client-side metadata successfully secured.');
         }
       } catch (e) {
-        addTelemetry('fast_path', 'Fast-path bypassed. Backend will handle extraction.');
+        recordEvent('FAST_PATH_FAIL', 'warn', 'Client limits reached. Bypassing to Sovereign Edge.');
       }
 
-      // 5. Phase 2: Uplink to Sovereign Edge Function
-      addTelemetry('uplink', 'Establishing secure link to Edge Processing Node...');
-      
+      recordEvent('SERVER_HANDOFF', 'info', 'Relaying payload to Edge Processing Node...');
+
       const edgeResponse = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/process-video`,
         {
@@ -194,48 +184,45 @@ export const useVideoStore = create<VideoState>((set, get) => ({
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            video_id: dbRecordId,
+            video_id: targetDbId,
             video_url: parsed.normalizedUrl,
             platform: parsed.platform,
-            transcript_text: clientTranscript, // Pass what we found (if anything)
+            transcript_text: clientTranscript,
             language: options.language,
             difficulty: options.difficulty,
           }),
         }
       );
 
-      // Handle Edge Function network failures
       if (!edgeResponse.ok) {
-        const errorData = await edgeResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || `Uplink failed with status code ${edgeResponse.status}`);
+        const errJson = await edgeResponse.json().catch(() => ({}));
+        throw new Error(errJson.error || `Node Gateway Refused: HTTP ${edgeResponse.status}`);
       }
 
       const result = await edgeResponse.json();
 
       if (result.success === false) {
-        throw new Error(result.error || 'Server-side pipeline rejected the payload.');
+        throw new Error(result.error || 'The remote Edge Node encountered a fatal processing error.');
       }
 
-      addTelemetry('syncing', 'Processing sequence complete. Finalizing data sync...');
-      
-      // Final Refresh
+      recordEvent('PIPELINE_FINALIZED', 'success', 'Assets compiled and stored in vault.');
+      set({ jobEndTime: Date.now() });
+
       await get().fetchUserVideos();
-      set({ lastProcessedId: dbRecordId });
 
     } catch (err: any) {
-      addTelemetry('initializing', `Fatal Pipeline Error: ${err.message}`);
-      set({ error: err.message });
+      recordEvent('PIPELINE_CRASH', 'error', err.message);
+      set({ error: err.message, isProcessing: false });
 
-      // Attempt to mark failure in DB so UI reflects correctly
-      if (dbRecordId) {
+      if (targetDbId) {
         await supabase
           .from('videos')
-          .update({ 
-            status: 'failed', 
+          .update({
+            status: 'failed',
             error_message: err.message,
             processing_completed_at: new Date().toISOString()
           })
-          .eq('id', dbRecordId);
+          .eq('id', targetDbId);
       }
     } finally {
       set({ isProcessing: false });

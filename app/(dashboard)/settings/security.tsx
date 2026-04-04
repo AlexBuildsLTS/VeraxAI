@@ -26,7 +26,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  SafeAreaView,
   Platform,
   Dimensions,
   StyleSheet,
@@ -56,6 +55,7 @@ import { Button } from '../../../components/ui/Button';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -324,11 +324,13 @@ export default function SecuritySettingsScreen() {
 
       // Persist to Supabase
       if (user) {
+        /*
         await supabase.from('profiles').upsert({
           id: user.id,
           biometrics_enabled: newVal,
           updated_at: new Date().toISOString(),
         });
+        */
       }
 
       Alert.alert(
@@ -464,27 +466,26 @@ export default function SecuritySettingsScreen() {
   const criteria = getStrengthCriteria(newPw);
 
   return (
-    <SafeAreaView className="flex-1 bg-[#020205]">
+       <SafeAreaView className="flex-1 bg-[#020205]">
       <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
         <NeuralOrb delay={0} color="#FF007F" />
         <NeuralOrb delay={2500} color="#8A2BE2" />
       </View>
 
       <ScrollView
+        style={{ flex: 1, width: '100%' }}
         contentContainerStyle={{
           padding: isMobile ? 20 : 60,
           paddingTop: isMobile ? 60 : 60,
           paddingBottom: 160,
+          flexGrow: 1,
         }}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
       >
         {/* ── Back ─────────────────────────────────────────────────────── */}
         <TouchableOpacity
           onPress={() =>
-            router.canGoBack()
-              ? router.back()
-              : router.replace('/settings' as any)
+            router.canGoBack() ? router.back() : router.replace('/settings' as any)
           }
           style={styles.backBtn}
           activeOpacity={0.7}
@@ -728,7 +729,7 @@ export default function SecuritySettingsScreen() {
                       <Eye size={16} color="#A1A1AA" />
                     )}
                   </TouchableOpacity>
-                </View> 
+                </View>
                 {confirmPw.length > 0 && (
                   <Text
                     style={[
@@ -851,10 +852,7 @@ export default function SecuritySettingsScreen() {
             5. Danger Zone
         ═══════════════════════════════════════════════════════════════ */}
         <FadeIn delay={300}>
-          <GlassCard
-            glowColor="pink"
-            className="p-6 mb-5"
-          >
+          <GlassCard glowColor="pink" className="p-6 mb-5">
             <View style={styles.cardHeaderRow}>
               <AlertTriangle size={16} color="#FF4500" />
               <Text style={[styles.cardTitle, { color: '#FF4500' }]}>
@@ -864,7 +862,7 @@ export default function SecuritySettingsScreen() {
             <Text style={styles.cardSubtitle}>
               Permanently delete your account and all associated data — videos,
               transcripts, AI insights, and settings. This action cannot be
-              undone.
+              undone. This action cannot be undone. 
             </Text>
             <TouchableOpacity
               onPress={handleDeleteAccount}

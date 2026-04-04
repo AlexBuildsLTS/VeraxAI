@@ -1,3 +1,11 @@
+/**
+ * hooks/queries/useRealtimeVideoStatus.ts
+ * Real-time Database Listener & Cache Invalidater
+ * ----------------------------------------------------------------------------
+ * Connects to Supabase Realtime to listen for backend pipeline updates.
+ * Perfectly synchronized with the enterprise useVideoStore methods.
+ */
+
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
@@ -8,28 +16,35 @@ type VideoRow = Database['public']['Tables']['videos']['Row'];
 
 export const useRealtimeVideoStatus = (videoId: string | null) => {
   const queryClient = useQueryClient();
-  const { setActiveVideo, updateStatus, updateVideoData } = useVideoStore();
+  
+  // FIXED: Destructuring the exact method names exported by the updated useVideoStore
+  const { setActiveJob, syncStatus, refreshLocalVideo } = useVideoStore();
 
+  // Initial fetch of the video data
   const { data, isLoading, error } = useQuery({
     queryKey: ['video', videoId],
     queryFn: async () => {
       if (!videoId) return null;
-      const { data, error } = await supabase
+      const { data: dbData, error: dbError } = await supabase
         .from('videos')
         .select('*')
         .eq('id', videoId)
         .single();
 
-      if (error) throw error;
-      return data as VideoRow;
+      if (dbError) throw dbError;
+      return dbData as VideoRow;
     },
     enabled: !!videoId,
   });
 
+  // Synchronize the initial data load with our global store
   useEffect(() => {
-    if (data) setActiveVideo(data);
-  }, [data, setActiveVideo]);
+    if (data) {
+      setActiveJob(data);
+    }
+  }, [data, setActiveJob]);
 
+  // Establish the Supabase Realtime WebSocket connection
   useEffect(() => {
     if (!videoId) return;
 
@@ -46,11 +61,14 @@ export const useRealtimeVideoStatus = (videoId: string | null) => {
         (payload) => {
           const updatedRow = payload.new as VideoRow;
           
-          updateStatus(updatedRow.status, updatedRow.error_message);
-          updateVideoData(updatedRow);
+          // FIXED: Using the synchronized store methods to update the UI instantly
+          syncStatus(updatedRow.status, updatedRow.error_message);
+          refreshLocalVideo(updatedRow);
 
+          // Update React Query's internal cache
           queryClient.setQueryData(['video', videoId], updatedRow);
 
+          // Once the backend orchestrator finishes, force a refetch of the final assets
           if (updatedRow.status === 'completed') {
             queryClient.invalidateQueries({ queryKey: ['transcripts', videoId] });
             queryClient.invalidateQueries({ queryKey: ['ai_insights', videoId] });
@@ -59,10 +77,11 @@ export const useRealtimeVideoStatus = (videoId: string | null) => {
       )
       .subscribe();
 
+    // Cleanup the WebSocket channel when the component unmounts
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [videoId, updateStatus, updateVideoData, queryClient]);
+  }, [videoId, syncStatus, refreshLocalVideo, queryClient]);
 
   return { data, isLoading, error };
 };

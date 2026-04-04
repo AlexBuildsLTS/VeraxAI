@@ -4,8 +4,6 @@
  * 2026 Compliant: Uses the modern Google GenAI SDK pattern and handles model deprecation gracefully.
  */
 
-// Note: In Deno, you might import from esm.sh. Ensure you are using the modern SDK.
-// For the legacy SDK (if you haven't migrated your Deno environment yet), the import is:
 import {
   GoogleGenerativeAI,
   SchemaType,
@@ -16,13 +14,11 @@ const InsightsSchema = {
   properties: {
     summary: {
       type: SchemaType.STRING,
-      description:
-        'Comprehensive executive summary adapted to content length. Must be highly professional.',
+      description: 'Comprehensive executive summary adapted to content length. Must be highly professional.',
     },
     chapters: {
       type: SchemaType.ARRAY,
-      description:
-        'Chronological segments for video navigation. Empty for content under 2 minutes.',
+      description: 'Chronological segments for video navigation. Empty for content under 2 minutes.',
       items: {
         type: SchemaType.OBJECT,
         properties: {
@@ -38,8 +34,7 @@ const InsightsSchema = {
     },
     key_takeaways: {
       type: SchemaType.ARRAY,
-      description:
-        '3-5 highly actionable, substantive points. Quality over quantity.',
+      description: '3-5 highly actionable, substantive points. Quality over quantity.',
       items: { type: SchemaType.STRING },
     },
     seo_metadata: {
@@ -86,16 +81,12 @@ export async function generateInsights(
   difficulty: string,
 ): Promise<InsightsResult> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey)
-    throw new Error(
-      'GEMINI_API_KEY is not configured in Edge Function secrets.',
-    );
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured in Edge Function secrets.');
+  }
 
   const category = getContentCategory(transcript);
   const genAI = new GoogleGenerativeAI(apiKey);
-
-  // Future-Proofing: gemini-2.5-flash sunsets June 17, 2026.
-  // We define a primary and a fallback in case the environment hasn't been updated.
   const targetModel = 'gemini-2.5-flash';
 
   const model = genAI.getGenerativeModel({
@@ -104,7 +95,6 @@ export async function generateInsights(
       responseMimeType: 'application/json',
       responseSchema: InsightsSchema,
       temperature: 0.2, // Low temperature for factual, analytical extraction
-      // 2.5 Flash handles massive contexts natively
     },
   });
 
@@ -138,9 +128,7 @@ export async function generateInsights(
     };
   } catch (error: any) {
     console.error(`[Insights] AI Generation failed:`, error);
-    throw new Error(
-      `Failed to generate intelligence payload: ${error.message}`,
-    );
+    throw new Error(`Failed to generate intelligence payload: ${error.message}`);
   }
 }
 
@@ -151,23 +139,17 @@ function buildIntelligentPrompt(
   category: 'short' | 'medium' | 'long',
 ): string {
   const difficultyGuides: Record<string, string> = {
-    beginner:
-      'Use accessible language, avoid deep jargon, and define technical terms clearly.',
-    standard:
-      'Balance clarity with professional precision. Suitable for a general business audience.',
-    advanced:
-      'Use precise, domain-specific technical language. Assume expert-level knowledge.',
+    beginner: 'Use accessible language, avoid deep jargon, and define technical terms clearly.',
+    standard: 'Balance clarity with professional precision. Suitable for a general business audience.',
+    advanced: 'Use precise, domain-specific technical language. Assume expert-level knowledge.',
   };
 
   const guidelines = {
-    short:
-      'Write 2-3 substantial paragraphs for the summary. Chapters are optional unless clear topic shifts exist.',
-    medium:
-      'Write 3-4 paragraphs for the summary. Extract 3-6 distinct chapters.',
+    short: 'Write 2-3 substantial paragraphs for the summary. Chapters are optional unless clear topic shifts exist.',
+    medium: 'Write 3-4 paragraphs for the summary. Extract 3-6 distinct chapters.',
     long: 'Write a comprehensive 4-5 paragraph summary. Extract 6-12 distinct, navigable chapters.',
   }[category];
 
-  // We explicitly instruct the model to output the JSON values in the target language.
   return `You are a world-class executive analyst. Your task is to analyze the provided video transcript and produce highly structured, actionable insights.
 
   CRITICAL DIRECTIVES:
@@ -177,5 +159,5 @@ function buildIntelligentPrompt(
   4. Accuracy: Do not hallucinate facts. Only extract information present in the transcript.
   
   Transcript Data:
-  ${transcript.slice(0, 800000)}`; // Safeguard slice, though 2.5 Flash can handle much more.
+  ${transcript.slice(0, 800000)}`;
 }

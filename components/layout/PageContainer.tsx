@@ -1,32 +1,38 @@
-  import React from 'react';
-  import { SafeAreaView, ViewProps, Platform, StatusBar } from 'react-native';
-  import { cn } from '../../lib/utils';
+import React from 'react';
+import { ViewProps, View, StyleSheet } from 'react-native';
+import { cn } from '../../lib/utils';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-  interface PageContainerProps extends ViewProps {
-    children: React.ReactNode;
-    className?: string;
-    safeAreaTop?: boolean;
-  }
+interface PageContainerProps extends ViewProps {
+  children: React.ReactNode;
+  className?: string;
+  safeAreaTop?: boolean;
+}
 
-  export const PageContainer: React.FC<PageContainerProps> = ({
-    children,
-    className,
-    safeAreaTop = true,
-    ...props
-  }) => {
-    return (
+export const PageContainer: React.FC<PageContainerProps> = ({
+  children,
+  className,
+  safeAreaTop = true,
+  ...props
+}) => {
+  return (
+    <View
+      className={cn('flex-1 bg-[#020205]', className)}
+      style={styles.full}
+      {...props}
+    >
       <SafeAreaView
-        className={cn('flex-1 bg-background', className)}
-        style={{
-          // Handle Android notch padding dynamically if needed, iOS is handled by SafeAreaView
-          paddingTop:
-            Platform.OS === 'android' && safeAreaTop
-              ? StatusBar.currentHeight
-              : 0,
-        }}
-        {...props}
+        style={styles.full}
+        edges={safeAreaTop ? ['top', 'left', 'right'] : ['left', 'right']}
       >
-        {children}
+        <View style={styles.full}>{children}</View>
       </SafeAreaView>
-    );
-  };
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  full: {
+    flex: 1,
+  },
+});

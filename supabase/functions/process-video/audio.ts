@@ -19,17 +19,13 @@ export async function getAudioUrl(
   console.log(`[Audio:START] Resolving ${platform} source: ${videoUrl}`);
 
   if (platform !== 'youtube') {
-    console.warn(
-      `[Audio:WARN] platform '${platform}' is currently outside high-priority logic.`,
-    );
+    console.warn(`[Audio:WARN] platform '${platform}' is currently outside high-priority logic.`);
     return null;
   }
 
   const ytId = extractYouTubeId(videoUrl);
   if (!ytId) {
-    console.error(
-      '[Audio:ERROR] Failed to extract unique identifier from URL.',
-    );
+    console.error('[Audio:ERROR] Failed to extract unique identifier from URL.');
     return null;
   }
 
@@ -57,9 +53,7 @@ export async function getAudioUrl(
           return payload.link;
         }
       }
-      console.warn(
-        `[Audio:UPSTREAM] Premium Node returned status: ${response.status}`,
-      );
+      console.warn(`[Audio:UPSTREAM] Premium Node returned status: ${response.status}`);
     } catch (e: any) {
       console.warn(`[Audio:UPSTREAM] Premium Node failed: ${e.message}`);
     }
@@ -80,8 +74,7 @@ export async function getAudioUrl(
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         },
         body: JSON.stringify({
           url: videoUrl,
@@ -94,23 +87,17 @@ export async function getAudioUrl(
       if (res.ok) {
         const data = await res.json();
         if (data?.url) {
-          console.log(
-            `[Audio:SUCCESS] Stream secured via ${new URL(node).hostname}`,
-          );
+          console.log(`[Audio:SUCCESS] Stream secured via ${new URL(node).hostname}`);
           return data.url;
         }
       }
-      console.warn(
-        `[Audio:SCRAPE] Node ${node} rejected request or is rate-limited.`,
-      );
+      console.warn(`[Audio:SCRAPE] Node ${node} rejected request or is rate-limited.`);
     } catch (error: any) {
       console.warn(`[Audio:SCRAPE] Connection to ${node} timed out or failed.`);
       continue;
     }
   }
 
-  console.error(
-    '[Audio:FATAL] All available audio resolution layers have been exhausted.',
-  );
+  console.error('[Audio:FATAL] All available audio resolution layers have been exhausted.');
   return null;
 }
