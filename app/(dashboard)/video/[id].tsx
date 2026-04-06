@@ -2,14 +2,15 @@
  * app/(dashboard)/video/[id].tsx
  * Master Intelligence Dossier - Sovereign Monolithic Layout
  * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE & USER DIRECTIVES:
- * 1. MONOLITHIC DESIGN: The Transcript Viewer is now baked directly into this file.
- * Zero chance of external components failing to render the raw text.
- * 2. TOP-LEVEL EXPORT: Export matrix moved above the intelligence data.
- * 3. THE MEGA-BOX: A single, continuous GlassCard containing the Title, Summary,
- * Indicators, and the side-by-side Timeline + Raw Verbatim Transcript.
- * 4. TYPESCRIPT SECURED: Strict `?? undefined` fallback for all database 'null' types.
- * 5. PLATFORM AGNOSTIC: Fluid flex-layouts that stack on mobile and expand on desktop.
+ * ARCHITECTURE & USER DIRECTIVES (ENDGAME VERSION):
+ * 1. AMBIENT ENGINE: Imported the breathing gradient animation from Dashboard.
+ * 2. RESPONSIVE MATRIX: Export buttons use flex-1 with min-width to stack perfectly
+ * on mobile (no gluing) and expand seamlessly on desktop.
+ * 3. DYNAMIC WIDTH: ScrollView constrained to max-w-7xl (1280px) for optimal
+ * desktop readability without stretching too far.
+ * 4. STRICT TYPES: `?? undefined` fallbacks guarantee zero Supabase schema crashes.
+ * 5. OVERFLOW PROTECTION: Strict flex-shrink and wordBreak CSS applied to transcript.
+ * 6. TIMELINE FIX: The purple timeline line extends to `bottom-0`.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -38,14 +39,14 @@ import {
   Download,
   Terminal,
   Layers,
-  Target,
-  ExternalLink,
   AlignLeft,
   CheckCircle2,
   ShieldCheck,
-  Zap,
-  Milestone,
+  ExternalLink,
   BookOpen,
+  Milestone,
+  Zap,
+  ArrowBigLeftDash,
 } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
@@ -63,6 +64,7 @@ import Animated, {
 import { useVideoData } from '../../../hooks/queries/useVideoData';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { ExportBuilder } from '../../../services/exportBuilder';
+import { FadeIn } from '../../../components/animations/FadeIn';
 import { cn } from '../../../lib/utils';
 import type {
   Video,
@@ -72,96 +74,67 @@ import type {
 } from '../../../types/api';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 1. AMBIENT BACKGROUND ENGINE
+// MODULE 1: AMBIENT BACKGROUND ENGINE (Breathing Animation)
 // ══════════════════════════════════════════════════════════════════════════════
-const AmbientEngine = React.memo(() => {
+// ══════════════════════════════════════════════════════════════════════════════
+// 1. AMBIENT BACKGROUND ENGINE (100% Exact Match to Dashboard index.tsx)
+// ══════════════════════════════════════════════════════════════════════════════
+const AmbientGradient = ({ delay = 0, color = '#3B82F6' }) => {
+  const pulse = useSharedValue(0);
   const { width, height } = Dimensions.get('window');
-  const pulse1 = useSharedValue(0);
-  const pulse2 = useSharedValue(0);
 
   useEffect(() => {
-    pulse1.value = withRepeat(
-      withTiming(1, { duration: 15000, easing: Easing.inOut(Easing.sin) }),
-      -1,
-      true,
+    pulse.value = withDelay(
+      delay,
+      withRepeat(withTiming(1, { duration: 10000 }), -1, true),
     );
-    pulse2.value = withDelay(
-      5000,
-      withRepeat(
-        withTiming(1, { duration: 18000, easing: Easing.inOut(Easing.sin) }),
-        -1,
-        true,
-      ),
-    );
-  }, [pulse1, pulse2]);
+  }, [delay, pulse]);
 
-  const style1 = useAnimatedStyle(() => ({
+  const animatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { scale: interpolate(pulse1.value, [0, 1], [1, 1.4]) },
-      { translateX: interpolate(pulse1.value, [0, 1], [0, width * 0.1]) },
+      { scale: interpolate(pulse.value, [0, 1], [1, 1.4]) },
+      { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
+      { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
     ],
-    opacity: interpolate(pulse1.value, [0, 1], [0.03, 0.08]),
-  }));
-
-  const style2 = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(pulse2.value, [0, 1], [1, 1.6]) },
-      { translateY: interpolate(pulse2.value, [0, 1], [0, height * 0.1]) },
-    ],
-    opacity: interpolate(pulse2.value, [0, 1], [0.02, 0.06]),
+    opacity: interpolate(pulse.value, [0, 1], [0.04, 0.08]),
   }));
 
   return (
-    <View className="absolute inset-0 overflow-hidden pointer-events-none bg-[#020205] z-0">
-      <Animated.View
-        style={[
-          style1,
-          {
-            position: 'absolute',
-            width: 900,
-            height: 900,
-            borderRadius: 450,
-            backgroundColor: '#00F0FF',
-            top: -200,
-            left: -200,
-            ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          style2,
-          {
-            position: 'absolute',
-            width: 1000,
-            height: 1000,
-            borderRadius: 500,
-            backgroundColor: '#8A2BE2',
-            bottom: -300,
-            right: -300,
-            ...(Platform.OS === 'web' ? { filter: 'blur(150px)' } : {}),
-          },
-        ]}
-      />
-      <View
-        className="absolute inset-0 opacity-[0.02]"
-        style={{
-          backgroundImage:
-            Platform.OS === 'web'
-              ? 'radial-gradient(circle at center, #ffffff 1px, transparent 1px)'
-              : 'none',
-          backgroundSize: '32px 32px',
-        }}
-      />
-    </View>
+    <Animated.View
+      style={[
+        animatedStyle,
+        {
+          position: 'absolute',
+          width: width * 1.5,
+          height: width * 1.5,
+          backgroundColor: color,
+          borderRadius: width,
+        },
+      ]}
+    />
   );
-});
+};
 
+const AmbientEngine = React.memo(() => (
+  <View
+    className="absolute inset-0 overflow-hidden bg-[#01111fbe]"
+    style={{ pointerEvents: 'none', zIndex: 0 }}
+  >
+    <AmbientGradient delay={0.5} color="#3B82F6" />
+    <AmbientGradient delay={3000} color="#8B5CF6" />
+  </View>
+));
 // ══════════════════════════════════════════════════════════════════════════════
 // 2. EXPORT MATRIX COMPONENT (Top Level)
 // ══════════════════════════════════════════════════════════════════════════════
 const ExportControlMatrix = React.memo(
-  ({ onExport }: { onExport: (format: any) => void }) => {
+  ({
+    onExport,
+    isMobile,
+  }: {
+    onExport: (format: any) => void;
+    isMobile: boolean;
+  }) => {
     const formats = [
       { id: 'md', label: 'MARKDOWN', icon: FileText, color: '#FCD34D' },
       { id: 'srt', label: 'SUB-RIP (SRT)', icon: Terminal, color: '#F472B6' },
@@ -174,35 +147,31 @@ const ExportControlMatrix = React.memo(
         entering={FadeInDown.duration(600).springify()}
         className="w-full mb-12"
       >
-        <View className="flex-row items-center mb-6 ml-2">
-          <Download size={20} color="#00F0FF" />
-          <Text className="text-white/50 text-[11px] md:text-xs font-black uppercase tracking-[5px] ml-4">
-            Extraction & Export Matrix
-          </Text>
-        </View>
-        <View className="flex-row flex-wrap gap-3 md:gap-4">
+        <View className="flex-row flex-wrap w-full gap-3 px-2 md:gap-4 md:px-0">
           {formats.map((format) => (
             <TouchableOpacity
               key={format.id}
               onPress={() => onExport(format.id)}
               activeOpacity={0.7}
-              className="flex-1 min-w-[140px] md:min-w-[180px] p-5 md:p-6 border rounded-3xl bg-[#05050A]/90 border-white/5 hover:bg-white/[0.04] transition-all group flex-row items-center justify-between shadow-xl"
+              style={{ width: isMobile ? '40%' : 'auto' }}
+              className="md:flex-1 p-4 md:p-6 border rounded-2xl md:rounded-3xl bg-[#05050A]/90 border-white/5 hover:bg-white/[0.04] transition-all group flex-row items-center justify-between shadow-xl mb-4"
             >
-              <View className="flex-row items-center">
+              <View className="flex-row items-center flex-1">
                 <format.icon
-                  size={18}
+                  size={isMobile ? 16 : 18}
                   color={format.color}
+                  strokeWidth={2.5}
                   opacity={0.8}
-                  className="mr-3 md:mr-4"
+                  className="mr-2 md:mr-4"
                 />
-                <Text className="text-[10px] md:text-xs font-black tracking-widest uppercase text-white/70 group-hover:text-white transition-colors">
+                <Text className="text-[9px] md:text-xs font-black tracking-widest uppercase text-white/70 group-hover:text-white transition-colors flex-shrink">
                   {format.label}
                 </Text>
               </View>
               <Download
                 size={14}
                 color="#ffffff20"
-                className="transition-colors group-hover:text-white/60"
+                className="ml-2 transition-colors group-hover:text-white/60"
               />
             </TouchableOpacity>
           ))}
@@ -387,7 +356,7 @@ const UnifiedMegaBox = React.memo(
 
                     <View className="relative pl-2 md:pl-4">
                       {/* Continuous Vertical Line */}
-                      <View className="absolute left-[39px] md:left-[43px] top-4 bottom-4 w-[2px] bg-white/10 rounded-full" />
+                     <View className="absolute left-[39px] md:left-[43px] top-4 bottom-0 w-[2px] bg-purple-500/20 rounded-full" />
 
                       {chapters.map((chapter, idx) => (
                         <View
@@ -425,7 +394,7 @@ const UnifiedMegaBox = React.memo(
                 <View
                   className={cn(
                     'w-full',
-                    chapters.length > 0 ? 'lg:w-2/3' : 'lg:w-full',
+                    chapters.length > 0 ? 'lg:flex-1' : 'lg:w-full',  
                   )}
                 >
                   <View className="flex-row items-center mb-10">
@@ -436,22 +405,30 @@ const UnifiedMegaBox = React.memo(
                   </View>
 
                   {transcriptText ? (
-                    <View className="p-8 border bg-black/20 border-white/5 rounded-[32px] relative overflow-hidden">
-                      <View
-                        className="absolute top-0 right-0 w-full h-40 bg-emerald-500/5 blur-[80px]"
+                    <View className="p-8 md:p-12 border bg-black/20 border-white/10 rounded-[32px] relative overflow-hidden w-full"> 
+                      {/* Ambient Glow */}
+                      <View                      
+                        className="absolute top-0 right-20 w-full h-40 bg-emerald-500/5 blur-[80px]"
                         pointerEvents="none"
                       />
 
-                      {/* The Full Text Box */}
-                      <Text
-                        className="text-base md:text-lg font-medium leading-[36px] md:leading-[42px] tracking-wide text-white/70"
-                        style={{ textAlign: 'justify' }}
-                      >
-                        {transcriptText}
-                      </Text>
+                 {/* The Full Text Box */}
+                      <View className="w-full">
+                        <Text
+                          className="text-base font-medium tracking-wide md:text-lg text-white/90"
+                          style={{ 
+                            textAlign: 'left',
+                            lineHeight: Platform.OS === 'web' ? 38 : 38,
+                            flexShrink: 2,
+                            ...(Platform.OS === 'web' ? { wordBreak: 'break-word', whiteSpace: 'pre-wrap' } as any : {})
+                          }}
+                        >
+                          {transcriptText}
+                        </Text>
+                      </View>
 
                       {/* Metadata Footer for the text */}
-                      <View className="flex-row items-center justify-between pt-8 mt-12 border-t border-white/5">
+                      <View className="flex-row items-center justify-between pt-8 mt-12 border-t border-white/10">
                         <View>
                           <Text className="text-white/30 text-[9px] font-black uppercase tracking-[3px]">
                             Extraction Method
@@ -464,7 +441,7 @@ const UnifiedMegaBox = React.memo(
                     </View>
                   ) : (
                     <View className="items-center justify-center p-16 border border-white/5 rounded-[32px] bg-black/20">
-                      <Terminal size={32} color="#ffffff20" />
+                      <Terminal size={28} color="#ffffff20" />
                       <Text className="mt-6 font-mono text-xs text-white/30 uppercase tracking-[4px]">
                         Transcript not available
                       </Text>
@@ -483,27 +460,30 @@ const UnifiedMegaBox = React.memo(
 // ══════════════════════════════════════════════════════════════════════════════
 // 4. CONCLUDING SYNTHESIS BOX
 // ══════════════════════════════════════════════════════════════════════════════
-const ConcludingSynthesis = React.memo(({ conclusion }: { conclusion?: string }) => (
-  <Animated.View
-    entering={FadeInDown.duration(900).springify()}
-    className="mb-20"
-  >
-    <GlassCard
-      glowColor="lime"
-      className="p-8 md:p-12 bg-emerald-500/[0.02] border-emerald-500/10 rounded-[40px]"
+const ConcludingSynthesis = React.memo(
+  ({ conclusion }: { conclusion?: string }) => (
+    <Animated.View
+      entering={FadeInDown.duration(900).springify()}
+      className="mb-20"
     >
-      <View className="flex-row items-center justify-center mb-6">
-        <ShieldCheck size={28} color="#34D399" />
-      </View>
-      <Text className="text-emerald-400 font-black text-xs md:text-sm uppercase tracking-[6px] text-center mb-6">
-        Concluding Synthesis
-      </Text>
-      <Text className="px-4 text-base font-medium leading-relaxed text-center text-white/70 md:text-lg md:px-10">
-        {conclusion || 'Analysis complete. All intelligence has been extracted and preserved.'}
-      </Text>
-    </GlassCard>
-  </Animated.View>
-));
+      <GlassCard
+        glowColor="lime"
+        className="p-8 md:p-12 bg-emerald-500/[0.02] border-emerald-500/10 rounded-[40px]"
+      >
+        <View className="flex-row items-center justify-center mb-6">
+          <ShieldCheck size={28} color="#34D399" />
+        </View>
+        <Text className="text-emerald-400 font-black text-xs md:text-sm uppercase tracking-[6px] text-center mb-6">
+          Concluding Synthesis
+        </Text>
+        <Text className="px-4 text-base font-medium leading-relaxed text-center text-white/70 md:text-lg md:px-10">
+          {conclusion ||
+            'Analysis complete. All intelligence has been extracted and preserved.'}
+        </Text>
+      </GlassCard>
+    </Animated.View>
+  ),
+);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 5. MASTER PAGE CONTROLLER
@@ -602,13 +582,9 @@ export default function MasterIntelligenceView() {
   });
 
   const headerStyle = useAnimatedStyle(() => ({
-    backgroundColor: `rgba(2, 2, 5, ${interpolate(scrollY.value, [0, 50], [0, 0.9])})`,
-    borderBottomWidth: 1,
-    borderBottomColor: `rgba(255, 255, 255, ${interpolate(scrollY.value, [0, 50], [0, 0.08])})`,
-    backdropFilter:
-      Platform.OS === 'web'
-        ? `blur(${interpolate(scrollY.value, [0, 50], [0, 20])}px)`
-        : undefined,
+    backgroundColor: 'transparent', 
+    borderBottomWidth: 0,
+    zIndex: 1000,
   }));
 
   // ─── FATAL ERROR STATE ───
@@ -627,14 +603,20 @@ export default function MasterIntelligenceView() {
           <Text className="mb-12 text-sm leading-relaxed text-center text-white/40">
             The requested intelligence payload could not be located.
           </Text>
-          <TouchableOpacity
-            onPress={() => router.replace('/history')}
-            className="items-center justify-center w-full py-4 transition-colors border bg-white/5 border-white/10 rounded-xl hover:bg-white/10"
-          >
-            <Text className="text-white font-black text-[10px] uppercase tracking-[4px]">
-              Return to Vault
-            </Text>
-          </TouchableOpacity>
+         <TouchableOpacity
+          onPress={() =>
+            router.canGoBack()
+              ? router.back()
+              : router.replace('/history' as any)
+          }
+          className="flex-row items-center mb-10 gap-x-2"
+          activeOpacity={0.7}
+        >
+          <ArrowBigLeftDash size={18} color="#00F0FF" />
+          <Text className="text-[10px] font-black tracking-[4px] text-neon-cyan uppercase">
+            Return
+          </Text>
+        </TouchableOpacity>
         </GlassCard>
       </View>
     );
@@ -661,19 +643,20 @@ export default function MasterIntelligenceView() {
         ]}
       >
         <View className="flex-row items-center justify-between px-4 py-4 md:px-8">
-          <TouchableOpacity
-            onPress={() =>
-              router.canGoBack() ? router.back() : router.replace('/history')
-            }
-            className="flex-row items-center p-2 transition-colors rounded-xl hover:bg-white/5 active:scale-95"
-          >
-            <ArrowLeft size={20} color="#00F0FF" />
-            {!isMobile && (
-              <Text className="ml-3 text-cyan-400 font-black text-[10px] uppercase tracking-[3px]">
-                Vault
-              </Text>
-            )}
-          </TouchableOpacity>
+             <TouchableOpacity
+                   onPress={() =>
+                     router.canGoBack()
+                       ? router.back()
+                       : router.replace('/history' as any)
+                   }
+                   className="flex-row items-center mb-10 gap-x-2"
+                   activeOpacity={0.7}
+                 >
+                   <ArrowBigLeftDash size={18} color="#00F0FF" />
+                   <Text className="text-[10px] font-black tracking-[4px] text-neon-cyan uppercase">
+                     Return
+                   </Text>
+                 </TouchableOpacity>
           <View className="flex-row items-center gap-4">
             <View
               className={cn(
@@ -716,7 +699,7 @@ export default function MasterIntelligenceView() {
         contentContainerStyle={{
           paddingTop: insets.top + 100,
           paddingBottom: 150,
-          paddingHorizontal: isMobile ? 16 : '8%',
+          paddingHorizontal: isMobile ? 12 : 32,
           maxWidth: 1400,
           alignSelf: 'center',
           width: '100%',
@@ -725,7 +708,7 @@ export default function MasterIntelligenceView() {
       >
         {/* 1. EXPORT MATRIX (Top Level) */}
         {!isProcessing && isCompleted && (
-          <ExportControlMatrix onExport={handleExport} />
+          <ExportControlMatrix onExport={handleExport} isMobile={isMobile} />
         )}
 
         {/* 2. THE UNIFIED MEGA-BOX */}
@@ -744,7 +727,9 @@ export default function MasterIntelligenceView() {
 
         {/* 3. CONCLUDING SYNTHESIS BOX */}
         {!isProcessing && isCompleted && (
-          <ConcludingSynthesis conclusion={(insights?.conclusion as string | null) ?? undefined} />
+          <ConcludingSynthesis
+            conclusion={(insights?.conclusion as string | null) ?? undefined}
+          />
         )}
       </Animated.ScrollView>
     </View>

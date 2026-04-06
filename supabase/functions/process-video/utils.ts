@@ -4,9 +4,9 @@
  * ----------------------------------------------------------------------------
  * FEATURES:
  * 1. DATABASE SAFETY: Null-byte scrubbing (\u0000) prevents Postgres crashes.
- * 2. MULTI-CONTEXT IDENTIFIER: Advanced regex for all YouTube variants (Shorts, Live, Embeds).
- * 3. METRIC ANALYTICS: High-precision duration and reading time calculations.
- * 4. TYPE SAFETY: Strictly defined interfaces for JSON3 and VTT parsing.
+ * 2. HTML DECODING: Annihilates &#39;, &quot;, and [music] tags from RapidAPI.
+ * 3. MULTI-CONTEXT IDENTIFIER: Advanced regex for all YouTube variants.
+ * 4. METRIC ANALYTICS: High-precision duration and reading time calculations.
  */
 
 export interface Json3Segment {
@@ -39,15 +39,20 @@ export function estimateReadingTime(wordCount: number): number {
 }
 
 /**
- * PostgreSQL String Sanitizer.
- * MANDATORY: PostgreSQL driver crashes on the null character (\u0000).
- * Scrubs illegal bytes and normalizes whitespace for optimal storage.
+ * PostgreSQL & API String Sanitizer.
+ * CRITICAL: Scrubs illegal bytes, decodes HTML entities, and removes [music] tags.
  */
 export function sanitizeForDb(text: string | null | undefined): string {
   if (!text) return '';
   return text
-    .replace(/\u0000/g, '') // Remove illegal binary bytes
-    .replace(/\s+/g, ' ')   // Collapse whitespace clusters
+    .replace(/\u0000/g, '') // Remove illegal binary bytes for Postgres
+    .replace(/&#39;/g, "'") // Decode apostrophes
+    .replace(/&quot;/g, '"') // Decode quotes
+    .replace(/&amp;/g, '&') // Decode ampersands
+    .replace(/&lt;/g, '<') // Decode less than
+    .replace(/&gt;/g, '>') // Decode greater than
+    .replace(/\[music\]/gi, '') // Remove annoying audio tags
+    .replace(/\s+/g, ' ') // Collapse whitespace clusters
     .trim();
 }
 
@@ -83,7 +88,6 @@ export function extractYouTubeId(url: string | null | undefined): string | null 
 
 /**
  * YouTube JSON3 Event Decoder.
- * Parses undocumented internal event streams into normalized text safely.
  */
 export function parseJson3(jsonData: unknown): string | null {
   if (!jsonData) return null;
@@ -97,7 +101,6 @@ export function parseJson3(jsonData: unknown): string | null {
       return null;
     }
 
-    // Memory-efficient reduction for massive transcripts
     const processedText = data.events
       .filter((event: Json3Event) => event.segs && Array.isArray(event.segs))
       .reduce((acc: string[], event: Json3Event) => {
@@ -142,12 +145,10 @@ export function stripVtt(vttContent: string): string {
 
 /**
  * Semantic Keyword Analytics.
- * Generates frequency-based metadata for automated tagging.
  */
 export function getKeywordDensity(text: string, limit = 10): string[] {
   if (!text) return [];
 
-  // Filter for words > 4 chars to ignore stop-words
   const words = text.toLowerCase().match(/\b(\w{5,})\b/g);
   if (!words) return [];
 

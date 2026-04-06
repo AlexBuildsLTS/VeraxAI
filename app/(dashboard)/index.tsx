@@ -376,7 +376,7 @@ export default function DashboardScreen() {
   const displayError = (mutationError as Error)?.message || videoData?.error_message;
 
   return (
-    <SafeAreaView className="flex-1 bg-[#05050A]">
+    <SafeAreaView className="flex-1 bg-[#01111fbe]">
       <View
         className="absolute inset-0 overflow-hidden"
         style={{ pointerEvents: 'none' }}

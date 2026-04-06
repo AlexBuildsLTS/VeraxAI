@@ -3,14 +3,14 @@
  * Sovereign Interactive Intelligence Viewer
  * ----------------------------------------------------------------------------
  * FEATURES:
- * 1. SIDE-BY-SIDE ARCHITECTURE: No tabs. Timeline and Raw Text are displayed simultaneously.
- * 2. VERTICAL LINE CHART: Connects chapter nodes with a continuous tracking line.
- * 3. MASSIVE DATA HANDLING: Optimized Text rendering for 10,000+ word verbatim transcripts.
+ * 1. SIDE-BY-SIDE ARCHITECTURE: Timeline and Raw Text are displayed simultaneously.
+ * 2. VERTICAL LINE CHART: Connects chapter nodes with a continuous tracking line to the absolute bottom.
+ * 3. MASSIVE DATA HANDLING: Optimized Text rendering with strict overflow protection.
  * 4. STRICT TYPES: Accepts exact undefined/string types to satisfy Supabase schema.
  */
 
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Platform } from 'react-native';
 import { Chapter } from '../../types/api';
 import { cn } from '../../lib/utils';
 import { Milestone, Zap, Terminal } from 'lucide-react-native';
@@ -44,9 +44,10 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
               </Text>
             </View>
 
-            <View className="relative pl-2 md:pl-4">
-              {/* Continuous Vertical Line */}
-              <View className="absolute left-[41px] md:left-[45px] top-6 bottom-6 w-[2px] bg-white/10 rounded-full" />
+            {/* CRITICAL FIX: Added pb-8 so the absolute line can reach the bottom cleanly */}
+            <View className="relative pb-8 pl-2 md:pl-4">
+              {/* Continuous Vertical Line stretching to bottom-0 */}
+              <View className="absolute left-[41px] md:left-[45px] top-6 bottom-0 w-[2px] bg-white/10 rounded-full" />
 
               {chapters.map((chapter, idx) => (
                 <View
@@ -84,7 +85,7 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
         <FadeIn
           delay={300}
           className={cn(
-            'w-full',
+            'w-full flex-1',
             hasChapters ? 'lg:w-3/5 xl:w-2/3' : 'lg:w-full',
           )}
         >
@@ -95,23 +96,44 @@ export const TranscriptViewer: React.FC<TranscriptViewerProps> = ({
             </Text>
           </View>
 
-          {transcriptText ? (
-            <View className="p-8 md:p-12 border bg-[#05050A]/80 border-white/5 rounded-[40px] relative overflow-hidden shadow-2xl">
-              {/* Background ambient glow inside the text box */}
-              <View
-                className="absolute top-0 right-0 w-full h-40 bg-emerald-500/5 blur-[80px]"
-                pointerEvents="none"
-              />
+         {transcriptText ? (
+            <View className="p-6 md:p-12 border bg-[#05050A]/80 border-white/5 rounded-[40px] relative shadow-2xl w-full">
+              <View className="absolute top-0 right-0 w-full h-40 bg-emerald-500/5 blur-[80px]" pointerEvents="none" />
 
+              {/* SURGICAL FIX: Removed flex-1 wrapper. Added raw CSS to force word wrapping so it never stretches the screen */}
               <Text
-                className="text-base md:text-lg font-medium leading-[36px] md:leading-[42px] tracking-wide text-white/80"
-                style={{ textAlign: 'justify' }}
+                className="w-full text-base font-medium tracking-wide md:text-lg text-white/80"
+                style={{
+                  lineHeight: Platform.OS === 'web' ? 42 : 36,
+                  textAlign: 'justify',
+                  ...(Platform.OS === 'web' ? { wordWrap: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' } as any : {})
+                }}
               >
                 {transcriptText}
               </Text>
 
+              {/* CRITICAL FIX: Overflow hidden wrapper to strictly contain the text on Web/Mobile */}
+              <View className="flex-1 w-full overflow-hidden">
+                <Text
+                  className="flex-shrink w-full text-base font-medium tracking-wide md:text-lg leading-[36px] md:leading-[42px] text-white/80"
+                  style={{
+                    textAlign: 'justify',
+                    flexShrink: 1,
+                    ...(Platform.OS === 'web'
+                      ? ({
+                          wordBreak: 'break-word',
+                          whiteSpace: 'pre-wrap',
+                        } as any)
+                      : {}),
+                  }}
+                >
+                  {transcriptText}
+                </Text>
+              </View>
+              
               {/* Technical Footer */}
-              <View className="flex-row items-center justify-between pt-10 mt-12 border-t border-white/5">
+
+<View className="flex-row items-center justify-between w-full pt-10 mt-12 overflow-hidden border-t border-white/5">
                 <View>
                   <Text className="text-white/30 text-[9px] md:text-[10px] font-black uppercase tracking-[3px]">
                     Decryption Node
