@@ -1,20 +1,25 @@
 /**
  * app/_layout.tsx
  * ══════════════════════════════════════════════════════════════════════════════
- * Root routing topology and global provider wrapper.
- * Enforces the NeonDarkTheme across the React Navigation layer to prevent
- * white flashes during nested navigator transitions.
+ * Root routing topology, global provider wrapper, and Premium Splash Handoff.
+ * Uses expo-image to render a transparent SVG/GIF over the dark theme.
  */
 import 'react-native-gesture-handler';
 import '../global.css';
+
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Animated, StyleSheet, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useAuthStore } from '../store/useAuthStore';
-import { View, ActivityIndicator } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
 import { useColorScheme } from 'nativewind';
+import * as SplashScreen from 'expo-splash-screen';
+import { Image } from 'expo-image';
+import { useAuthStore } from '../store/useAuthStore';
 import { ThemeProvider, DarkTheme } from '@react-navigation/native';
+
+// 1. Freeze the static image immediately so it doesn't flash
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const NeonDarkTheme = {
   ...DarkTheme,
@@ -29,28 +34,35 @@ const NeonDarkTheme = {
 
 export default function RootLayout() {
   const { setColorScheme } = useColorScheme();
-  
-  // 1. Pull session directly from the store instead of making a new listener
+
+  // Auth & Routing State
   const { initialize, isLoading, session } = useAuthStore();
   const segments = useSegments();
   const router = useRouter();
 
-  // 2. Safely scope the QueryClient to the component lifecycle
+  // Query Client
   const [queryClient] = useState(() => new QueryClient());
 
+  // Splash State - Auto-finish if on Web!
+  const [splashFinished, setSplashFinished] = useState(Platform.OS === 'web');
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  // 2. Theme & Auth Initialization
   useEffect(() => {
     setColorScheme('dark');
   }, [setColorScheme]);
 
   useEffect(() => {
-    // 3. CORRECTLY capture and return the cleanup function to prevent memory leaks
     const cleanup = initialize();
     return cleanup;
   }, [initialize]);
 
-  // 4. Clean routing logic based purely on Zustand state
+  // 3. Routing Logic & Splash Handoff Trigger
   useEffect(() => {
     if (isLoading) return;
+
+    // Once auth is loaded, hide the static PNG. The transparent SVG is now showing.
+    SplashScreen.hideAsync().catch(() => {});
 
     const inAuthGroup = segments[0] === '(auth)';
 
@@ -61,28 +73,71 @@ export default function RootLayout() {
     }
   }, [session, isLoading, segments, router]);
 
+  // 4. Trigger the fade out of the transparent SVG
+  useEffect(() => {
+    if (Platform.OS === 'web') return; // Do not run animation on web
+
+    if (!isLoading) {
+      // Let the SVG/GIF play for 1.5 seconds, then fade it out
+      setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0, // Fade opacity to 0
+          duration: 500, // Buttery smooth half-second fade
+          useNativeDriver: true,
+        }).start(() => {
+          setSplashFinished(true); // Unmount overlay
+        });
+      }, 1500);
+    }
+  }, [isLoading]);
+
+  // Prevent rendering the actual UI tree until Auth is resolved
   if (isLoading) {
-    return (
-      <View className="flex-1 bg-[#020205] items-center justify-center">
-        <ActivityIndicator size="large" color="#00F0FF" />
-      </View>
-    );
+    return <View style={{ flex: 1, backgroundColor: '#020205' }} />;
   }
 
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={NeonDarkTheme}>
         <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: '#020205' },
-          }}
-        >
-          <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
-          <Stack.Screen name="(dashboard)" options={{ animation: 'fade' }} />
-        </Stack>
+
+        <View style={{ flex: 1, backgroundColor: '#020205' }}>
+          {/* YOUR ACTUAL APP ROUTING */}
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: '#020205' },
+            }}
+          >
+            <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
+            <Stack.Screen name="(dashboard)" options={{ animation: 'fade' }} />
+          </Stack>
+
+          {/* THE TRANSPARENT SVG OVERLAY (Native Only) */}
+          {Platform.OS !== 'web' && !splashFinished && (
+            <Animated.View
+              style={[styles.splashOverlay, { opacity: fadeAnim }]}
+              pointerEvents="none"
+            >
+              <Image
+                source={require('../assets/favicon.png')}
+                style={{ width: 150, height: 150 }}
+                contentFit="contain"
+              />
+            </Animated.View>
+          )}
+        </View>
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  splashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#020205',
+    zIndex: 99999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

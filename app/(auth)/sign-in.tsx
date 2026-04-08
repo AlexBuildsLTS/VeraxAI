@@ -1,11 +1,9 @@
 /**
- * sign-in.tsx — Unified Authentication Screen
- * Dual-mode: Sign In / Create Account.
- * Integrates with Supabase Auth via useAuthStore (Zustand).
- * Features Glassmorphism cards and interactive social links.
+ * app/(auth)/sign-in.tsx
+ * Unified Authentication Screen
  */
 
-import React, { useState, memo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, memo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,8 +16,6 @@ import {
   StyleSheet,
   Image,
   Dimensions,
-  Linking,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -39,55 +35,66 @@ import {
   Github,
   Twitter,
   Youtube,
-  ChevronRight,
 } from 'lucide-react-native';
 import Animated, {
   FadeInDown,
   FadeInRight,
+  FadeOutUp,
+  Layout,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
   withTiming,
   interpolate,
   withDelay,
+  FadeInUp,
+  FadeOutDown,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/Button';
 import { AuthValidator } from '../../utils/validators/auth';
 import { supabase } from '../../lib/supabase/client';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 
-/* ── Static Assets ─────────────────────────────────────────────────────────── */
+WebBrowser.maybeCompleteAuthSession();
+
 const APP_ICON = require('../../assets/icon.png');
 
-/* ── Auth Mode Type ────────────────────────────────────────────────────────── */
 type AuthMode = 'sign-in' | 'sign-up';
 
-/* ── Bento Feature Cards ───────────────────────────────────────────────────── */
-type BentoItem = { icon: any; title: string; desc: string; color: string };
-
-const BENTO_ITEMS: BentoItem[] = [
+const BENTO_ITEMS = [
   {
     icon: Zap,
     title: 'Lightning Engine',
     desc: 'Process massive media payloads with sub-second latency.',
-    color: '#00F0FF', // Cyan
+    color: '#00F0FF',
   },
   {
     icon: Brain,
     title: 'Neural Analysis',
     desc: 'Semantic extraction via Anthropic Claude models.',
-    color: '#8A2BE2', // Purple
+    color: '#8A2BE2',
   },
   {
     icon: Globe,
     title: 'Global Nodes',
     desc: 'Access your transcripts from any authenticated endpoint.',
-    color: '#00F0FF', // Cyan
+    color: '#00F0FF',
   },
 ];
 
-/* ── Ambient Background Orb ────────────────────────────────────────────────── */
+function mapAuthError(errorMessage: string): string {
+  if (errorMessage.includes('Invalid login credentials'))
+    return 'Incorrect email or password.';
+  if (errorMessage.includes('User already registered'))
+    return 'An account with this email already exists.';
+  if (errorMessage.includes('Password should be at least'))
+    return 'Password does not meet security requirements.';
+  return errorMessage;
+}
+
 const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
   const pulse = useSharedValue(0);
   const { width, height } = Dimensions.get('window');
@@ -105,7 +112,7 @@ const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
       { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
       { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
     ],
-    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.09]),
+    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.08]),
   }));
 
   return (
@@ -118,14 +125,13 @@ const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
           height: 600,
           backgroundColor: color,
           borderRadius: 300,
-          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
+          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' as any } : {}),
         },
       ]}
     />
   );
 };
 
-/* ── Password Strength Calculator ──────────────────────────────────────────── */
 const getPasswordStrength = (password: string) => {
   let score = 0;
   if (password.length >= 8) score++;
@@ -140,17 +146,12 @@ const getPasswordStrength = (password: string) => {
   return { score, label: 'STRONG', color: '#32FF00' };
 };
 
-/* ══════════════════════════════════════════════════════════════════════════════
- * MAIN SCREEN — SignInScreen
- * ══════════════════════════════════════════════════════════════════════════════ */
 export default function SignInScreen() {
   const { signInWithPassword, signUp } = useAuthStore();
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
 
-  /* ── Form State ──────────────────────────────────────────────────────────── */
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -159,17 +160,16 @@ export default function SignInScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [message, setMessage] = useState<{
     type: 'error' | 'success';
     text: string;
   } | null>(null);
 
-  /* ── Unified Action Handler ──────────────────────────────────────────────── */
   const handleAction = useCallback(async () => {
     setMessage(null);
     const trimmedEmail = email.trim();
 
-    // Common Validation
     if (!AuthValidator.isValidEmail(trimmedEmail)) {
       return setMessage({
         type: 'error',
@@ -180,51 +180,45 @@ export default function SignInScreen() {
     setLoading(true);
 
     if (authMode === 'sign-in') {
-      // Sign In Logic
       const { error } = await signInWithPassword(trimmedEmail, password);
       if (error) {
-        setMessage({ type: 'error', text: error });
+        setMessage({ type: 'error', text: mapAuthError(error) });
       } else {
         router.replace('/(dashboard)');
       }
     } else {
-      // Sign Up Logic
-      if (!fullName.trim())
-        return (
-          setMessage({ type: 'error', text: 'Full name is required.' }),
-          setLoading(false)
-        );
-      if (password.length < 8)
-        return (
-          setMessage({
-            type: 'error',
-            text: 'Password must be at least 8 characters.',
-          }),
-          setLoading(false)
-        );
-      if (password !== confirmPassword)
-        return (
-          setMessage({ type: 'error', text: 'Passwords do not match.' }),
-          setLoading(false)
-        );
-      if (!agreedToTerms)
-        return (
-          setMessage({
-            type: 'error',
-            text: 'You must accept the Terms of Service.',
-          }),
-          setLoading(false)
-        );
+      if (!fullName.trim()) {
+        setLoading(false);
+        return setMessage({ type: 'error', text: 'Full name is required.' });
+      }
+      if (password.length < 8) {
+        setLoading(false);
+        return setMessage({
+          type: 'error',
+          text: 'Password must be at least 8 characters.',
+        });
+      }
+      if (password !== confirmPassword) {
+        setLoading(false);
+        return setMessage({ type: 'error', text: 'Passwords do not match.' });
+      }
+      if (!agreedToTerms) {
+        setLoading(false);
+        return setMessage({
+          type: 'error',
+          text: 'You must accept the Terms of Service.',
+        });
+      }
 
       const { error } = await signUp(trimmedEmail, password, fullName.trim());
       if (error) {
-        setMessage({ type: 'error', text: error });
+        setMessage({ type: 'error', text: mapAuthError(error) });
       } else {
         setMessage({
           type: 'success',
           text: 'Account created. Check your email to verify.',
         });
-        setAuthMode('sign-in'); // Switch back to sign in mode after successful registration
+        setAuthMode('sign-in');
       }
     }
     setLoading(false);
@@ -239,46 +233,49 @@ export default function SignInScreen() {
     signUp,
     router,
   ]);
-  // ── Google OAuth ────────────────────────────────────────────────────────────
-  async function handleGoogleSignIn() {
+
+  const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
+    setMessage(null);
     try {
-      const redirectTo = makeRedirectUri({
-        scheme: 'transcriberpro',
-        path: 'auth/callback',
+      const redirectUri = AuthSession.makeRedirectUri({
+        path: '/auth/callback',
       });
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo,
-          skipBrowserRedirect: true,
-        },
+        options: { redirectTo: redirectUri, skipBrowserRedirect: true },
       });
+
       if (error) throw error;
+
       if (data?.url) {
-        const result = await Linking.openURL(data.url);
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUri,
+        );
         if (result.type === 'success' && result.url) {
           const urlParams = new URL(result.url);
-          const accessToken = urlParams.searchParams.get('access_token');
-          const refreshToken = urlParams.searchParams.get('refresh_token');
+          const accessToken = result.url.match(/access_token=([^&]*)/)?.[1];
+          const refreshToken = result.url.match(/refresh_token=([^&]*)/)?.[1];
           if (accessToken && refreshToken) {
             await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
             });
+            router.replace('/(dashboard)');
           }
         }
       }
     } catch (e: any) {
-      Alert.alert(
-        'Google Sign In Failed',
-        mapAuthError(e.message ?? 'Unknown error'),
-      );
+      setMessage({
+        type: 'error',
+        text: mapAuthError(e.message || 'Google Sign In failed'),
+      });
     } finally {
       setIsGoogleLoading(false);
     }
-  }
-  /* ── Render ──────────────────────────────────────────────────────────────── */
+  };
+
   return (
     <View className="flex-1 bg-[#020205]">
       <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
@@ -302,8 +299,9 @@ export default function SignInScreen() {
                     paddingVertical: 40,
                   }}
                   showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
                 >
-                  <BrandHeader authMode={authMode} />
+                  <BrandHeader />
                   <AuthForm
                     authMode={authMode}
                     setAuthMode={setAuthMode}
@@ -320,7 +318,9 @@ export default function SignInScreen() {
                     agreedToTerms={agreedToTerms}
                     setAgreedToTerms={setAgreedToTerms}
                     loading={loading}
+                    isGoogleLoading={isGoogleLoading}
                     onAction={handleAction}
+                    onGoogleAction={handleGoogleSignIn}
                     message={message}
                   />
                   <SecurityFooter />
@@ -337,9 +337,11 @@ export default function SignInScreen() {
             <ScrollView
               style={styles.mobileScroll}
               contentContainerStyle={styles.mobileScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
             >
               <View style={styles.mobilePane}>
-                <BrandHeader authMode={authMode} />
+                <BrandHeader />
                 <AuthForm
                   authMode={authMode}
                   setAuthMode={setAuthMode}
@@ -356,7 +358,9 @@ export default function SignInScreen() {
                   agreedToTerms={agreedToTerms}
                   setAgreedToTerms={setAgreedToTerms}
                   loading={loading}
+                  isGoogleLoading={isGoogleLoading}
                   onAction={handleAction}
+                  onGoogleAction={handleGoogleSignIn}
                   message={message}
                 />
                 <SecurityFooter />
@@ -373,11 +377,7 @@ export default function SignInScreen() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════════════
- * SUB-COMPONENTS
- * ══════════════════════════════════════════════════════════════════════════════ */
-
-const BrandHeader = memo(({ authMode }: { authMode: AuthMode }) => (
+const BrandHeader = memo(() => (
   <Animated.View
     entering={FadeInDown.duration(1000).springify()}
     style={{ alignItems: 'center', marginBottom: 32 }}
@@ -388,7 +388,7 @@ const BrandHeader = memo(({ authMode }: { authMode: AuthMode }) => (
 BrandHeader.displayName = 'BrandHeader';
 
 const FormField = ({ label, icon: Icon, children }: any) => (
-  <View>
+  <View style={{ marginBottom: 16 }}>
     <Text className="text-neon-cyan font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
       {label}
     </Text>
@@ -416,7 +416,9 @@ const AuthForm = memo(
     agreedToTerms,
     setAgreedToTerms,
     loading,
+    isGoogleLoading,
     onAction,
+    onGoogleAction,
     message,
   }: any) => {
     const [showPassword, setShowPassword] = useState(false);
@@ -426,51 +428,116 @@ const AuthForm = memo(
     const passwordsMatch =
       confirmPassword.length > 0 && password === confirmPassword;
 
+    const SlideIn = FadeInRight.springify()
+      .damping(18)
+      .mass(0.8)
+      .stiffness(150);
+    const SlideOut = FadeOutUp.duration(150);
+
     return (
-      <View className="p-6 border neural-glass rounded-2xl border-white/5 bg-black/40">
-        <View style={{ gap: 15 }}>
-          {/* Auth Toggle */}
-          <View className="flex-row bg-white/[0.03] border border-white/10 rounded-2xl p-1 mb-3">
-            <TouchableOpacity
-              onPress={() => setAuthMode('sign-in')}
-              className={cn(
-                'flex-1 py-3 rounded-xl items-center',
-                !isSignUp
-                  ? 'bg-neon-cyan/10 border border-neon-cyan/30'
-                  : 'border border-transparent',
-              )}
-            >
-              <Text
-                className={cn(
-                  'text-[10px] font-black uppercase tracking-widest',
-                  !isSignUp ? 'text-neon-cyan' : 'text-white/50',
-                )}
+      <View
+        style={{
+          width: '100%',
+          padding: 24,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.05)',
+          borderRadius: 16,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          overflow: 'hidden',
+        }}
+      >
+        <Animated.View
+          layout={Layout.springify().mass(0.6).damping(16).stiffness(120)}
+        >
+          {/* THIS IS THE FIX: The two buttons are wrapped in flex: 1 containers so they can never be squished */}
+          <View
+            style={{
+              flexDirection: 'row',
+              backgroundColor: 'rgba(255,255,255,0.03)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
+              borderRadius: 16,
+              padding: 4,
+              marginBottom: 20,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setAuthMode('sign-in');
+                  setConfirmPassword('');
+                  setFullName('');
+                }}
+                activeOpacity={0.8}
+                style={{
+                  width: '100%',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: !isSignUp
+                    ? 'rgba(0, 240, 255, 0.3)'
+                    : 'transparent',
+                  backgroundColor: !isSignUp
+                    ? 'rgba(0, 240, 255, 0.1)'
+                    : 'transparent',
+                }}
               >
-                Sign In
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setAuthMode('sign-up')}
-              className={cn(
-                'flex-1 py-3 rounded-xl items-center',
-                isSignUp
-                  ? 'bg-neon-cyan/10 border border-neon-cyan/30'
-                  : 'border border-transparent',
-              )}
-            >
-              <Text
-                className={cn(
-                  'text-[10px] font-black uppercase tracking-widest',
-                  isSignUp ? 'text-neon-cyan' : 'text-white/30',
-                )}
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={{
+                    fontSize: 10,
+                    fontWeight: '900',
+                    textTransform: 'uppercase',
+                    letterSpacing: 2,
+                    color: !isSignUp ? '#00F0FF' : 'rgba(255,255,255,0.4)',
+                  }}
+                >
+                  SIGN IN
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <TouchableOpacity
+                onPress={() => setAuthMode('sign-up')}
+                activeOpacity={0.8}
+                style={{
+                  width: '100%',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: isSignUp
+                    ? 'rgba(0, 240, 255, 0.3)'
+                    : 'transparent',
+                  backgroundColor: isSignUp
+                    ? 'rgba(0, 240, 255, 0.1)'
+                    : 'transparent',
+                }}
               >
-                Create Account
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={{
+                    fontSize: 10,
+                    fontWeight: '900',
+                    textTransform: 'uppercase',
+                    letterSpacing: 2,
+                    color: isSignUp ? '#00F0FF' : 'rgba(255,255,255,0.4)',
+                  }}
+                >
+                  SIGN UP
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {isSignUp && (
-            <Animated.View entering={FadeInDown.duration(300)}>
+            <Animated.View entering={SlideIn} exiting={SlideOut}>
               <FormField label="Full Name" icon={User}>
                 <TextInput
                   className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
@@ -485,10 +552,7 @@ const AuthForm = memo(
           )}
 
           {isSignUp && (
-            <Animated.View
-              entering={FadeInDown.duration(400)}
-              style={{ marginTop: -4 }}
-            >
+            <Animated.View entering={SlideIn.delay(50)} exiting={SlideOut}>
               <FormField label="Username" icon={AtSign}>
                 <TextInput
                   className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
@@ -516,11 +580,11 @@ const AuthForm = memo(
             />
           </FormField>
 
-          <View>
+          <View style={{ marginBottom: 16 }}>
             <Text className="text-neon-cyan font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
               PASSWORD
             </Text>
-            <View className="bg-white/[0.02] border border-white/10 rounded-2xl h-14 flex-row items-center px-4">
+            <View className="bg-white/[0.02] border border-white/10 rounded-2xl h-16 flex-row items-center px-4">
               <Lock size={18} color="#A1A1AA" />
               <TextInput
                 className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
@@ -533,7 +597,7 @@ const AuthForm = memo(
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
               >
                 {showPassword ? (
                   <EyeOff size={18} color="#A1A1AA" />
@@ -544,7 +608,11 @@ const AuthForm = memo(
             </View>
 
             {isSignUp && password.length > 0 && (
-              <View className="px-1 mt-3">
+              <Animated.View
+                entering={FadeInDown}
+                exiting={SlideOut}
+                className="px-1 mt-3"
+              >
                 <View className="flex-row h-1 gap-1 mb-2">
                   {[1, 2, 3, 4, 5].map((level) => (
                     <View
@@ -571,18 +639,18 @@ const AuthForm = memo(
                     {strength.label}
                   </Text>
                 </View>
-              </View>
+              </Animated.View>
             )}
           </View>
 
           {isSignUp && (
-            <Animated.View entering={FadeInDown.duration(500)}>
+            <Animated.View entering={SlideIn.delay(100)} exiting={SlideOut}>
               <Text className="text-neon-cyan font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
                 Confirm Security Key
               </Text>
               <View
                 className={cn(
-                  'border rounded-2xl h-14 flex-row items-center px-4',
+                  'border rounded-2xl h-16 flex-row items-center px-4',
                   confirmPassword.length > 0 && !passwordsMatch
                     ? 'border-neon-pink/50'
                     : passwordsMatch
@@ -601,46 +669,38 @@ const AuthForm = memo(
                   secureTextEntry={!showConfirm}
                   editable={!loading}
                 />
-                <TouchableOpacity
-                  onPress={() => setShowConfirm(!showConfirm)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  {showConfirm ? (
-                    <EyeOff size={18} color="#A1A1AA" />
-                  ) : (
-                    <Eye size={18} color="#A1A1AA" />
-                  )}
-                </TouchableOpacity>
               </View>
+
+              <TouchableOpacity
+                onPress={() => setAgreedToTerms(!agreedToTerms)}
+                className="flex-row items-start gap-3 mt-4 mb-2"
+                activeOpacity={0.7}
+              >
+                {agreedToTerms ? (
+                  <CheckCircle2 size={20} color="#00F0FF" />
+                ) : (
+                  <Circle size={20} color="rgba(255,255,255,0.2)" />
+                )}
+                <Text className="flex-1 text-white/40 text-[11px] leading-5">
+                  I agree to the{' '}
+                  <Text className="font-bold text-neon-cyan">
+                    Terms of Service
+                  </Text>{' '}
+                  and{' '}
+                  <Text className="font-bold text-neon-cyan">
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </TouchableOpacity>
             </Animated.View>
           )}
 
-          {isSignUp && (
-            <TouchableOpacity
-              onPress={() => setAgreedToTerms(!agreedToTerms)}
-              className="flex-row items-start gap-3 mt-2"
-              activeOpacity={0.7}
-            >
-              {agreedToTerms ? (
-                <CheckCircle2 size={20} color="#00F0FF" />
-              ) : (
-                <Circle size={20} color="rgba(255,255,255,0.2)" />
-              )}
-              <Text className="flex-1 text-white/40 text-[11px] leading-5">
-                I agree to the{' '}
-                <Text className="font-bold text-neon-cyan">
-                  Terms of Service
-                </Text>{' '}
-                and{' '}
-                <Text className="font-bold text-neon-cyan">Privacy Policy</Text>
-              </Text>
-            </TouchableOpacity>
-          )}
-
           {message && (
-            <View
+            <Animated.View
+              entering={FadeInDown}
+              exiting={SlideOut}
               className={cn(
-                'p-4 border rounded-xl',
+                'p-4 border rounded-xl mt-2',
                 message.type === 'error'
                   ? 'bg-neon-pink/10 border-neon-pink/30'
                   : 'bg-neon-cyan/10 border-neon-cyan/30',
@@ -656,7 +716,7 @@ const AuthForm = memo(
               >
                 {message.text}
               </Text>
-            </View>
+            </Animated.View>
           )}
 
           <Button
@@ -669,9 +729,33 @@ const AuthForm = memo(
                   ? 'CREATE ACCOUNT'
                   : 'SIGN IN'
             }
-            className="py-4 mt-2 shadow-lg shadow-neon-cyan/20"
+            className="py-5 mt-4 shadow-lg shadow-neon-cyan/20"
           />
-        </View>
+
+          <View className="flex-row items-center my-6 opacity-30">
+            <View className="flex-1 h-[1px] bg-white" />
+            <Text className="px-4 text-[10px] font-bold text-white uppercase tracking-widest">
+              OR
+            </Text>
+            <View className="flex-1 h-[1px] bg-white" />
+          </View>
+
+          <TouchableOpacity
+            onPress={onGoogleAction}
+            disabled={isGoogleLoading || loading}
+            className="flex-row items-center justify-center py-4 transition-opacity bg-white rounded-xl active:opacity-80"
+          >
+            <Image
+              source={{
+                uri: 'https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg',
+              }}
+              style={{ width: 18, height: 18, marginRight: 10 }}
+            />
+            <Text className="text-xs font-bold tracking-wider text-black">
+              {isGoogleLoading ? 'CONNECTING...' : 'CONTINUE WITH GOOGLE'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     );
   },
@@ -687,13 +771,7 @@ const SecurityFooter = memo(() => (
 ));
 SecurityFooter.displayName = 'SecurityFooter';
 
-/* ── Styled Glass Cards Matching the Settings UI provided ──────────────────── */
 const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
-  const openSocial = (url: string) =>
-    Linking.openURL(url).catch((err) =>
-      console.error('Error opening URL', err),
-    );
-
   return (
     <View
       style={{
@@ -732,16 +810,8 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
           >
             <TouchableOpacity
               activeOpacity={0.8}
-              className="p-6 rounded-3xl"
-              style={{
-                backgroundColor: 'rgba(5, 5, 10, 0.6)',
-                borderColor: `rgba(${item.color === '#00F0FF' ? '0,240,255' : '138,43,226'}, 0.3)`,
-                borderWidth: 1,
-                shadowColor: item.color,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 12,
-              }}
+              className="p-6 border rounded-3xl border-white/10"
+              style={{ backgroundColor: 'rgba(5, 5, 10, 0.6)' }}
             >
               <View className="flex-row items-center gap-4 mb-2">
                 <View
@@ -758,11 +828,6 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
                     {item.desc}
                   </Text>
                 </View>
-                <ChevronRight
-                  size={16}
-                  color={item.color}
-                  className="opacity-70"
-                />
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -770,39 +835,15 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
       </View>
 
       <View className="flex-row items-center justify-center gap-10 mt-24 opacity-60">
-        <TouchableOpacity
-          onPress={() => openSocial('https://youtube.com')}
-          className="p-2 hover:opacity-80"
-        >
-          <Youtube color="#FFFFFF" size={26} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => openSocial('https://twitter.com')}
-          className="p-2 hover:opacity-80"
-        >
-          <Twitter color="#FFFFFF" size={26} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => openSocial('https://github.com')}
-          className="p-2 hover:opacity-80"
-        >
-          <Github color="#FFFFFF" size={26} />
-        </TouchableOpacity>
-      </View>
-
-      <View className="items-center mt-12 md:items-start opacity-20">
-        <Text className="text-white text-[9px] font-black uppercase tracking-[3px]">
-          TRANSCRIBER v1.0.0 | NorthOS
-        </Text>
+        <Youtube color="#FFFFFF" size={26} />
+        <Twitter color="#FFFFFF" size={26} />
+        <Github color="#FFFFFF" size={26} />
       </View>
     </View>
   );
 });
 MarketingContent.displayName = 'MarketingContent';
 
-/* ══════════════════════════════════════════════════════════════════════════════
- * STYLESHEET
- * ══════════════════════════════════════════════════════════════════════════════ */
 const styles = StyleSheet.create({
   desktopContainer: { flexDirection: 'row', flex: 1 },
   desktopSidebar: {
@@ -821,19 +862,5 @@ const styles = StyleSheet.create({
   mobileScroll: { flex: 1 },
   mobileScrollContent: { flexGrow: 1, paddingBottom: 100 },
   mobilePane: { padding: 24, paddingTop: 40 },
-  brandHeader: { alignItems: 'center', marginBottom: 32 },
   brandIcon: { width: 100, height: 100 },
 });
-function makeRedirectUri({
-  scheme,
-  path,
-}: {
-  scheme: string;
-  path: string;
-}): string {
-  return `${scheme}://${path}`;
-}
-
-function mapAuthError(arg0: any): any {
-  throw new Error('Function not implemented.');
-}

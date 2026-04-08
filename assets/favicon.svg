@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="docFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F2F5FF" />
+      <stop offset="100%" stop-color="#D9E2FF" />
+    </linearGradient>
+    
+    <linearGradient id="vidFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="30%" stop-color="#DE5889" />
+      <stop offset="100%" stop-color="#F18FAF" />
+    </linearGradient>
+  </defs>
+
+  <style>
+    /* Gently float the icons up and down */
+    .doc { animation: float 4s ease-in-out infinite; }
+    .vid { animation: float-rev 4s ease-in-out infinite; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    @keyframes float-rev {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(8px); }
+    }
+
+    /* Path drawing animation for the arrows */
+    .arrow-line {
+      stroke-dasharray: 350;
+      stroke-dashoffset: 350;
+      animation: drawLine 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    .arrow-head {
+      stroke-dasharray: 150;
+      stroke-dashoffset: 150;
+      animation: drawHead 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    
+    /* Offset the bottom arrow animation to create an alternating cycle */
+    .delay {
+      animation-delay: 2s;
+    }
+
+    @keyframes drawLine {
+      0%, 5% { stroke-dashoffset: 350; opacity: 0; }
+      10% { opacity: 1; }
+      40%, 85% { stroke-dashoffset: 0; opacity: 1; }
+      95%, 100% { stroke-dashoffset: 0; opacity: 0; }
+    }
+    @keyframes drawHead {
+      0%, 25% { stroke-dashoffset: 150; opacity: 0; }
+      30% { opacity: 1; }
+      50%, 85% { stroke-dashoffset: 0; opacity: 1; }
+      95%, 100% { stroke-dashoffset: 0; opacity: 0; }
+    }
+  </style>
+
+  <g stroke="#F8CD50" stroke-width="20" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 270 80 L 400 80 Q 430 80 430 110 L 430 190" opacity="0.3" />
+    <path d="M 390 150 L 430 190 L 470 150" opacity="0.3" />
+    
+    <path class="arrow-line" d="M 270 80 L 400 80 Q 430 80 430 110 L 430 190" />
+    <path class="arrow-head" d="M 390 150 L 430 190 L 470 150" />
+  </g>
+
+  <g stroke="#F8CD50" stroke-width="20" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 210 430 L 100 430 Q 70 430 70 400 L 70 310" opacity="0.3" />
+    <path d="M 30 350 L 70 310 L 110 350" opacity="0.3" />
+    
+    <path class="arrow-line delay" d="M 210 430 L 100 430 Q 70 430 70 400 L 70 310" />
+    <path class="arrow-head delay" d="M 30 350 L 70 310 L 110 350" />
+  </g>
+
+  <g class="doc">
+    <path d="M 40 40 L 160 40 L 220 100 L 220 260 L 40 260 Z" fill="url(#docFill)" />
+    <path d="M 160 40 L 160 100 L 220 100 Z" fill="#F8CD50" />
+    <path d="M 40 40 L 160 40 L 220 100 L 220 260 L 40 260 Z" fill="none" stroke="#0B2A6A" stroke-width="20" stroke-linejoin="round" />
+  </g>
+
+  <g class="vid">
+    <rect x="250" y="280" width="210" height="150" rx="30" fill="url(#vidFill)" />
+    <rect x="250" y="280" width="210" height="150" rx="30" fill="none" stroke="#0B2A6A" stroke-width="20" />
+    <path d="M 335 325 L 385 355 L 335 385 Z" fill="#D9E2FF" stroke="#D9E2FF" stroke-width="10" stroke-linejoin="round" />
+  </g>
+</svg>
