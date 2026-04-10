@@ -1,12 +1,18 @@
-# ⚡ TranscriberPro: Enterprise Audio Intelligence Engine
+# ⚡ TranscriberPro — Enterprise Audio Intelligence Engine
 
-[![Expo](https://img.shields.io/badge/Expo-SDK%2055-7d3301.svg?style=flat-square&logo=expo)](https://expo.dev)
+<div align="center">
+
+[![Platform](https://img.shields.io/badge/Platform-Web%20%7C%20iOS%20%7C%20Android-0A0D14.svg?style=flat-square&logo=expo)](https://expo.dev)
 [![Framework](https://img.shields.io/badge/Framework-React%20Native%200.83-61DAFB.svg?style=flat-square&logo=react)](https://reactnative.dev)
-[![Typescript](https://img.shields.io/badge/Typescript-040412.svg?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
-[![Backend](https://img.shields.io/badge/Backend-Supabase-006112.svg?style=flat-square&logo=supabase)](https://supabase.com)
-[![Edge Functions](https://img.shields.io/badge/Edge%20Functions-DEEPGRAM%20%7C%20DENO-0A0D14.svg?style=flat-square&logo=deno)](https://deno.com/deploy)
-[![AI](https://img.shields.io/badge/AI-Gemini%202.5%20Flash-12024d.svg?style=flat-square&logo=google)](https://ai.google.com/gemini/pro/)
-[![Styling](https://img.shields.io/badge/Styling-NativeWind%20v4-38B2AC.svg?style=flat-square&logo=tailwind-css)](https://nativewind.dev)
+[![Expo](https://img.shields.io/badge/Expo-SDK%2055-000020.svg?style=flat-square&logo=expo)](https://expo.dev)
+[![Backend](https://img.shields.io/badge/Backend-Supabase-3ECF8E.svg?style=flat-square&logo=supabase)](https://supabase.com)
+[![AI](https://img.shields.io/badge/AI-Gemini%203.1%20Flash--Lite-4285F4.svg?style=flat-square&logo=google)](https://ai.google.dev)
+[![Deploy](https://img.shields.io/badge/Deploy-Vercel-000000.svg?style=flat-square&logo=vercel)](https://transcriber-pro.vercel.app)
+[![Build](https://img.shields.io/badge/Build-EAS%20APK-000020.svg?style=flat-square&logo=expo)](https://expo.dev)
+
+**Live:** [transcriber-pro.vercel.app](https://transcriber-pro.vercel.app) · **APK:** EAS Preview Build · **Supabase:** `jhcgkqzjabsitfilajuh`
+
+</div>
 
 ---
 

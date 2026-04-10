@@ -4,6 +4,7 @@
  * Root routing topology, global provider wrapper, and Premium Splash Handoff.
  * Uses expo-image to render a transparent SVG/GIF over the dark theme.
  */
+import 'react-native-url-polyfill/auto';
 import 'react-native-gesture-handler';
 import '../global.css';
 

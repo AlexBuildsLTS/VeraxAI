@@ -1,9 +1,20 @@
 /**
  * FILE: app/(dashboard)/settings/profile.tsx
  * MODULE: User Profile Management (NorthOS)
+ * ARCHITECTURE: 2026 High-Performance Standards (Web Vercel & Native APK)
+ * * ============================================================================
+ * MODULE OVERVIEW
+ * ============================================================================
+ * This interface handles user identity data, avatar synchronization via 
+ * Supabase Storage, and core account metrics. 
+ * * CORE FEATURES:
+ * - Fluid UI/UX: Fully animated state transitions and hardware-accelerated ambient orbs.
+ * - Robust Layouts: Native Flexbox locking ensures perfect alignment across APK and Web.
+ * - Dynamic Role Badging: Automatically decodes user roles into visual security badges.
+ * - Secure Handoffs: Protects navigation state directly interfacing with useAuthStore.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { memo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,10 +26,13 @@ import {
   Dimensions,
   Image,
   KeyboardAvoidingView,
+  StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+// ─── ICONS ───────────────────────────────────────────────────────────────────
 import {
   ArrowBigLeftDash,
   ArrowBigUpDash,
@@ -31,16 +45,17 @@ import {
   Pencil,
   RotateCcw,
   Upload,
-  Check,
-  X,
 } from 'lucide-react-native';
 
+// ─── SYSTEM COMPONENTS ───────────────────────────────────────────────────────
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { Input } from '../../../components/ui/Input';
 import { Button } from '../../../components/ui/Button';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
+
+// ─── ANIMATION ENGINE ────────────────────────────────────────────────────────
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -52,7 +67,10 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-// 1. THIS IS THE BADGE COLOR HELPER
+/**
+ * ─── MODULE: ROLE DECODER ────────────────────────────────────────────────────
+ * Generates specific badge styling based on the user's database role matrix.
+ */
 const getRoleConfig = (role?: string) => {
   switch (role?.toLowerCase()) {
     case 'admin':
@@ -79,7 +97,11 @@ const getRoleConfig = (role?: string) => {
   }
 };
 
-const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
+/**
+ * ─── MODULE: AMBIENT NEURAL ORBS ─────────────────────────────────────────────
+ * Provides a deep, 60fps hardware-accelerated animated background.
+ */
+const NeuralOrb = memo(({ delay = 0, color = '#00F0FF' }: { delay?: number; color?: string }) => {
   const pulse = useSharedValue(0);
   const { width, height } = Dimensions.get('window');
 
@@ -114,9 +136,14 @@ const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
       ]}
     />
   );
-};
+});
+NeuralOrb.displayName = 'NeuralOrb';
 
-const StatPill = ({
+/**
+ * ─── MODULE: STAT PILL ───────────────────────────────────────────────────────
+ * Renders small metric cards for user metadata (Provider, Network, Date).
+ */
+const StatPill = memo(({
   icon: Icon,
   label,
   value,
@@ -142,14 +169,19 @@ const StatPill = ({
       {value}
     </Text>
   </View>
-);
+));
+StatPill.displayName = 'StatPill';
 
+/**
+ * ─── MODULE: PRIMARY SCREEN COMPONENT ────────────────────────────────────────
+ */
 export default function ProfileSettingsScreen() {
   const router = useRouter();
 
-  // 2. WE PULL THE PROFILE HERE TO CHECK THE ROLE
+  // Core Identity State
   const { user, profile } = useAuthStore();
 
+  // UI State
   const [fullName, setFullName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -158,10 +190,11 @@ export default function ProfileSettingsScreen() {
   const [saved, setSaved] = useState(false);
   const [memberSince, setMemberSince] = useState('');
 
-  // 3. WE SET UP THE BADGE DATA FOR THE UI
+  // Security Badge Configuration
   const userRole = profile?.role || 'member';
   const roleConfig = getRoleConfig(userRole);
 
+  // Avatar Ring Physics
   const ringScale = useSharedValue(1);
   const ringOpacity = useSharedValue(0.3);
 
@@ -171,13 +204,14 @@ export default function ProfileSettingsScreen() {
       withTiming(1, { duration: 200 }),
       withTiming(0.3, { duration: 600 }),
     );
-  }, []);
+  }, [ringScale, ringOpacity]);
 
   const ringStyle = useAnimatedStyle(() => ({
     transform: [{ scale: ringScale.value }],
     opacity: ringOpacity.value,
   }));
 
+  // Identity Synchronization
   useEffect(() => {
     async function loadProfile() {
       if (!user) return;
@@ -209,6 +243,7 @@ export default function ProfileSettingsScreen() {
     loadProfile();
   }, [user]);
 
+  // Media Library Bridge
   const handlePickImage = useCallback(async () => {
     if (Platform.OS !== 'web') {
       const { status } =
@@ -229,6 +264,7 @@ export default function ProfileSettingsScreen() {
     performAvatarSync(result.assets[0]);
   }, [user]);
 
+  // Storage Bucket Upload Engine
   const performAvatarSync = async (asset: ImagePicker.ImagePickerAsset) => {
     setIsUploading(true);
     pulseRing();
@@ -256,9 +292,11 @@ export default function ProfileSettingsScreen() {
           updated_at: new Date().toISOString(),
         })
         .eq('id', user!.id);
+      
       await supabase.auth.updateUser({
         data: { avatar_url: urlData.publicUrl },
       });
+      
       pulseRing();
     } catch (err: any) {
       Alert.alert(
@@ -270,6 +308,7 @@ export default function ProfileSettingsScreen() {
     }
   };
 
+  // Database Identity Commit
   const handleSaveProfile = useCallback(async () => {
     if (!user || !fullName.trim()) {
       Alert.alert('Input Required', 'Operative designation cannot be blank.');
@@ -285,7 +324,9 @@ export default function ProfileSettingsScreen() {
         })
         .eq('id', user.id);
       if (error) throw error;
+      
       await supabase.auth.updateUser({ data: { full_name: fullName.trim() } });
+      
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err: any) {
@@ -295,12 +336,12 @@ export default function ProfileSettingsScreen() {
     }
   }, [user, fullName]);
 
-  // 4. SAFE RETURN HANDLER - Fallback to /settings
+  // Smart Navigation Fallback
   const handleReturn = () => {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace('/settings'); // Directly to the settings index
+      router.replace('/settings'); 
     }
   };
 
@@ -314,6 +355,7 @@ export default function ProfileSettingsScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#020205]">
+      {/* Ambient Neural Background */}
       <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
         <NeuralOrb delay={0} color="#00F0FF" />
         <NeuralOrb delay={4000} color="#FF007F" />
@@ -328,26 +370,26 @@ export default function ProfileSettingsScreen() {
           contentContainerStyle={{ paddingBottom: 150 }}
         >
           <View className="w-full max-w-2xl px-6 pt-12 mx-auto">
-            {/* THIS IS THE WEB-VISIBLE BACK ARROW */}
+            
+            {/* ─── HEADER CONTROLS ─── */}
             <TouchableOpacity
               onPress={handleReturn}
               className="flex-row items-center mb-12 gap-x-3"
               activeOpacity={0.7}
             >
               <ArrowBigLeftDash size={24} color="#00F0FF" />
-              <Text className="text-[11px] font-black tracking-[4px] text-neon-cyan uppercase">
+              <Text className="text-[11px] font-black tracking-[4px] text-[#00F0FF] uppercase">
                 RETURN
               </Text>
             </TouchableOpacity>
 
             <FadeIn>
-              {/* 5. THIS IS WHERE THE BADGE RENDERS ON THE SCREEN */}
               <View className="flex-row items-center justify-between mb-12">
                 <View>
                   <Text className="text-5xl font-black leading-none tracking-tighter text-white uppercase md:text-6xl">
-                    <Text className="text-neon-cyan">PROFILE</Text>
+                    <Text className="text-[#00F0FF]">PROFILE</Text>
                   </Text>
-                  <View className="h-1 w-24 bg-neon-cyan mt-6 rounded-full shadow-[0_0_15px_#00F0FF]" />
+                  <View className="h-1 w-24 bg-[#00F0FF] mt-6 rounded-full shadow-[0_0_15px_#00F0FF]" />
                 </View>
 
                 {/* DYNAMIC ROLE BADGE */}
@@ -375,9 +417,11 @@ export default function ProfileSettingsScreen() {
               </View>
             </FadeIn>
 
+            {/* ─── MODULE: AVATAR MANAGEMENT ─── */}
             <FadeIn delay={100}>
               <GlassCard className="items-center p-10 mb-8 border-white/5">
                 <View className="relative mb-8">
+                  {/* Reactive Energy Ring */}
                   <Animated.View
                     style={[
                       ringStyle,
@@ -392,7 +436,7 @@ export default function ProfileSettingsScreen() {
                   />
 
                   <View
-                    className="items-center justify-center overflow-hidden border-2 rounded-full bg-black/80 border-neon-cyan/40"
+                    className="items-center justify-center overflow-hidden border-2 rounded-full bg-black/80 border-[#00F0FF]/40"
                     style={{ width: 144, height: 144 }}
                   >
                     {isUploading ? (
@@ -410,46 +454,72 @@ export default function ProfileSettingsScreen() {
 
                   <TouchableOpacity
                     onPress={handlePickImage}
-                    className="absolute bottom-1 right-1 w-11 h-11 rounded-full bg-neon-cyan items-center justify-center border-4 border-[#020205] shadow-lg shadow-neon-cyan/50"
+                    className="absolute bottom-1 right-1 w-11 h-11 rounded-full bg-[#00F0FF] items-center justify-center border-4 border-[#020205] shadow-lg shadow-[#00F0FF]/50"
                   >
                     <Pencil size={18} color="#020205" />
                   </TouchableOpacity>
                 </View>
 
-                <View className="flex-row w-full gap-x-4">
-                  <TouchableOpacity
-                    onPress={handlePickImage}
-                    disabled={isUploading}
-                    className="items-center flex-1 py-4 border bg-white/5 border-white/10 rounded-2xl"
-                  >
-                  {isUploading ? (
-  <Text className="text-white/60 text-[10px] font-black uppercase tracking-[3px]">
-    Transferring...
-  </Text>
-) : (
-  <Upload size={16} color="rgba(9, 186, 112, 0.6)" />
-)} 
-                  </TouchableOpacity>
-
-                  {avatarUrl && (
+                {/* ─── CRITICAL FIX: AVATAR ACTION BUTTONS ─── */}
+                {/* This layout completely discards unreliable Tailwind Flexbox wrappers that 
+                  collapse vertically on some environments. It explicitly enforces a native 
+                  horizontal flex structure, guaranteeing perfect alignment of the actions 
+                  in a sleek, dark pill container centered beneath the avatar.
+                */}
+                <View style={styles.actionPillWrapper}>
+                  <View style={styles.actionPillContainer}>
+                    
+                    {/* Primary Action: Upload / Update */}
                     <TouchableOpacity
-                      onPress={() => setAvatarUrl('Upload')}
-                      className="items-center justify-center w-16 border bg-neon-pink/10 border-neon-pink/20 rounded-2xl"
+                      onPress={handlePickImage}
+                      disabled={isUploading}
+                      style={styles.actionButton}
+                      activeOpacity={0.7}
                     >
-                      <RotateCcw size={20} color="#FF007F" />
+                      {isUploading ? (
+                        <Text style={styles.actionTextTransferring}>
+                          Transferring...
+                        </Text>
+                      ) : avatarUrl ? (
+                        <ArrowBigUpDash size={22} color="rgba(9, 186, 112, 0.8)" />
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Upload size={16} color="#00F0FF" />
+                          <Text style={styles.actionTextUpload}>
+                            UPDATE AVATAR
+                          </Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
-                  )}
+
+                    {/* Secondary Action: Reset / Clear */}
+                    {avatarUrl && !isUploading && (
+                      <>
+                        <View style={styles.actionDivider} />
+                        <TouchableOpacity
+                          onPress={() => setAvatarUrl('')}
+                          style={styles.actionButton}
+                          activeOpacity={0.7}
+                        >
+                          <RotateCcw size={20} color="#FF007F" />
+                        </TouchableOpacity>
+                      </>
+                    )}
+
+                  </View>
                 </View>
+
               </GlassCard>
             </FadeIn>
 
+            {/* ─── MODULE: IDENTITY FORM ─── */}
             <FadeIn delay={200}>
               <GlassCard className="p-8 mb-8 border-white/5">
                 <View className="gap-y-10">
                   <View>
                     <View className="flex-row items-center mb-4 ml-1">
                       <User size={14} color="#00F0FF" />
-                      <Text className="text-neon-cyan font-black text-[10px] tracking-[4px] uppercase ml-3">
+                      <Text className="text-[#00F0FF] font-black text-[10px] tracking-[4px] uppercase ml-3">
                         USERNAME
                       </Text>
                     </View>
@@ -496,6 +566,7 @@ export default function ProfileSettingsScreen() {
               </GlassCard>
             </FadeIn>
 
+            {/* ─── MODULE: TELEMETRY PILLS ─── */}
             <FadeIn delay={300}>
               <View className="flex-row gap-x-4">
                 <StatPill
@@ -509,7 +580,7 @@ export default function ProfileSettingsScreen() {
                 <StatPill
                   icon={Globe}
                   label="Network"
-                  value="Production-V1"
+                  value="SECURE"
                   color="#00F0FF"
                 />
                 <StatPill
@@ -521,10 +592,11 @@ export default function ProfileSettingsScreen() {
               </View>
             </FadeIn>
 
+            {/* ─── FOOTER ─── */}
             <View className="items-center mt-20 opacity-30">
               <View className="h-[1px] w-12 bg-white/20 mb-4" />
               <Text className="text-[9px] font-mono tracking-[6px] text-white uppercase">
-                NorthOS Digital Identity Module
+                NorthOS PROFILE INTERFACE
               </Text>
             </View>
           </View>
@@ -533,3 +605,49 @@ export default function ProfileSettingsScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── LOCAL STYLESHEET ────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  actionPillWrapper: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  actionPillContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5, 5, 10, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    height: 56,
+  },
+  actionButton: {
+    paddingHorizontal: 20,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: 4,
+  },
+  actionTextUpload: {
+    color: '#00F0FF',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+  },
+  actionTextTransferring: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+  },
+});

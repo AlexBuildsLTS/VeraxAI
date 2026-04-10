@@ -71,7 +71,7 @@ export async function fetchClientCaptions(
   } catch {
     // We hit CORS (Web Browser) or a timeout. 
     // Do NOT loop through garbage proxies. Instantly hand off to the Edge backend. 
-    console.log('[Captions:Client] Direct fetch blocked (CORS/Web). Instantly routing to Sovereign Edge...');
+    console.log('[Captions:Client] Direct fetch blocked (CORS/Web). Instantly routing to Verbum Edge...');
   }
   return null; // Signal to use Edge Node fallback
 }

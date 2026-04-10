@@ -1,6 +1,19 @@
 /**
  * app/(auth)/sign-in.tsx
  * Sovereign NorthOS - Enterprise Authentication Protocol
+ * Architecture: 2026 High-Performance Standards (Web Vercel & Native APK)
+ * * ============================================================================
+ * MODULE OVERVIEW
+ * ============================================================================
+ * This file serves as the primary entry point for user identity verification.
+ * It features a highly optimized, fully responsive Glassmorphism design system
+ * powered by React Native Reanimated and NativeWind v4.
+ * * CORE FEATURES:
+ * - Fluid Layout Physics: Uses Layout.springify() for buttery smooth form transitions.
+ * - Hardware-Accelerated Ambient Background: 60fps pulsing gradient engine.
+ * - Native-Safe Integrations: Pre-configured to prevent Android OkHttp crashes
+ * and Web Router unmount flashes (via Zustand store locking).
+ * - Multi-Platform OAuth: Native device browser handoff for Google Sign-In.
  */
 
 import React, { useState, memo, useCallback, useEffect } from 'react';
@@ -19,12 +32,22 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+
+// ─── STATE & UTILS ───────────────────────────────────────────────────────────
 import { useAuthStore } from '../../store/useAuthStore';
+import { cn } from '../../lib/utils';
+import { AuthValidator } from '../../utils/validators/auth';
+import { supabase } from '../../lib/supabase/client';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+
+// ─── COMPONENTS & ICONS ──────────────────────────────────────────────────────
+import { Button } from '../../components/ui/Button';
+import { FadeIn } from '../../components/animations/FadeIn';
 import {
   Mail,
   Lock,
   User,
-  AtSign,
   Eye,
   EyeOff,
   CheckCircle2,
@@ -37,7 +60,13 @@ import {
   Youtube,
   Fingerprint,
   UserX,
+  Facebook,
+  Instagram,
+  Twitch,
+  Video,
 } from 'lucide-react-native';
+
+// ─── ANIMATION ENGINE ────────────────────────────────────────────────────────
 import Animated, {
   FadeInDown,
   FadeInRight,
@@ -49,21 +78,46 @@ import Animated, {
   withTiming,
   interpolate,
   withDelay,
-  ZoomIn,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { cn } from '../../lib/utils';
-import { Button } from '../../components/ui/Button';
-import { AuthValidator } from '../../utils/validators/auth';
-import { supabase } from '../../lib/supabase/client';
-import * as AuthSession from 'expo-auth-session';
-import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
-
 const APP_ICON = require('../../assets/icon.png');
 
+// ─── TYPE DEFINITIONS ────────────────────────────────────────────────────────
+
 type AuthMode = 'sign-in' | 'sign-up';
+
+interface FormFieldProps {
+  label: string;
+  icon: React.ElementType;
+  children: React.ReactNode;
+}
+
+interface AuthFormProps {
+  authMode: AuthMode;
+  setAuthMode: (mode: AuthMode) => void;
+  fullName: string;
+  setFullName: (name: string) => void;
+  email: string;
+  setEmail: (email: string) => void;
+  password: string;
+  setPassword: (pw: string) => void;
+  confirmPassword: string;
+  setConfirmPassword: (pw: string) => void;
+  agreedToTerms: boolean;
+  setAgreedToTerms: (agreed: boolean) => void;
+  loading: boolean;
+  isGoogleLoading: boolean;
+  onAction: () => Promise<void>;
+  onGoogleAction: () => Promise<void>;
+  message: { type: 'error' | 'success'; text: string } | null;
+  setMessage: (msg: { type: 'error' | 'success'; text: string } | null) => void;
+  successState: 'none' | 'login' | 'signup';
+  router: ReturnType<typeof useRouter>;
+}
+
+// ─── STATIC CONTENT ──────────────────────────────────────────────────────────
 
 const BENTO_ITEMS = [
   {
@@ -86,6 +140,12 @@ const BENTO_ITEMS = [
   },
 ];
 
+// ─── ERROR INTERCEPTOR ───────────────────────────────────────────────────────
+
+/**
+ * Translates raw backend exceptions into user-facing UX feedback.
+ * Formatted specifically to fit the "Protocol Breach" UI styling.
+ */
 function mapAuthError(errorMessage: string): string {
   const lowMsg = errorMessage.toLowerCase();
   if (lowMsg.includes('invalid login credentials'))
@@ -96,69 +156,65 @@ function mapAuthError(errorMessage: string): string {
   )
     return 'This identity protocol is already active. Please sign in instead.';
   if (lowMsg.includes('password should be at least'))
-    return 'Security key strength insufficient. Minimum 8 characters required.';
+    return 'Security key strength insufficient. Minimum 10 characters required.';
   if (lowMsg.includes('network') || lowMsg.includes('fetch'))
     return 'Neural link failed. Check your network connection.';
   if (lowMsg.includes('rate limit'))
     return 'Traffic surge detected. Please wait before retrying.';
   if (lowMsg.includes('email not confirmed'))
     return 'Account pending verification. Please check your inbox.';
+  if (lowMsg.includes('unexpected_failure') || lowMsg.includes('500'))
+    return 'System fault: Database trigger execution failed on server.';
   return errorMessage;
 }
 
-// ----------------------------------------------------------------------------
-// [MODULE: AMBIENT UX ENGINE]
-// ----------------------------------------------------------------------------
-const NeuralOrb = ({ delay = 0, color = '#00F0FF' }) => {
-  const pulse = useSharedValue(0);
-  const { width, height } = Dimensions.get('window');
+// ─── AMBIENT BACKGROUND ENGINE ───────────────────────────────────────────────
 
-  useEffect(() => {
-    pulse.value = withDelay(
-      delay,
-      withRepeat(withTiming(1, { duration: 8000 }), -1, true),
+/**
+ * 60FPS Hardware-Accelerated Background Pulser.
+ * Specifically avoids zIndex:-1 on the container to prevent Android blackouts,
+ * relying instead on native React Native node order.
+ */
+const AmbientGradient = memo(
+  ({ delay = 0, color = '#3B82F6' }: { delay?: number; color?: string }) => {
+    const pulse = useSharedValue(0);
+    const { width } = Dimensions.get('window');
+
+    useEffect(() => {
+      pulse.value = withDelay(
+        delay,
+        withRepeat(withTiming(1, { duration: 10000 }), -1, true),
+      );
+    }, [delay, pulse]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [
+        { scale: interpolate(pulse.value, [0, 1], [1, 1.4]) },
+        { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.08]) },
+        { translateY: interpolate(pulse.value, [0, 1], [0, width * 0.04]) },
+      ],
+      opacity: interpolate(pulse.value, [0, 1], [0.06, 0.12]),
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          animatedStyle,
+          {
+            position: 'absolute',
+            width: width * 2.0,
+            height: width * 2.0,
+            backgroundColor: color,
+            borderRadius: width,
+          },
+        ]}
+      />
     );
-  }, [delay, pulse]);
+  },
+);
+AmbientGradient.displayName = 'AmbientGradient';
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(pulse.value, [0, 1], [1, 1.6]) },
-      { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
-      { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
-    ],
-    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.08]),
-  }));
-
-  return (
-    <Animated.View
-      style={[
-        animatedStyle,
-        {
-          position: 'absolute',
-          width: 600,
-          height: 600,
-          backgroundColor: color,
-          borderRadius: 300,
-          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
-        },
-      ]}
-    />
-  );
-};
-
-const getPasswordStrength = (password: string) => {
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (password.length >= 12) score++;
-  if (/[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
-
-  if (score <= 1) return { score, label: 'WEAK', color: '#FF007F' };
-  if (score <= 2) return { score, label: 'FAIR', color: '#FF4500' };
-  if (score <= 3) return { score, label: 'GOOD', color: '#00F0FF' };
-  return { score, label: 'STRONG', color: '#32FF00' };
-};
+// ─── MAIN SCREEN COMPONENT ───────────────────────────────────────────────────
 
 export default function SignInScreen() {
   const { signInWithPassword, signUp } = useAuthStore();
@@ -166,18 +222,17 @@ export default function SignInScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
 
+  // Local Form State
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
+  // Transition & Progress State
   const [loading, setLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isAnonLoading, setIsAnonLoading] = useState(false);
-
   const [successState, setSuccessState] = useState<'none' | 'login' | 'signup'>(
     'none',
   );
@@ -186,93 +241,79 @@ export default function SignInScreen() {
     text: string;
   } | null>(null);
 
-  // ----------------------------------------------------------------------------
-  // [MODULE: CORE AUTHENTICATION DISPATCHER]
-  // ----------------------------------------------------------------------------
+  /**
+   * Primary execution handler for both Sign In and Sign Up protocols.
+   */
   const handleAction = useCallback(async () => {
-    if (__DEV__) console.log(`[Sign-In] Action triggered: ${authMode}`);
     setMessage(null);
     const trimmedEmail = email.trim();
-
-    if (!AuthValidator.isValidEmail(trimmedEmail)) {
-      if (__DEV__) console.warn('[Sign-In] Invalid email entered');
-      return setMessage({
-        type: 'error',
-        text: 'Valid email address required.',
-      });
-    }
-
     setLoading(true);
 
     if (authMode === 'sign-in') {
-      if (__DEV__) console.log('[Sign-In] Calling signInWithPassword');
+      const validation = AuthValidator.validateSignIn(trimmedEmail, password);
+      if (!validation.valid) {
+        setLoading(false);
+        return setMessage({
+          type: 'error',
+          text: validation.error || 'Invalid input.',
+        });
+      }
+
       const { error } = await signInWithPassword(trimmedEmail, password);
+
       if (error) {
-        if (__DEV__) console.log('[Sign-In] Sign-in failed:', error);
         setMessage({ type: 'error', text: mapAuthError(error) });
         setLoading(false);
       } else {
-        if (__DEV__)
-          console.log('[Sign-In] Sign-in successful, redirecting...');
         setSuccessState('login');
         setTimeout(() => {
           router.replace('/(dashboard)');
         }, 1500);
       }
     } else {
-      if (__DEV__) console.log('[Sign-In] Validating sign-up fields');
-      if (
-        !fullName.trim() ||
-        password.length < 8 ||
-        password !== confirmPassword ||
-        !agreedToTerms
-      ) {
-        if (__DEV__) console.warn('[Sign-In] Sign-up validation failed');
+      if (!agreedToTerms) {
         setLoading(false);
         return setMessage({
           type: 'error',
-          text: 'Please complete all required fields.',
+          text: 'You must agree to the Terms of Service and Privacy Policy.',
         });
       }
 
-      if (__DEV__) console.log('[Sign-In] Calling signUp');
+      const validation = AuthValidator.validateSignUp(
+        trimmedEmail,
+        password,
+        confirmPassword,
+        fullName,
+      );
+      if (!validation.valid) {
+        setLoading(false);
+        return setMessage({
+          type: 'error',
+          text: validation.error || 'Invalid input.',
+        });
+      }
+
+      // UI Executes Registration. The Store's internal lock shields the Web Router
+      // from violently unmounting this component during the transition.
       const { error } = await signUp(trimmedEmail, password, fullName.trim());
 
       if (error) {
-        if (__DEV__) console.error('[Sign-In] Sign-up failed:', error);
         setMessage({ type: 'error', text: mapAuthError(error) });
         setLoading(false);
       } else {
-        if (__DEV__) console.log('[Sign-In] Sign-up successful');
-
-        // We ALWAYS show the signup success state first, even if auto-confirmed.
-        // This ensures the user sees the "Identity Initialized" message.
+        // Because the layouts are safely locked by the store, this animation will now play perfectly
         setSuccessState('signup');
 
-        setTimeout(async () => {
-          // Check if user was automatically signed in (depends on Supabase config)
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
-
-          if (session) {
-            if (__DEV__)
-              console.log('[Sign-In] User auto-signed in after sign-up');
-            setSuccessState('login');
-            setTimeout(() => {
-              router.replace('/(dashboard)');
-            }, 1500);
-          } else {
-            setSuccessState('none');
-            setAuthMode('sign-in');
-            setPassword('');
-            setConfirmPassword('');
-            setMessage({
-              type: 'success',
-              text: 'Account created. Please check your email to verify.',
-            });
-            setLoading(false);
-          }
+        setTimeout(() => {
+          setSuccessState('none');
+          setAuthMode('sign-in');
+          setPassword('');
+          setConfirmPassword('');
+          setMessage({
+            type: 'success',
+            text: 'Identity verified. Please sign in to access your workspace.',
+          });
+          setLoading(false);
         }, 2000);
       }
     }
@@ -288,6 +329,10 @@ export default function SignInScreen() {
     router,
   ]);
 
+  /**
+   * OAuth execution via Expo Auth Session.
+   * Handles app-to-browser handoff and deep linking back to the APK.
+   */
   const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
     setMessage(null);
@@ -300,11 +345,13 @@ export default function SignInScreen() {
         options: { redirectTo: redirectUri, skipBrowserRedirect: true },
       });
       if (error) throw error;
+
       if (data?.url) {
         const result = await WebBrowser.openAuthSessionAsync(
           data.url,
           redirectUri,
         );
+
         if (result.type === 'success' && result.url) {
           const urlParams = new URL(result.url);
           const accessToken = result.url.match(/access_token=([^&]*)/)?.[1];
@@ -328,36 +375,20 @@ export default function SignInScreen() {
     }
   };
 
-  const handleAnonymousSignIn = async () => {
-    setIsAnonLoading(true);
-    setMessage(null);
-    try {
-      const { error } = await supabase.auth.signInAnonymously();
-      if (error) throw error;
-      setSuccessState('login');
-      setTimeout(() => {
-        router.replace('/(dashboard)');
-      }, 1500);
-    } catch (e: any) {
-      setMessage({
-        type: 'error',
-        text: mapAuthError(e.message || 'Anonymous sign-in failed.'),
-      });
-      setIsAnonLoading(false);
-    }
-  };
-
   return (
-    <View className="flex-1 bg-[#020205]">
-      {/* 🔴 THE FIX: pointerEvents passed via style and zIndex pushed back to prevent invisible touch shield on Android */}
+    <View className="flex-1 bg-[#000016]">
+      {/* Android Physics Fix: Z-index omitted entirely. By placing this View first 
+        in the JSX tree, React Native naturally draws it at the absolute bottom. 
+      */}
       <View
         style={[
           StyleSheet.absoluteFill,
-          { pointerEvents: 'none', zIndex: -1, overflow: 'hidden' },
+          { pointerEvents: 'none', overflow: 'hidden' },
         ]}
       >
-        <NeuralOrb delay={0} color="#00F0FF" />
-        <NeuralOrb delay={2500} color="#8A2BE2" />
+        <AmbientGradient delay={100} color="#3B82F6" />
+        <AmbientGradient delay={4000} color="#8B5CF6" />
+        <AmbientGradient delay={6000} color="#2003fc" />
       </View>
 
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
@@ -384,8 +415,6 @@ export default function SignInScreen() {
                     setAuthMode={setAuthMode}
                     fullName={fullName}
                     setFullName={setFullName}
-                    username={username}
-                    setUsername={setUsername}
                     email={email}
                     setEmail={setEmail}
                     password={password}
@@ -396,10 +425,8 @@ export default function SignInScreen() {
                     setAgreedToTerms={setAgreedToTerms}
                     loading={loading}
                     isGoogleLoading={isGoogleLoading}
-                    isAnonLoading={isAnonLoading}
                     onAction={handleAction}
                     onGoogleAction={handleGoogleSignIn}
-                    onAnonAction={handleAnonymousSignIn}
                     message={message}
                     setMessage={setMessage}
                     successState={successState}
@@ -429,8 +456,6 @@ export default function SignInScreen() {
                   setAuthMode={setAuthMode}
                   fullName={fullName}
                   setFullName={setFullName}
-                  username={username}
-                  setUsername={setUsername}
                   email={email}
                   setEmail={setEmail}
                   password={password}
@@ -441,10 +466,8 @@ export default function SignInScreen() {
                   setAgreedToTerms={setAgreedToTerms}
                   loading={loading}
                   isGoogleLoading={isGoogleLoading}
-                  isAnonLoading={isAnonLoading}
                   onAction={handleAction}
                   onGoogleAction={handleGoogleSignIn}
-                  onAnonAction={handleAnonymousSignIn}
                   message={message}
                   setMessage={setMessage}
                   successState={successState}
@@ -464,6 +487,8 @@ export default function SignInScreen() {
   );
 }
 
+// ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
+
 const BrandHeader = memo(() => (
   <Animated.View
     entering={FadeInDown.duration(1000).springify()}
@@ -474,7 +499,7 @@ const BrandHeader = memo(() => (
 ));
 BrandHeader.displayName = 'BrandHeader';
 
-const FormField = ({ label, icon: Icon, children }: any) => (
+const FormField = ({ label, icon: Icon, children }: FormFieldProps) => (
   <View style={{ marginBottom: 16 }}>
     <Text className="text-[#00F0FF] font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
       {label}
@@ -492,8 +517,6 @@ const AuthForm = memo(
     setAuthMode,
     fullName,
     setFullName,
-    username,
-    setUsername,
     email,
     setEmail,
     password,
@@ -504,19 +527,23 @@ const AuthForm = memo(
     setAgreedToTerms,
     loading,
     isGoogleLoading,
-    isAnonLoading,
     onAction,
     onGoogleAction,
-    onAnonAction,
     message,
     setMessage,
     successState,
     router,
-  }: any) => {
+  }: AuthFormProps) => {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const isSignUp = authMode === 'sign-up';
-    const strength = getPasswordStrength(password);
+
+    const strength = password
+      ? AuthValidator.validatePassword(password).valid
+        ? { score: 4, label: 'STRONG', color: '#32FF00' }
+        : { score: 1, label: 'WEAK', color: '#FF007F' }
+      : { score: 0, label: '', color: 'transparent' };
+
     const passwordsMatch =
       confirmPassword.length > 0 && password === confirmPassword;
 
@@ -525,16 +552,10 @@ const AuthForm = memo(
 
     return (
       <Animated.View
+        // YOUR ORIGINAL PHYSICS RESTORED: This springify layout enables buttery smooth expansion
+        // and contraction of the form fields when toggling between Sign In and Sign Up.
         layout={Layout.springify().damping(20).stiffness(150)}
-        style={{
-          width: '100%',
-          padding: 24,
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.05)',
-          borderRadius: 18,
-          backgroundColor: 'rgba(0,0,0,0.4)',
-          overflow: 'hidden',
-        }}
+        style={styles.formContainer}
       >
         {successState !== 'none' ? (
           <Animated.View
@@ -549,78 +570,37 @@ const AuthForm = memo(
                 ? 'Access Granted'
                 : 'Identity Initialized'}
             </Text>
-
             <Text className="text-white/50 text-[10px] uppercase tracking-widest mt-2 text-center">
               {successState === 'login'
                 ? 'Synchronizing workspace...'
                 : 'Preparing secure connection...'}
             </Text>
-
             <View className="items-center justify-center mt-12">
-              <Animated.View
-                entering={ZoomIn.delay(200)}
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 24,
-                  borderWidth: 2,
-                  borderColor: 'rgba(50, 255, 0, 0.2)',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <ActivityIndicator color="#32FF00" size="small" />
-              </Animated.View>
+              <ActivityIndicator color="#32FF00" size="small" />
             </View>
           </Animated.View>
         ) : (
           <>
-            {/* TAB CONTROLLER */}
-            <View
-              style={{
-                flexDirection: 'row',
-                backgroundColor: 'rgba(255,255,255,0.03)',
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.1)',
-                borderRadius: 16,
-                padding: 4,
-                marginBottom: 24,
-              }}
-            >
+            <View style={styles.tabContainer}>
               <View style={{ flex: 1 }}>
                 <TouchableOpacity
                   onPress={() => {
                     setAuthMode('sign-in');
                     setConfirmPassword('');
                     setFullName('');
-                    if (setMessage) setMessage(null);
+                    setMessage(null);
                   }}
                   activeOpacity={0.8}
-                  style={{
-                    width: '100%',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: !isSignUp
-                      ? 'rgba(0, 240, 255, 0.3)'
-                      : 'transparent',
-                    backgroundColor: !isSignUp
-                      ? 'rgba(0, 240, 255, 0.1)'
-                      : 'transparent',
-                  }}
+                  style={[
+                    styles.tabButton,
+                    !isSignUp ? styles.tabActive : styles.tabInactive,
+                  ]}
                 >
                   <Text
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    style={{
-                      fontSize: 10,
-                      fontWeight: '900',
-                      textTransform: 'uppercase',
-                      letterSpacing: 2,
-                      color: !isSignUp ? '#00F0FF' : 'rgba(255,255,255,0.4)',
-                    }}
+                    style={[
+                      styles.tabText,
+                      !isSignUp ? styles.tabTextActive : styles.tabTextInactive,
+                    ]}
                   >
                     SIGN IN
                   </Text>
@@ -630,34 +610,19 @@ const AuthForm = memo(
                 <TouchableOpacity
                   onPress={() => {
                     setAuthMode('sign-up');
-                    if (setMessage) setMessage(null);
+                    setMessage(null);
                   }}
                   activeOpacity={0.8}
-                  style={{
-                    width: '100%',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: isSignUp
-                      ? 'rgba(0, 240, 255, 0.3)'
-                      : 'transparent',
-                    backgroundColor: isSignUp
-                      ? 'rgba(0, 240, 255, 0.1)'
-                      : 'transparent',
-                  }}
+                  style={[
+                    styles.tabButton,
+                    isSignUp ? styles.tabActive : styles.tabInactive,
+                  ]}
                 >
                   <Text
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    style={{
-                      fontSize: 10,
-                      fontWeight: '900',
-                      textTransform: 'uppercase',
-                      letterSpacing: 2,
-                      color: isSignUp ? '#00F0FF' : 'rgba(255,255,255,0.4)',
-                    }}
+                    style={[
+                      styles.tabText,
+                      isSignUp ? styles.tabTextActive : styles.tabTextInactive,
+                    ]}
                   >
                     SIGN UP
                   </Text>
@@ -680,23 +645,6 @@ const AuthForm = memo(
               </Animated.View>
             )}
 
-            {isSignUp && (
-              <Animated.View entering={SlideIn.delay(50)} exiting={SlideOut}>
-                <FormField label="Username" icon={AtSign}>
-                  <TextInput
-                    className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
-                    placeholder="Username"
-                    placeholderTextColor="#475569"
-                    value={username}
-                    onChangeText={setUsername}
-                    autoCapitalize="none"
-                    editable={!loading}
-                    autoCorrect={false}
-                  />
-                </FormField>
-              </Animated.View>
-            )}
-
             <FormField label="Email" icon={Mail}>
               <TextInput
                 className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
@@ -711,19 +659,15 @@ const AuthForm = memo(
               />
             </FormField>
 
-            {/* ----------------------------------------------------------------------------
-                  [MODULE: PASSWORD CONTAINER]
-                  ---------------------------------------------------------------------------- */}
             <View style={{ marginBottom: isSignUp ? 12 : 0 }}>
               <Text className="text-[#00F0FF] font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
                 PASSWORD
               </Text>
-
               <View className="bg-white/[0.02] border border-white/10 rounded-2xl h-16 flex-row items-center px-4">
                 <Lock size={18} color="#A1A1AA" />
                 <TextInput
                   className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
-                  placeholder="Min. 8 characters"
+                  placeholder="Min. 10 characters"
                   placeholderTextColor="#475569"
                   value={password}
                   onChangeText={setPassword}
@@ -743,8 +687,6 @@ const AuthForm = memo(
                   )}
                 </TouchableOpacity>
               </View>
-
-              {/* Strength Meter */}
               {isSignUp && password.length > 0 && (
                 <Animated.View
                   entering={FadeInDown}
@@ -752,12 +694,12 @@ const AuthForm = memo(
                   className="px-1 mt-4"
                 >
                   <View className="flex-row h-1 gap-1 mb-2">
-                    {[1, 2, 3, 4, 5].map((level) => (
+                    {[1, 2, 3, 4].map((level) => (
                       <View
                         key={level}
                         style={{
-                          flex: 1,
-                          borderRadius: 99,
+                          flex: 4,
+                          borderRadius: 80,
                           backgroundColor:
                             strength.score >= level
                               ? strength.color
@@ -768,7 +710,7 @@ const AuthForm = memo(
                   </View>
                   <View className="flex-row items-center justify-between">
                     <Text className="text-white/20 text-[8px] font-mono uppercase tracking-widest">
-                      8+ chars, uppercase, number, symbol
+                      uppercase, number, symbol
                     </Text>
                     <Text
                       style={{ color: strength.color }}
@@ -781,10 +723,6 @@ const AuthForm = memo(
               )}
             </View>
 
-            {/* ----------------------------------------------------------------------------
-                  [MODULE: FORGOT PASSWORD LINK]
-                  Cleanly placed entirely outside the input box, right-aligned, with standard mt-3 spacing.
-                  ---------------------------------------------------------------------------- */}
             {!isSignUp && (
               <Animated.View
                 entering={FadeInDown.duration(300)}
@@ -798,7 +736,7 @@ const AuthForm = memo(
                   onPress={() => router.push('/(auth)/forgot-password' as any)}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Text className="text-[#00F0FF] text-[11px] font-bold tracking-widest uppercase hover:text-white transition-colors">
+                  <Text className="text-[#00F0FF] text-[11px] items-center my-3 ml-1 font-bold tracking-widest uppercase hover:text-white transition-colors">
                     Forgot Password?
                   </Text>
                 </TouchableOpacity>
@@ -895,7 +833,7 @@ const AuthForm = memo(
                   >
                     {message.type === 'error'
                       ? 'Protocol Breach'
-                      : 'Verification Sent'}
+                      : 'System Message'}
                   </Text>
                   <Text className="text-white/70 text-[11px] font-medium leading-4 mt-1">
                     {message.text}
@@ -918,16 +856,16 @@ const AuthForm = memo(
             />
 
             <View className="flex-row items-center my-6 opacity-30">
-              <View className="flex-1 h-[1px] bg-white" />
-              <Text className="px-4 text-[14px] font-bold text-white uppercase tracking-widest">
-                --
+              <View className="flex-1 h-[1px] bg-cyan-500" />
+              <Text className="px-4 text-[14px] font-bold text-cyan-500 uppercase tracking-widest">
+                VerAI
               </Text>
-              <View className="flex-1 h-[1px] bg-white" />
+              <View className="flex-1 h-[1px] bg-cyan-500" />
             </View>
 
             <TouchableOpacity
               onPress={onGoogleAction}
-              disabled={isGoogleLoading || loading || isAnonLoading}
+              disabled={isGoogleLoading || loading}
               activeOpacity={0.7}
               className="flex-row items-center justify-center py-4 mb-3 transition-opacity bg-white border rounded-xl border-white/20"
             >
@@ -941,18 +879,6 @@ const AuthForm = memo(
                 {isGoogleLoading ? 'Connecting...' : 'SIGN IN GOOGLE'}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={onAnonAction}
-              disabled={isGoogleLoading || loading || isAnonLoading}
-              activeOpacity={0.7}
-              className="flex-row items-center justify-center py-4 transition-opacity bg-white/[0.05] border rounded-xl border-white/10"
-            >
-              <UserX size={18} color="#A1A1AA" style={{ marginRight: 10 }} />
-              <Text className="text-xs font-bold tracking-widest text-[#A1A1AA] uppercase">
-                {isAnonLoading ? 'Generating Session...' : 'GUEST SESSION'}
-              </Text>
-            </TouchableOpacity>
           </>
         )}
       </Animated.View>
@@ -962,11 +888,13 @@ const AuthForm = memo(
 AuthForm.displayName = 'AuthForm';
 
 const SecurityFooter = memo(() => (
-  <View className="flex-row items-center justify-center mt-10 opacity-40">
-    <Text className="text-white/80 text-[9px] font-black tracking-[2px] uppercase">
-      VIDEO & AUDIOURL TRANSCRIBER
-    </Text>
-  </View>
+  <FadeIn
+    delay={400}
+    duration={800}
+    translateYStart={10}
+    className="flex-row items-center justify-center mt-10 opacity-40"
+    children={undefined}
+  ></FadeIn>
 ));
 SecurityFooter.displayName = 'SecurityFooter';
 
@@ -979,16 +907,13 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
         paddingHorizontal: isDesktop ? 0 : 16,
       }}
     >
-      <Animated.View
-        entering={FadeInRight.duration(1200).springify().delay(200)}
-        style={{ marginBottom: 40 }}
-      ></Animated.View>
-
       <View className="flex-col gap-5 mt-4">
         {BENTO_ITEMS.map((item, index) => (
-          <Animated.View
+          <FadeIn
             key={item.title}
-            entering={FadeInRight.delay(200 + index * 100).springify()}
+            delay={200 + index * 150}
+            duration={800}
+            translateYStart={30}
           >
             <TouchableOpacity
               activeOpacity={0.8}
@@ -1012,19 +937,32 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
                 </View>
               </View>
             </TouchableOpacity>
-          </Animated.View>
+          </FadeIn>
         ))}
       </View>
 
-      <View className="flex-row items-center justify-center gap-10 mt-24 opacity-60">
-        <Youtube color="#FFFFFF" size={26} />
-        <Twitter color="#FFFFFF" size={26} />
-        <Github color="#FFFFFF" size={26} />
-      </View>
+      {/* FIXED SOCIAL ICON LAYOUT:
+        We use an explicit native <View> with robust flex-row and flex-wrap properties
+        to strictly enforce horizontal alignment across both Native APK and Web,
+        preventing the vertical stacking bug shown in your screenshots.
+      */}
+      <FadeIn delay={800} duration={800} translateYStart={15}>
+        <View style={styles.socialIconsContainer}>
+          <Youtube color="#FFFFFF" size={26} />
+          <Twitter color="#FFFFFF" size={26} />
+          <Github color="#FFFFFF" size={26} />
+          <Facebook color="#FFFFFF" size={26} />
+          <Instagram color="#FFFFFF" size={26} />
+          <Twitch color="#FFFFFF" size={26} />
+          <Video color="#FFFFFF" size={26} />
+        </View>
+      </FadeIn>
     </View>
   );
 });
 MarketingContent.displayName = 'MarketingContent';
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   desktopContainer: { flexDirection: 'row', flex: 1 },
@@ -1050,4 +988,52 @@ const styles = StyleSheet.create({
   },
   mobilePane: { padding: 24, paddingTop: 40 },
   brandIcon: { width: 100, height: 100 },
+  formContainer: {
+    width: '100%',
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    overflow: 'hidden',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 24,
+  },
+  tabButton: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  tabActive: {
+    borderColor: 'rgba(0, 240, 255, 0.3)',
+    backgroundColor: 'rgba(0, 240, 255, 0.1)',
+  },
+  tabInactive: { borderColor: 'transparent', backgroundColor: 'transparent' },
+  tabText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+  },
+  tabTextActive: { color: '#00F0FF' },
+  tabTextInactive: { color: 'rgba(255,255,255,0.4)' },
+  socialIconsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 30, // Requires React Native 0.71+
+    marginTop: 96,
+    opacity: 0.6,
+  },
 });
