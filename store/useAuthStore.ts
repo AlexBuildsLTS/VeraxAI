@@ -1,7 +1,7 @@
 /**
  * store/useAuthStore.ts
- * Verbum NorthOS - Enterprise Authentication State Manager (Production Ready)
- * Architecture: 2026 High-Performance Standards (Web & Native APK)
+ * VerbumAI - Authentication State Manager
+ * WEB / APK
  */
 
 import { create } from 'zustand';
@@ -13,15 +13,11 @@ import { Platform } from 'react-native';
 /**
  * [CRITICAL ROUTER LOCK]
  * When 'Confirm Email' is disabled in Supabase, signing up auto-triggers a SIGNED_IN event.
- * This lock completely blinds the Zustand store from broadcasting that temporary session to 
- * the Expo Router. This physically prevents the "black screen blink" layout crash on Web.
+ * This lock blinds the store from broadcasting that temporary session to Expo Router,
+ * preventing the "black screen blink" layout crash on Web.
  */
 let isRegisteringLock = false;
 
-/**
- * [MODULE: TYPE DEFINITIONS]
- * Maps the exact Supabase generated schema. Note: NO username column per your schema.
- */
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
 interface AuthState {
@@ -35,46 +31,41 @@ interface AuthState {
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  refreshProfile: (retryCount?: number) => Promise<void>;
   initialize: () => () => void;
   clearError: () => void;
 }
 
+/**
+ * Translates raw Supabase/network errors into user-facing messages.
+ */
 const interceptAuthError = (err: any, defaultMessage: string): string => {
   const msg = err?.message || '';
 
   if (msg.includes('Unexpected character: <') || msg.includes('JSON Parse error')) {
-    if (__DEV__) console.warn('[Auth Interceptor] ⚠️ Received HTML instead of JSON. Check network routing.');
-    return 'Network Protocol Error: The authentication gateway is misconfigured. Please verify the connection.';
+    if (__DEV__) console.warn('[Auth Interceptor] ⚠️ Received HTML instead of JSON.');
+    return 'Network Protocol Error: The authentication gateway is misconfigured.';
   }
-
   if (msg.includes('unexpected_failure') || msg.includes('500')) {
     if (__DEV__) console.error('[Auth Interceptor] 🚨 Backend Trigger Failure:', msg);
-    return 'System fault: Identity generation failed on the server. Please check Supabase triggers.';
+    return 'System fault: Identity generation failed on the server.';
   }
-
   if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
-    if (__DEV__) console.error('[Auth Interceptor] 🌐 Network Connectivity Issue:', msg);
-    return 'Neural link failed. The application cannot reach the authentication server. Please check your internet connection.';
+    if (__DEV__) console.error('[Auth Interceptor] 🌐 Network Issue:', msg);
+    return 'Neural link failed. Cannot reach the authentication server.';
   }
 
   return msg || defaultMessage;
 };
 
 /**
- * [MODULE: URL SANITIZER]
- * CRITICAL ANDROID FIX: Ensures the Supabase URL string is free of any invisible characters
- * that cause the native Android OkHttp client to instantly crash.
+ * Strips invisible characters from env URLs that crash Android OkHttp.
  */
 const sanitizeUrl = (url: string | undefined): string => {
   if (!url) return 'https://jhcgkqzjabsitfilajuh.supabase.co';
   return url.replace(/[\s\n\r]+$/g, '').replace(/\/$/, '');
 };
 
-/**
- * [MODULE: CORE STATE MANAGER]
- * Orchestrates all identity lifecycles securely across Web and APK environments.
- */
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   session: null,
@@ -85,24 +76,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
+  /**
+   * Email/password sign-in.
+   * CRITICAL APK FIX: A 3-second hard timeout guarantees isLoading becomes false
+   * even if refreshProfile loops or hangs — preventing infinite splash on Android.
+   */
   signInWithPassword: async (email: string, password: string) => {
     set({ isLoading: true, error: null });
-    if (__DEV__) console.log(`[Auth Store] 🔐 Attempting sign-in: ${email}`);
+    if (__DEV__) console.log(`[Auth Store] 🔐 Attempting sign -in: ${email} `);
 
     try {
       const safeUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL);
       if (__DEV__ && Platform.OS !== 'web') {
-        console.log(`[Auth Store] Native URL Check: ->${safeUrl}<-`);
+        console.log(`[Auth Store] Native URL Check: -> ${safeUrl} <-`);
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
       if (error) throw error;
 
-      if (__DEV__) console.log(`[Auth Store] ✅ Sign-in successful: ${data.user?.email}`);
+      if (__DEV__) console.log(`[Auth Store] ✅ Sign -in successful: ${data.user?.email} `);
 
       set({ session: data.session, user: data.user });
+
+      // Hard timeout: if profile fetch hangs for any reason, release the loading lock
+      // so _layout.tsx routing fires correctly on APK.
+      const profileTimeout = setTimeout(() => {
+        if (__DEV__) console.warn('[Auth Store] ⏱️ Profile timeout — forcing isLoading: false');
+        set({ isLoading: false });
+      }, 3000);
+
       await get().refreshProfile();
+      clearTimeout(profileTimeout);
 
       return { error: null };
     } catch (err: unknown) {
@@ -112,33 +116,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  /**
+   * Email/password registration.
+   * Router lock prevents the auto SIGNED_IN event from routing mid-signup.
+   */
   signUp: async (email: string, password: string, fullName: string) => {
-    // 1. ENGAGE THE ROUTER LOCK
     isRegisteringLock = true;
     set({ isLoading: true, error: null });
-
-    if (__DEV__) console.log(`[Auth Store] 📝 Attempting sign-up: ${email}`);
+    if (__DEV__) console.log(`[Auth Store] 📝 Attempting sign - up: ${email} `);
 
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: {
-            full_name: fullName,
-          },
-          emailRedirectTo: Platform.OS === 'web' ? window.location.origin : undefined
+          data: { full_name: fullName },
+          emailRedirectTo: Platform.OS === 'web' ? window.location.origin : undefined,
         },
       });
 
       if (error) throw error;
 
-      if (__DEV__) console.log(`[Auth Store] 📬 Sign-up request processed.`);
+      if (__DEV__) console.log(`[Auth Store] 📬 Sign - up processed.`);
 
-      // 2. SILENT PURGE (Blocked from UI by the lock)
+      // Purge the auto-session silently — UI is blindfolded by the lock
       if (data.session) {
         if (__DEV__) console.log('[Auth Store] 🛡️ Auto-session detected. Purging...');
-        // We can safely await this now because the UI layout is blindfolded by isRegisteringLock
         await supabase.auth.signOut();
       }
 
@@ -148,7 +151,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ error: mappedError, isLoading: false });
       return { error: mappedError };
     } finally {
-      // 3. RELEASE THE LOCK and ensure state remains empty so the UI can play the animation
       isRegisteringLock = false;
       set({ session: null, user: null, isLoading: false });
     }
@@ -165,12 +167,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  refreshProfile: async () => {
+  /**
+   * Fetches the user profile from Supabase.
+   * CRITICAL APK FIX: Limited to 3 retries maximum. Previously looped infinitely,
+   * which kept isLoading: true forever and prevented _layout.tsx routing from firing.
+   */
+  refreshProfile: async (retryCount = 0) => {
     const { session } = get();
     const userId = session?.user?.id;
 
     if (!userId) {
-      // APK FIX: Guarantee isLoading becomes false if no user is found so the boot splash drops
       set({ profile: null, isLoading: false });
       return;
     }
@@ -183,31 +189,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .maybeSingle();
 
       if (error) {
-        if (__DEV__) console.warn(`[Auth Kernel] ⚠️ Sync Error: ${error.message}`);
-        // APK FIX: Guarantee isLoading becomes false even on DB error
+        if (__DEV__) console.warn(`[Auth Kernel] ⚠️ Sync Error: ${error.message} `);
         set({ error: interceptAuthError(error, 'Profile sync failed.'), isLoading: false });
         return;
       }
 
       if (data) {
         set({ profile: data as Profile, error: null, isLoading: false });
+      } else if (retryCount < 3) {
+        // Profile may not have propagated yet — retry with backoff
+        if (__DEV__) console.log(`[Auth Kernel] ⏳ Profile propagating, retry ${retryCount + 1}/3...`);
+        setTimeout(() => get().refreshProfile(retryCount + 1), 1000);
       } else {
-        if (__DEV__) console.log('[Auth Kernel] ⏳ Profile propagating, polling in 1s...');
-        setTimeout(() => get().refreshProfile(), 1000);
+        // Profile never arrived — let the user in anyway, profile is non-critical for routing
+        if (__DEV__) console.warn('[Auth Kernel] ⚠️ Profile not found after 3 retries. Proceeding.');
+        set({ isLoading: false });
       }
     } catch (err: unknown) {
       if (__DEV__) console.warn('[Auth Kernel] 🚨 Non-fatal Store Error:', err);
-      // APK FIX: Guarantee isLoading becomes false on critical crash
       set({ profile: null, isLoading: false, error: interceptAuthError(err, 'Critical sync failure') });
     }
   },
 
+  /**
+   * Bootstraps the auth session on app launch.
+   * Reads persisted session from SecureStore (native) or localStorage (web),
+   * then subscribes to all future auth state changes.
+   */
   initialize: () => {
     if (__DEV__) console.log('[Auth Kernel] 🚀 Initializing Auth Matrix...');
 
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
-        if (__DEV__) console.warn('[Auth Kernel] Expected Session Boundary:', error.message);
+        if (__DEV__) console.warn('[Auth Kernel] Session boundary:', error.message);
       }
 
       set({ session, user: session?.user ?? null, isInitialized: true });
@@ -215,7 +229,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (session?.user) {
         get().refreshProfile();
       } else {
-        // APK FIX: If guest, immediately drop the loading state to dismiss the boot splash
         set({ isLoading: false });
       }
     }).catch(err => {
@@ -224,16 +237,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // 🚫 THE INTERCEPTOR: Completely blind the store while the SignUp lock is active!
+      // Blind the store during signup to prevent premature routing
       if (isRegisteringLock) {
-        if (__DEV__) console.log(`[Auth Kernel] 🔒 Ignoring Event during signup lock: ${event}`);
+        if (__DEV__) console.log(`[Auth Kernel] 🔒 Ignoring event during signup lock: ${event}`);
         return;
       }
 
-      if (__DEV__) console.log(`[Auth Kernel] ⚡ Event Dispatch: ${event}`);
+      if (__DEV__) console.log(`[Auth Kernel] ⚡ Event: ${event}`);
 
       if ((event as string) === 'TOKEN_REFRESH_FAILED') {
-        if (__DEV__) console.log('[Auth Kernel] Token expired. Dropping to guest state.');
         set({ session: null, user: null, profile: null, isLoading: false });
         return;
       }
@@ -247,8 +259,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   },
 }));
