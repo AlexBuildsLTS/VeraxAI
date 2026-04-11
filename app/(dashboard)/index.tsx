@@ -178,6 +178,7 @@ const AmbientGradient = ({
 
   return (
     <Animated.View
+    pointerEvents="none"
       style={[
         animatedStyle,
 

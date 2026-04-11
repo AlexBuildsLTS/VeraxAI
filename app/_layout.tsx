@@ -18,7 +18,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { Image } from 'expo-image';
 import { useAuthStore } from '../store/useAuthStore';
 import { ThemeProvider, DarkTheme } from '@react-navigation/native';
-
+import { ProcessingLoader } from '../components/ui/ProcessingLoader';
 
 // 1. Freeze the static image immediately so it doesn't flash
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -124,11 +124,7 @@ export default function RootLayout() {
               style={[styles.splashOverlay, { opacity: fadeAnim }]}
               pointerEvents="none"
             >
-              <Image
-                source={require('../assets/favicon.png')}
-                style={{ width: 150, height: 150 }}
-                contentFit="contain"
-              />
+              <ProcessingLoader size={120} color="#00F0FF" />
             </Animated.View>
           )}
         </View>

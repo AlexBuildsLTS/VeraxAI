@@ -1,17 +1,8 @@
 /**
- * FILE: app/(dashboard)/settings/profile.tsx
- * MODULE: User Profile Management (NorthOS)
- * ARCHITECTURE: 2026 High-Performance Standards (Web Vercel & Native APK)
- * * ============================================================================
- * MODULE OVERVIEW
- * ============================================================================
- * This interface handles user identity data, avatar synchronization via 
- * Supabase Storage, and core account metrics. 
- * * CORE FEATURES:
- * - Fluid UI/UX: Fully animated state transitions and hardware-accelerated ambient orbs.
- * - Robust Layouts: Native Flexbox locking ensures perfect alignment across APK and Web.
- * - Dynamic Role Badging: Automatically decodes user roles into visual security badges.
- * - Secure Handoffs: Protects navigation state directly interfacing with useAuthStore.
+ * app/(dashboard)/settings/profile.tsx
+ * ══════════════════════════════════════════════════════════════════════════════
+ * User Profile Management — Identity data, avatar sync, and account metrics.
+ * Architecture: 2026 High-Performance Standards (Web Vercel & Native APK)
  */
 
 import React, { memo, useState, useEffect, useCallback } from 'react';
@@ -67,121 +58,117 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-/**
- * ─── MODULE: ROLE DECODER ────────────────────────────────────────────────────
- * Generates specific badge styling based on the user's database role matrix.
- */
+// ─── MODULE: ROLE DECODER ────────────────────────────────────────────────────
+// Maps user role string to visual badge color tokens.
 const getRoleConfig = (role?: string) => {
   switch (role?.toLowerCase()) {
     case 'admin':
       return {
         label: 'ADMIN',
-        bg: 'rgba(255, 51, 102, 0.15)',
+        bg: 'rgba(255,51,102,0.15)',
         text: '#FF3366',
-        border: 'rgba(255, 51, 102, 0.3)',
+        border: 'rgba(255,51,102,0.3)',
       };
     case 'premium':
       return {
         label: 'PREMIUM',
-        bg: 'rgba(255, 170, 0, 0.15)',
+        bg: 'rgba(255,170,0,0.15)',
         text: '#FFD700',
-        border: 'rgba(255, 170, 0, 0.3)',
+        border: 'rgba(255,170,0,0.3)',
       };
     default:
       return {
         label: 'MEMBER',
-        bg: 'rgba(0, 240, 255, 0.15)',
+        bg: 'rgba(0,240,255,0.15)',
         text: '#00F0FF',
-        border: 'rgba(0, 240, 255, 0.3)',
+        border: 'rgba(0,240,255,0.3)',
       };
   }
 };
 
-/**
- * ─── MODULE: AMBIENT NEURAL ORBS ─────────────────────────────────────────────
- * Provides a deep, 60fps hardware-accelerated animated background.
- */
-const NeuralOrb = memo(({ delay = 0, color = '#00F0FF' }: { delay?: number; color?: string }) => {
-  const pulse = useSharedValue(0);
-  const { width, height } = Dimensions.get('window');
+// ─── MODULE: AMBIENT NEURAL ORBS ─────────────────────────────────────────────
+// 60fps hardware-accelerated background glow. pointerEvents="none" prevents
+// touch interception on Android APK.
+const NeuralOrb = memo(
+  ({ delay = 0, color = '#00F0FF' }: { delay?: number; color?: string }) => {
+    const pulse = useSharedValue(0);
+    const { width, height } = Dimensions.get('window');
 
-  useEffect(() => {
-    pulse.value = withDelay(
-      delay,
-      withRepeat(withTiming(1, { duration: 8000 }), -1, true),
+    useEffect(() => {
+      pulse.value = withDelay(
+        delay,
+        withRepeat(withTiming(1, { duration: 8000 }), -1, true),
+      );
+    }, [delay, pulse]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [
+        { scale: interpolate(pulse.value, [0, 1], [1, 1.6]) },
+        { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
+        { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
+      ],
+      opacity: interpolate(pulse.value, [0, 1], [0.03, 0.09]),
+    }));
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          animatedStyle,
+          {
+            position: 'absolute',
+            width: 600,
+            height: 600,
+            backgroundColor: color,
+            borderRadius: 300,
+            ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
+          },
+        ]}
+      />
     );
-  }, [delay, pulse]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(pulse.value, [0, 1], [1, 1.6]) },
-      { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.05]) },
-      { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
-    ],
-    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.09]),
-  }));
-
-  return (
-    <Animated.View
-      style={[
-        animatedStyle,
-        {
-          position: 'absolute',
-          width: 600,
-          height: 600,
-          backgroundColor: color,
-          borderRadius: 300,
-          ...(Platform.OS === 'web' ? { filter: 'blur(120px)' } : {}),
-        },
-      ]}
-    />
-  );
-});
+  },
+);
 NeuralOrb.displayName = 'NeuralOrb';
 
-/**
- * ─── MODULE: STAT PILL ───────────────────────────────────────────────────────
- * Renders small metric cards for user metadata (Provider, Network, Date).
- */
-const StatPill = memo(({
-  icon: Icon,
-  label,
-  value,
-  color = '#00F0FF',
-}: {
-  icon: any;
-  label: string;
-  value: string;
-  color?: string;
-}) => (
-  <View
-    className="items-center flex-1 p-4 border rounded-2xl border-white/10"
-    style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
-  >
-    <Icon size={16} color={color} />
-    <Text className="text-[8px] font-black uppercase tracking-[2px] text-white/30 mt-2">
-      {label}
-    </Text>
-    <Text
-      className="text-[10px] font-bold text-white/80 mt-1"
-      numberOfLines={1}
+// ─── MODULE: STAT PILL ───────────────────────────────────────────────────────
+// Small metric card displaying a single user metadata value with icon.
+const StatPill = memo(
+  ({
+    icon: Icon,
+    label,
+    value,
+    color = '#00F0FF',
+  }: {
+    icon: any;
+    label: string;
+    value: string;
+    color?: string;
+  }) => (
+    <View
+      className="items-center flex-1 p-4 border rounded-2xl border-white/10"
+      style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
     >
-      {value}
-    </Text>
-  </View>
-));
+      <Icon size={16} color={color} />
+      <Text className="text-[8px] font-black uppercase tracking-[2px] text-white/30 mt-2">
+        {label}
+      </Text>
+      <Text
+        className="text-[10px] font-bold text-white/80 mt-1"
+        numberOfLines={1}
+      >
+        {value}
+      </Text>
+    </View>
+  ),
+);
 StatPill.displayName = 'StatPill';
 
-/**
- * ─── MODULE: PRIMARY SCREEN COMPONENT ────────────────────────────────────────
- */
+// ─── MODULE: PRIMARY SCREEN ───────────────────────────────────────────────────
 export default function ProfileSettingsScreen() {
   const router = useRouter();
-
-  // Core Identity State
   const { user, profile } = useAuthStore();
 
-  // UI State
+  // ─── LOCAL STATE ─────────────────────────────────────────────────────────
   const [fullName, setFullName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -190,11 +177,11 @@ export default function ProfileSettingsScreen() {
   const [saved, setSaved] = useState(false);
   const [memberSince, setMemberSince] = useState('');
 
-  // Security Badge Configuration
   const userRole = profile?.role || 'member';
   const roleConfig = getRoleConfig(userRole);
 
-  // Avatar Ring Physics
+  // ─── AVATAR RING PHYSICS ──────────────────────────────────────────────────
+  // Pulse animation triggered on avatar upload events.
   const ringScale = useSharedValue(1);
   const ringOpacity = useSharedValue(0.3);
 
@@ -211,7 +198,8 @@ export default function ProfileSettingsScreen() {
     opacity: ringOpacity.value,
   }));
 
-  // Identity Synchronization
+  // ─── IDENTITY SYNC ────────────────────────────────────────────────────────
+  // Loads profile data from Supabase on mount.
   useEffect(() => {
     async function loadProfile() {
       if (!user) return;
@@ -243,7 +231,8 @@ export default function ProfileSettingsScreen() {
     loadProfile();
   }, [user]);
 
-  // Media Library Bridge
+  // ─── MEDIA LIBRARY BRIDGE ─────────────────────────────────────────────────
+  // Requests gallery permission then launches the image picker.
   const handlePickImage = useCallback(async () => {
     if (Platform.OS !== 'web') {
       const { status } =
@@ -253,18 +242,17 @@ export default function ProfileSettingsScreen() {
         return;
       }
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 0.8,
     });
-
     if (result.canceled || !result.assets?.length) return;
     performAvatarSync(result.assets[0]);
   }, [user]);
 
-  // Storage Bucket Upload Engine
+  // ─── STORAGE BUCKET UPLOAD ENGINE ────────────────────────────────────────
+  // Uploads selected image to Supabase Storage and updates profile record.
   const performAvatarSync = async (asset: ImagePicker.ImagePickerAsset) => {
     setIsUploading(true);
     pulseRing();
@@ -277,7 +265,6 @@ export default function ProfileSettingsScreen() {
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(fileName, blob, { contentType: `image/${ext}`, upsert: true });
-
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage
@@ -292,11 +279,10 @@ export default function ProfileSettingsScreen() {
           updated_at: new Date().toISOString(),
         })
         .eq('id', user!.id);
-      
+
       await supabase.auth.updateUser({
         data: { avatar_url: urlData.publicUrl },
       });
-      
       pulseRing();
     } catch (err: any) {
       Alert.alert(
@@ -308,7 +294,8 @@ export default function ProfileSettingsScreen() {
     }
   };
 
-  // Database Identity Commit
+  // ─── DATABASE IDENTITY COMMIT ─────────────────────────────────────────────
+  // Persists full name changes to Supabase profiles table and auth metadata.
   const handleSaveProfile = useCallback(async () => {
     if (!user || !fullName.trim()) {
       Alert.alert('Input Required', 'Operative designation cannot be blank.');
@@ -324,9 +311,8 @@ export default function ProfileSettingsScreen() {
         })
         .eq('id', user.id);
       if (error) throw error;
-      
+
       await supabase.auth.updateUser({ data: { full_name: fullName.trim() } });
-      
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err: any) {
@@ -336,13 +322,10 @@ export default function ProfileSettingsScreen() {
     }
   }, [user, fullName]);
 
-  // Smart Navigation Fallback
+  // ─── NAVIGATION ───────────────────────────────────────────────────────────
   const handleReturn = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/settings'); 
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace('/settings');
   };
 
   if (isLoading) {
@@ -355,7 +338,7 @@ export default function ProfileSettingsScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#020205]">
-      {/* Ambient Neural Background */}
+      {/* Ambient background orbs — pointerEvents none prevents Android touch blocking */}
       <View className="absolute inset-0 overflow-hidden" pointerEvents="none">
         <NeuralOrb delay={0} color="#00F0FF" />
         <NeuralOrb delay={4000} color="#FF007F" />
@@ -370,8 +353,7 @@ export default function ProfileSettingsScreen() {
           contentContainerStyle={{ paddingBottom: 150 }}
         >
           <View className="w-full max-w-2xl px-6 pt-12 mx-auto">
-            
-            {/* ─── HEADER CONTROLS ─── */}
+            {/* ─── RETURN BUTTON ───────────────────────────────────────────── */}
             <TouchableOpacity
               onPress={handleReturn}
               className="flex-row items-center mb-12 gap-x-3"
@@ -383,16 +365,15 @@ export default function ProfileSettingsScreen() {
               </Text>
             </TouchableOpacity>
 
+            {/* ─── PAGE HEADER ─────────────────────────────────────────────── */}
             <FadeIn>
               <View className="flex-row items-center justify-between mb-12">
                 <View>
-                  <Text className="text-5xl font-black leading-none tracking-tighter text-white uppercase md:text-6xl">
-                    <Text className="text-[#00F0FF]">PROFILE</Text>
+                  <Text className="text-5xl font-black leading-none tracking-tighter text-[#00F0FF] uppercase md:text-6xl">
+                    PROFILE
                   </Text>
                   <View className="h-1 w-24 bg-[#00F0FF] mt-6 rounded-full shadow-[0_0_15px_#00F0FF]" />
                 </View>
-
-                {/* DYNAMIC ROLE BADGE */}
                 <View
                   style={{
                     backgroundColor: roleConfig.bg,
@@ -417,17 +398,21 @@ export default function ProfileSettingsScreen() {
               </View>
             </FadeIn>
 
-            {/* ─── MODULE: AVATAR MANAGEMENT ─── */}
+            {/* ─── MODULE: AVATAR MANAGEMENT ───────────────────────────────── */}
             <FadeIn delay={100}>
               <GlassCard className="items-center p-10 mb-8 border-white/5">
                 <View className="relative mb-8">
-                  {/* Reactive Energy Ring */}
+                  {/* Reactive energy ring — pulses on upload */}
                   <Animated.View
+                    pointerEvents="none"
                     style={[
                       ringStyle,
                       {
                         position: 'absolute',
-                        inset: -8,
+                        top: -8,
+                        left: -8,
+                        right: -8,
+                        bottom: -8,
                         borderRadius: 999,
                         borderWidth: 2,
                         borderColor: '#00F0FF',
@@ -454,22 +439,16 @@ export default function ProfileSettingsScreen() {
 
                   <TouchableOpacity
                     onPress={handlePickImage}
-                    className="absolute bottom-1 right-1 w-11 h-11 rounded-full bg-[#00F0FF] items-center justify-center border-4 border-[#020205] shadow-lg shadow-[#00F0FF]/50"
+                    activeOpacity={0.8}
+                    className="absolute bottom-1 right-1 w-11 h-11 rounded-full bg-[#00F0FF] items-center justify-center border-4 border-[#020205]"
                   >
                     <Pencil size={18} color="#020205" />
                   </TouchableOpacity>
                 </View>
 
-                {/* ─── CRITICAL FIX: AVATAR ACTION BUTTONS ─── */}
-                {/* This layout completely discards unreliable Tailwind Flexbox wrappers that 
-                  collapse vertically on some environments. It explicitly enforces a native 
-                  horizontal flex structure, guaranteeing perfect alignment of the actions 
-                  in a sleek, dark pill container centered beneath the avatar.
-                */}
+                {/* Avatar action pill — upload + reset buttons */}
                 <View style={styles.actionPillWrapper}>
                   <View style={styles.actionPillContainer}>
-                    
-                    {/* Primary Action: Upload / Update */}
                     <TouchableOpacity
                       onPress={handlePickImage}
                       disabled={isUploading}
@@ -481,9 +460,15 @@ export default function ProfileSettingsScreen() {
                           Transferring...
                         </Text>
                       ) : avatarUrl ? (
-                        <ArrowBigUpDash size={22} color="rgba(9, 186, 112, 0.8)" />
+                        <ArrowBigUpDash size={22} color="rgba(9,186,112,0.8)" />
                       ) : (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                        >
                           <Upload size={16} color="#00F0FF" />
                           <Text style={styles.actionTextUpload}>
                             UPDATE AVATAR
@@ -492,9 +477,10 @@ export default function ProfileSettingsScreen() {
                       )}
                     </TouchableOpacity>
 
-                    {/* Secondary Action: Reset / Clear */}
                     {avatarUrl && !isUploading && (
-                      <>
+                      <View
+                        style={{ flexDirection: 'row', alignItems: 'center' }}
+                      >
                         <View style={styles.actionDivider} />
                         <TouchableOpacity
                           onPress={() => setAvatarUrl('')}
@@ -503,19 +489,18 @@ export default function ProfileSettingsScreen() {
                         >
                           <RotateCcw size={20} color="#FF007F" />
                         </TouchableOpacity>
-                      </>
+                      </View>
                     )}
-
                   </View>
                 </View>
-
               </GlassCard>
             </FadeIn>
 
-            {/* ─── MODULE: IDENTITY FORM ─── */}
+            {/* ─── MODULE: IDENTITY FORM ────────────────────────────────────── */}
             <FadeIn delay={200}>
               <GlassCard className="p-8 mb-8 border-white/5">
                 <View className="gap-y-10">
+                  {/* Full name input */}
                   <View>
                     <View className="flex-row items-center mb-4 ml-1">
                       <User size={14} color="#00F0FF" />
@@ -523,17 +508,18 @@ export default function ProfileSettingsScreen() {
                         USERNAME
                       </Text>
                     </View>
-                    <View className="h-16 px-2 py-1 border justify-left bg-black/60 border-white/15 rounded-2xl">
+                    <View className="justify-center h-16 px-2 py-1 border bg-black/60 border-white/15 rounded-2xl">
                       <Input
                         value={fullName}
                         onChangeText={setFullName}
                         placeholder="User Name"
-                        className="text-lg font-bold text-white bg-transparent border-1"
+                        className="text-lg font-bold text-white bg-transparent border-0"
                         placeholderTextColor="rgba(255,255,255,0.15)"
                       />
                     </View>
                   </View>
 
+                  {/* Email — read only */}
                   <View>
                     <View className="flex-row items-center mb-4 ml-1">
                       <Mail size={14} color="rgba(255,255,255,0.3)" />
@@ -541,7 +527,7 @@ export default function ProfileSettingsScreen() {
                         System Email
                       </Text>
                     </View>
-                    <View className="flex-row items-center justify-between h-16 px-6 border shadow-inner opacity-50 bg-white/5 border-white/5 rounded-2xl">
+                    <View className="flex-row items-center justify-between h-16 px-6 border opacity-50 bg-white/5 border-white/5 rounded-2xl">
                       <Text className="font-mono text-sm tracking-tight text-white/40">
                         {user?.email}
                       </Text>
@@ -566,7 +552,7 @@ export default function ProfileSettingsScreen() {
               </GlassCard>
             </FadeIn>
 
-            {/* ─── MODULE: TELEMETRY PILLS ─── */}
+            {/* ─── MODULE: TELEMETRY PILLS ──────────────────────────────────── */}
             <FadeIn delay={300}>
               <View className="flex-row gap-x-4">
                 <StatPill
@@ -585,18 +571,18 @@ export default function ProfileSettingsScreen() {
                 />
                 <StatPill
                   icon={Sparkles}
-                  label="Access Date"
+                  label="CREATED"
                   value={memberSince}
                   color="#FF007F"
                 />
               </View>
             </FadeIn>
 
-            {/* ─── FOOTER ─── */}
+            {/* ─── FOOTER ───────────────────────────────────────────────────── */}
             <View className="items-center mt-20 opacity-30">
               <View className="h-[1px] w-12 bg-white/20 mb-4" />
               <Text className="text-[9px] font-mono tracking-[6px] text-white uppercase">
-                NorthOS PROFILE INTERFACE
+                VertAI PROFILE INTERFACE
               </Text>
             </View>
           </View>
@@ -607,6 +593,8 @@ export default function ProfileSettingsScreen() {
 }
 
 // ─── LOCAL STYLESHEET ────────────────────────────────────────────────────────
+// Native StyleSheet for components that require precise layout control
+// beyond what NativeWind provides reliably across web and APK.
 const styles = StyleSheet.create({
   actionPillWrapper: {
     flexDirection: 'row',
@@ -617,8 +605,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(5, 5, 10, 0.6)',
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(5,5,10,0.6)',
+    borderColor: 'rgba(255,255,255,0.1)',
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 8,
@@ -633,7 +621,7 @@ const styles = StyleSheet.create({
   actionDivider: {
     width: 1,
     height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     marginHorizontal: 4,
   },
   actionTextUpload: {
@@ -644,7 +632,7 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
   },
   actionTextTransferring: {
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 10,
     fontWeight: '900',
     textTransform: 'uppercase',

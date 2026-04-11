@@ -1,7 +1,8 @@
 /**
- * Input.tsx — Core Design System Text Input
- * Dark-mode-first with neon-cyan focus states.
- * Used across auth, dashboard, and settings screens.
+ * components/ui/Input.tsx
+ * Core design system text input.
+ * Dark-mode-first with neon cyan label and focus states.
+ * Supports optional label, error message, and all standard TextInput props.
  */
 
 import React from 'react';

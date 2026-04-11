@@ -198,6 +198,7 @@ const AmbientGradient = memo(
 
     return (
       <Animated.View
+       pointerEvents="none"    
         style={[
           animatedStyle,
           {
@@ -338,7 +339,8 @@ export default function SignInScreen() {
     setMessage(null);
     try {
       const redirectUri = AuthSession.makeRedirectUri({
-        path: '/auth/callback',
+        scheme: 'transcriber-pro',
+        path: 'auth/callback',
       });
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -870,9 +872,7 @@ const AuthForm = memo(
               className="flex-row items-center justify-center py-4 mb-3 transition-opacity bg-white border rounded-xl border-white/20"
             >
               <Image
-                source={{
-                  uri: 'https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg',
-                }}
+                source={require('../../assets/google-logo.png')}
                 style={{ width: 18, height: 18, marginRight: 10 }}
               />
               <Text className="text-xs font-bold tracking-widest text-black uppercase">
