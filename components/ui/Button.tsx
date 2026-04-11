@@ -1,14 +1,21 @@
+/**
+ * components/ui/Button.tsx
+ * Primary action button with loading state.
+ * Supports primary (neon cyan) and secondary (dark) variants.
+ * Accepts optional children for icon+text combos.
+ */
+
 import React from 'react';
 import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { cn } from '../../lib/utils';
 
 interface ButtonProps {
   onPress: () => void;
-  title?: string; // Optional because you might use children/icons
+  title?: string;
   isLoading?: boolean;
   className?: string;
   variant?: 'primary' | 'secondary';
-  children?: React.ReactNode; // FIXED: Added this so your video screen stops erroring
+  children?: React.ReactNode;
 }
 
 export const Button = ({
@@ -30,6 +37,7 @@ export const Button = ({
     <TouchableOpacity
       onPress={onPress}
       disabled={isLoading}
+      activeOpacity={0.75}
       className={cn(baseClass, variants[variant], className)}
     >
       {isLoading ? (
@@ -40,7 +48,7 @@ export const Button = ({
           {title && (
             <Text
               className={cn(
-                'text-base font-bold',
+                'text-base font-bold tracking-widest uppercase',
                 children ? 'ml-2' : '',
                 variant === 'primary' ? 'text-[#00F0FF]' : 'text-white',
               )}

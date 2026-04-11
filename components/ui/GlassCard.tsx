@@ -1,12 +1,17 @@
+/**
+ * components/ui/GlassCard.tsx
+ * Core glassmorphism card container.
+ * Accepts full ViewProps so callers control layout (flex-row, padding, etc.)
+ * The inner content wrapper is removed to prevent flex direction overrides.
+ */
+
 import React from 'react';
-import { View, StyleSheet, Platform, ViewProps } from 'react-native';
+import { View, ViewProps } from 'react-native';
 import { cn } from '../../lib/utils';
 
-// 1. EXTEND ViewProps so TypeScript knows this component accepts 'style'
 interface GlassCardProps extends ViewProps {
   children: React.ReactNode;
   className?: string;
-  // 2. ADD 'red' and 'green' for the Admin and Support cards
   glowColor?: 'cyan' | 'purple' | 'pink' | 'lime' | 'red' | 'green';
 }
 
@@ -14,8 +19,8 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   children,
   className,
   glowColor = 'cyan',
-  style, // Extract styles
-  ...props // Extract any other standard View props
+  style,
+  ...props
 }) => {
   const glowStyles = {
     cyan: 'border-neon-cyan/20 shadow-[0_0_30px_rgba(0,240,255,0.05)]',
@@ -29,15 +34,14 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   return (
     <View
       className={cn(
-        'relative overflow-hidden rounded-[32px] border bg-[#0f172a]/40', // Semi-transparent solid bg replaces BlurView
+        'rounded-[32px] border bg-[#0f172a]/40',
         glowStyles[glowColor],
         className,
       )}
-      style={style} // Apply the custom dynamic styles passed from index.tsx
+      style={style}
       {...props}
     >
-      {/* Content Layer */}
-      <View className="relative z-10">{children}</View>
+      {children}
     </View>
   );
 };

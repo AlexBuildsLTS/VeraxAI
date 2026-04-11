@@ -1,13 +1,9 @@
 /**
  * components/ui/ProfileDropdown.tsx
- * Verbum NorthOS — User Context & Navigation Node
- * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL:
- * 1. COMPILER SAFETY: Uses native React Native shadow props to bypass NativeWind bugs.
- * 2. STRUCTURAL INTEGRITY: Re-implemented w-10/h-10 and absolute positioning for web/mobile.
- * 3. DYNAMIC ROLE BADGING: Visual hierarchy based on user authorization level.
- * 4. GLASSMORPHISM: Safe WebkitBackdropFilter applied conditionally for web browsers.
- * ══════════════════════════════════════════════════════════════════════════════
+ * User context menu — avatar trigger with floating dropdown.
+ * Shows full name, email, dynamic role badge, and navigation actions.
+ * Platform-safe: uses native shadow props (not NativeWind) for glow effects.
+ * WebkitBackdropFilter applied conditionally for web blur support.
  */
 
 import React, { useState } from 'react';
@@ -15,9 +11,10 @@ import { View, Text, TouchableOpacity, Platform, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/useAuthStore';
 
-// ─── MODULE 1: UTILITIES & CONFIGURATION ──────────────────────────────────────
+// ─── UTILITIES ───────────────────────────────────────────────────────────────
 
-const getInitials = (name?: string) => {
+/** Extracts up to 2 initials from a display name. */
+const getInitials = (name?: string): string => {
   if (!name) return 'U';
   return name
     .split(' ')
@@ -27,41 +24,41 @@ const getInitials = (name?: string) => {
     .toUpperCase();
 };
 
+/** Returns color tokens for each user role. */
 const getRoleConfig = (role?: string) => {
   switch (role?.toLowerCase()) {
     case 'admin':
       return {
         label: 'ADMIN',
-        bg: 'rgba(255, 51, 102, 0.15)',
+        bg: 'rgba(255,51,102,0.15)',
         text: '#FF3366',
-        border: 'rgba(255, 51, 102, 0.3)',
+        border: 'rgba(255,51,102,0.3)',
         shadow: '#FF3366',
       };
     case 'premium':
       return {
         label: 'PREMIUM',
-        bg: 'rgba(255, 170, 0, 0.15)',
+        bg: 'rgba(255,170,0,0.15)',
         text: '#FFD700',
-        border: 'rgba(255, 170, 0, 0.3)',
+        border: 'rgba(255,170,0,0.3)',
         shadow: '#FFD700',
       };
     default:
       return {
         label: 'MEMBER',
-        bg: 'rgba(0, 240, 255, 0.15)',
+        bg: 'rgba(0,240,255,0.15)',
         text: '#00F0FF',
-        border: 'rgba(0, 240, 255, 0.3)',
+        border: 'rgba(0,240,255,0.3)',
         shadow: '#00F0FF',
       };
   }
 };
 
-// ─── MODULE 2: MAIN COMPONENT ─────────────────────────────────────────────────
+// ─── COMPONENT ───────────────────────────────────────────────────────────────
 
 export const ProfileDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
-
   const { user, profile, signOut } = useAuthStore();
 
   const fullName =
@@ -78,26 +75,29 @@ export const ProfileDropdown = () => {
     router.replace('/(auth)/sign-in');
   };
 
+  const handleNavigate = (path: string) => {
+    setIsOpen(false);
+    router.push(path as any);
+  };
+
   return (
     <View
       style={{ position: 'relative', alignItems: 'flex-end', zIndex: 9999 }}
     >
-      {/* ─── MODULE 3: AVATAR TRIGGER ─── */}
+      {/* Avatar trigger button */}
       <TouchableOpacity
         onPress={() => setIsOpen(!isOpen)}
-        // CRITICAL: Restored Tailwind structural classes for size and background
+        activeOpacity={0.8}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         className="w-10 h-10 rounded-full bg-[#020205] border border-white/10 items-center justify-center"
         style={{
           ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}),
-          // Compiler-Safe Shadows
           shadowColor: roleConfig.shadow,
           shadowOffset: { width: 0, height: 0 },
           shadowOpacity: 0.8,
           shadowRadius: 10,
           elevation: 5,
         }}
-        activeOpacity={0.8}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
         {avatarUrl ? (
           <Image
@@ -119,150 +119,155 @@ export const ProfileDropdown = () => {
         )}
       </TouchableOpacity>
 
-      {/* ─── MODULE 4: FLOATING DROPDOWN MENU ─── */}
+      {/* Floating dropdown menu */}
       {isOpen && (
-        <View
-          // CRITICAL: Restored absolute positioning, width, and background
-          className="absolute top-14 right-0 w-60 rounded-2xl bg-[#0A0D14]/95 border border-white/10 overflow-hidden"
-          style={{
-            ...(Platform.OS === 'web'
-              ? { WebkitBackdropFilter: 'blur(20px) saturate(180%)' as any }
-              : {}),
-            // Compiler-Safe Menu Shadows
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 10 },
-            shadowOpacity: 1,
-            shadowRadius: 20,
-            elevation: 15,
-          }}
-        >
-          {/* Header Info */}
+        <>
+          {/* Invisible backdrop to close dropdown when tapping outside */}
+          <TouchableOpacity
+            style={{ position: 'fixed' as any, inset: 0, zIndex: 9998 }}
+            onPress={() => setIsOpen(false)}
+            activeOpacity={1}
+          />
+
           <View
+            className="absolute top-14 right-0 w-60 rounded-2xl bg-[#0A0D14]/95 border border-white/10 overflow-hidden"
             style={{
-              padding: 16,
-              borderBottomWidth: 1,
-              borderBottomColor: 'rgba(255,255,255,0.05)',
+              zIndex: 9999,
+              ...(Platform.OS === 'web'
+                ? { WebkitBackdropFilter: 'blur(20px) saturate(180%)' as any }
+                : {}),
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 1,
+              shadowRadius: 20,
+              elevation: 15,
             }}
           >
+            {/* User info header */}
             <View
               style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 4,
+                padding: 16,
+                borderBottomWidth: 1,
+                borderBottomColor: 'rgba(255,255,255,0.05)',
               }}
             >
-              <Text
-                style={{
-                  color: '#ffffff',
-                  fontWeight: '800',
-                  fontSize: 13,
-                  flex: 1,
-                }}
-                numberOfLines={1}
-              >
-                {fullName}
-              </Text>
-
-              {/* Dynamic Role Badge */}
               <View
                 style={{
-                  backgroundColor: roleConfig.bg,
-                  borderColor: roleConfig.border,
-                  borderWidth: 1,
-                  paddingHorizontal: 6,
-                  paddingVertical: 3,
-                  borderRadius: 6,
-                  marginLeft: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 4,
                 }}
               >
                 <Text
                   style={{
-                    color: roleConfig.text,
-                    fontSize: 8,
-                    fontWeight: '900',
-                    letterSpacing: 1,
-                  }}
-                >
-                  {roleConfig.label}
-                </Text>
-              </View>
-            </View>
-            <Text
-              style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-              numberOfLines={1}
-            >
-              {email}
-            </Text>
-          </View>
-
-          {/* Action Links */}
-          <View style={{ padding: 8 }}>
-            {userRole === 'admin' && (
-              <TouchableOpacity
-                onPress={() => {
-                  setIsOpen(false);
-                  router.push('/admin');
-                }}
-                className="flex-row items-center p-3 rounded-xl hover:bg-white/5"
-              >
-                <Text
-                  style={{
-                    color: '#FF3366',
-                    fontSize: 11,
+                    color: '#fff',
                     fontWeight: '800',
+                    fontSize: 13,
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {fullName}
+                </Text>
+                {/* Role badge */}
+                <View
+                  style={{
+                    backgroundColor: roleConfig.bg,
+                    borderColor: roleConfig.border,
+                    borderWidth: 1,
+                    paddingHorizontal: 6,
+                    paddingVertical: 3,
+                    borderRadius: 6,
+                    marginLeft: 8,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: roleConfig.text,
+                      fontSize: 8,
+                      fontWeight: '900',
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {roleConfig.label}
+                  </Text>
+                </View>
+              </View>
+              <Text
+                style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                numberOfLines={1}
+              >
+                {email}
+              </Text>
+            </View>
+
+            {/* Navigation actions */}
+            <View style={{ padding: 8 }}>
+              {userRole === 'admin' && (
+                <TouchableOpacity
+                  onPress={() => handleNavigate('/admin')}
+                  activeOpacity={0.7}
+                  className="flex-row items-center p-3 rounded-xl"
+                  style={{ backgroundColor: 'rgba(255,51,102,0.05)' }}
+                >
+                  <Text
+                    style={{
+                      color: '#FF3366',
+                      fontSize: 11,
+                      fontWeight: '800',
+                      letterSpacing: 1,
+                    }}
+                  >
+                    🛡️ ADMIN
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                onPress={() => handleNavigate('/settings')}
+                activeOpacity={0.7}
+                className="flex-row items-center p-3 rounded-xl"
+              >
+                <Text
+                  style={{
+                    color: 'rgba(255,255,255,0.8)',
+                    fontSize: 11,
+                    fontWeight: '700',
                     letterSpacing: 1,
                   }}
                 >
-                  🛡️ ADMIN
+                  ⚙️ SETTINGS
                 </Text>
               </TouchableOpacity>
-            )}
 
-            <TouchableOpacity
-              onPress={() => {
-                setIsOpen(false);
-                router.push('/settings');
-              }}
-              className="flex-row items-center p-3 rounded-xl hover:bg-white/5"
-            >
-              <Text
+              <View
                 style={{
-                  color: 'rgba(255,255,255,0.8)',
-                  fontSize: 11,
-                  fontWeight: '700',
-                  letterSpacing: 1,
+                  height: 1,
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  marginVertical: 4,
                 }}
-              >
-                ⚙️ SETTINGS
-              </Text>
-            </TouchableOpacity>
+              />
 
-            <View
-              style={{
-                height: 1,
-                backgroundColor: 'rgba(255,255,255,0.05)',
-                marginVertical: 4,
-              }}
-            />
-
-            <TouchableOpacity
-              onPress={handleSignOut}
-              className="flex-row items-center p-3 rounded-xl hover:bg-white/5"
-            >
-              <Text
-                style={{
-                  color: 'rgba(255,255,255,0.4)',
-                  fontSize: 11,
-                  fontWeight: '700',
-                  letterSpacing: 1,
-                }}
+              <TouchableOpacity
+                onPress={handleSignOut}
+                activeOpacity={0.7}
+                className="flex-row items-center p-3 rounded-xl"
               >
-                SIGN OUT
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={{
+                    color: 'rgba(255,255,255,0.4)',
+                    fontSize: 11,
+                    fontWeight: '700',
+                    letterSpacing: 1,
+                  }}
+                >
+                  SIGN OUT
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </>
       )}
     </View>
   );
