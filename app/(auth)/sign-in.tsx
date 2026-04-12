@@ -334,49 +334,86 @@ export default function SignInScreen() {
    * OAuth execution via Expo Auth Session.
    * Handles app-to-browser handoff and deep linking back to the APK.
    */
+  /**
+   * OAuth execution via Expo Auth Session.
+   * Fixed for VeraxAI APK and Web Browser Redirects.
+   */
+  /**
+   * Finalized Google OAuth Handshake
+   * Handles Fragment (#) parsing for APK and Query (?) parsing for Web.
+   */
   const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
     setMessage(null);
     try {
+      // 1. Prepare the deep-link return path
       const redirectUri = AuthSession.makeRedirectUri({
         scheme: 'veraxai',
         path: 'auth/callback',
       });
+
+      // 2. Initialize OAuth flow with Supabase
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: redirectUri, skipBrowserRedirect: true },
+        options: {
+          redirectTo: redirectUri,
+          skipBrowserRedirect: true,
+        },
       });
+
       if (error) throw error;
+      if (!data?.url)
+        throw new Error('OAuth Portal URL could not be generated.');
 
-      if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(
-          data.url,
-          redirectUri,
-        );
+      // 3. Open the secure system browser
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        redirectUri,
+      );
 
-        if (result.type === 'success' && result.url) {
-          const urlParams = new URL(result.url);
-          const accessToken = result.url.match(/access_token=([^&]*)/)?.[1];
-          const refreshToken = result.url.match(/refresh_token=([^&]*)/)?.[1];
-          if (accessToken && refreshToken) {
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-            router.replace('/(dashboard)');
-          }
+      // 4. Extract and process the return tokens
+      if (result.type === 'success' && result.url) {
+        // We split by '#' for mobile, and fallback to splitting by '?' for web/proxies
+        const urlParts = result.url.split('#');
+        const hashParams = urlParts[1];
+        const queryParams = result.url.split('?')[1];
+
+        // Combine both into a search parser
+        const params = new URLSearchParams(hashParams || queryParams || '');
+
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+
+        if (access_token && refresh_token) {
+          // Inject the session into the Supabase client
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+
+          if (sessionError) throw sessionError;
+
+          // CRITICAL: Force the AuthStore to download the profile row immediately
+          await useAuthStore.getState().refreshProfile();
+
+          // Final handoff to the dashboard
+          router.replace('/(dashboard)');
+        } else {
+          throw new Error(
+            'Verification failed: Handshake tokens were not returned.',
+          );
         }
       }
     } catch (e: any) {
+      console.error('[VeraxAI Auth Fault]', e);
       setMessage({
         type: 'error',
-        text: mapAuthError(e.message || 'OAuth execution failed.'),
+        text: e.message || 'Identity link failed. Please try again.',
       });
     } finally {
       setIsGoogleLoading(false);
     }
   };
-
   return (
     <View className="flex-1 bg-[#000016]">
       {/* Android Physics Fix: Z-index omitted entirely. By placing this View first 
