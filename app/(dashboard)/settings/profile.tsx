@@ -255,35 +255,43 @@ export default function ProfileSettingsScreen() {
   }, [user]);
 
   // ─── STORAGE BUCKET UPLOAD ENGINE ────────────────────────────────────────
-  // Robust Universal Upload: Handles Blob on Web and Base64 Buffer on Android/iOS
   const performAvatarSync = async (asset: ImagePicker.ImagePickerAsset) => {
     setIsUploading(true);
     pulseRing();
     try {
       const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
       const fileName = `${user!.id}/avatar_${Date.now()}.${ext}`;
-      let uploadData: any;
+      
+      let uploadError;
 
       if (Platform.OS === 'web') {
-        // Web Env: Fetch natively resolves the Blob
+        // Web Environment: Fetch natively resolves the Blob
         const response = await fetch(asset.uri);
-        uploadData = await response.blob();
+        const blob = await response.blob();
+        
+        const { error } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, blob, { 
+            contentType: `image/${ext}`, 
+            upsert: true 
+          });
+        uploadError = error;
       } else {
-        // Native: Read FileSystem to Base64 to bypass local URI restrictions
-        const FS = FileSystem as any;
-        const base64String = await FS.readAsStringAsync(asset.uri, {
-          encoding: 'base64',
-        });
-        uploadData = decode(base64String); // Converts Base64 to ArrowBuffer for SupaDB
-      }
+        // Native Environment: React Native FormData bypasses URI fetch restrictions
+        const formData = new FormData();
+        formData.append('file', {
+          uri: asset.uri,
+          name: fileName,
+          type: `image/${ext}`,
+        } as any);
 
-      // Execute Storage Upload
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, uploadData, {
-          contentType: `image/${ext}`,
-          upsert: true,
-        });
+        const { error } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, formData, { 
+            upsert: true 
+          });
+        uploadError = error;
+      }
 
       if (uploadError) throw uploadError;
 
@@ -307,6 +315,7 @@ export default function ProfileSettingsScreen() {
       });
       pulseRing();
     } catch (err: any) {
+      console.error('[Avatar Sync]', err);
       Alert.alert(
         'Upload Interrupted',
         err.message || 'Storage node unreachable.',
@@ -315,7 +324,6 @@ export default function ProfileSettingsScreen() {
       setIsUploading(false);
     }
   };
-
   // ─── DATABASE IDENTITY COMMIT ─────────────────────────────────────────────
   // Persists full name changes to Supabase profiles table and auth metadata.
   const handleSaveProfile = useCallback(async () => {

@@ -183,11 +183,11 @@ const ExportControlMatrix = React.memo(
     return (
       <Animated.View
         entering={FadeInDown.duration(600).springify()}
-        style={{ 
-          zIndex: 30, 
-          width: '100%', 
-          marginBottom: 32, // Enforced spacing for Web
-          paddingBottom: 16  // Extra breathing room
+        style={{
+          zIndex: 30,
+          width: '100%',
+          marginBottom: 32, 
+          paddingBottom: 16, 
         }}
       >
         <ScrollView
@@ -842,7 +842,6 @@ export default function MasterIntelligenceView() {
     videoRecord?.status === 'queued';
   const isCompleted = videoRecord?.status === 'completed';
 
-  // ─── NATIVE OS FILE EXPORT DISPATCHER ───
   const handleExport = useCallback(
     async (format: 'txt' | 'srt' | 'json' | 'md') => {
       if (!videoRecord || !transcript) return;
@@ -852,6 +851,7 @@ export default function MasterIntelligenceView() {
         transcript: transcript as unknown as Transcript,
         insights: insights as unknown as AiInsights,
       };
+
       const options = {
         format,
         includeTimestamps: true,
@@ -861,36 +861,15 @@ export default function MasterIntelligenceView() {
       };
 
       try {
+        // 1. Generate the raw text content
         const result = ExportBuilder.exportTranscript(exportPayload, options);
+
+        // 2. Override the default filename with the actual Video Title
         const safeName = displayTitle.slice(0, 30).replace(/[^a-z0-9]/gi, '_');
-        const filename = `${safeName}.${format}`;
+        result.filename = `${safeName}.${format}`;
 
-        if (IS_WEB) {
-          ExportBuilder.downloadExport(result);
-        } else {
-          const fs: any = FileSystem;
-          const cacheDir = fs.cacheDirectory;
-          const path = `${cacheDir}${filename}`;
-
-          await fs.writeAsStringAsync(path, result.content, {
-            encoding: fs.EncodingType.UTF8,
-          });
-
-          const available = await Sharing.isAvailableAsync();
-          if (available) {
-            await Sharing.shareAsync(path, {
-              mimeType: ExportBuilder.mimeTypes[format] || 'text/plain',
-              dialogTitle: `Export Report`,
-              UTI: format === 'json' ? 'public.json' : 'public.plain-text',
-            });
-          } else {
-            await Clipboard.setStringAsync(result.content);
-            Alert.alert(
-              'Copied',
-              'Sharing unavailable on this device. Content copied to clipboard.',
-            );
-          }
-        }
+        // 3. Trigger the Universal Downloader (Handles Web & Mobile automatically!)
+        await ExportBuilder.downloadExport(result);
       } catch (err) {
         console.error('[Export Failure]', err);
         Alert.alert(

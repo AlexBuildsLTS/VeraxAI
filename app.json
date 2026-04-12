@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "transcriber-pro",
-    "slug": "transcriber-pro",
+    "name": "veraxai",
+    "slug": "veraxai",
     "version": "1.0.0",
-    "scheme": "transcriber-pro",
+    "scheme": "veraxai",
     "orientation": "portrait",
     "platforms": ["ios", "android", "web"],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.transcriberpro.app",
+      "bundleIdentifier": "com.veraxai.app",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app needs access to the microphone to transcribe your speech in real-time.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your library to import video files for transcription.",
@@ -19,7 +19,7 @@
       }
     },
     "android": {
-      "package": "com.transcriberpro.app",
+      "package": "com.veraxai.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/favicon.png",
         "backgroundColor": "#020205"
@@ -87,4 +87,3 @@
     }
   }
 }
-  

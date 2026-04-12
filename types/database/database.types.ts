@@ -380,7 +380,19 @@ export type Database = {
     }
     Functions: {
       check_is_admin: { Args: never; Returns: boolean }
+      get_daily_token_usage: {
+        Args: { days_back?: number }
+        Returns: {
+          total_requests: number
+          total_tokens: number
+          usage_date: string
+        }[]
+      }
       get_my_workspace_ids: { Args: never; Returns: string[] }
+      increment_key_burn: {
+        Args: { key_id: string; token_amount: number }
+        Returns: undefined
+      }
       increment_workspace_usage: {
         Args: { p_minutes: number; p_workspace_id: string }
         Returns: undefined

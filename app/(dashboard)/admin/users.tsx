@@ -7,7 +7,7 @@
  * 2. REAL-TIME SYNC: Listens to the 'profiles' table for instant registry updates.
  * 3. TIER-LESS ARCHITECTURE: Purged 'tier' dependency; relies strictly on 'role'.
  * 4. BAN MANAGEMENT: Custom ban durations + instant unban restores. Banned users stay visible.
- * 5. DESIGN SYSTEM: Strictly utilizes the THEME object for all color mapping.
+ * 5. TOUCH FIXES: Strict input styling & keyboard tap persistence enabled.
  * ----------------------------------------------------------------------------
  */
 
@@ -27,19 +27,17 @@ import {
   UIManager,
   Alert,
   Dimensions,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Search,
   Ban,
-  CheckCircle,
   UserCog,
-  ChevronLeft,
   Trash2,
   Calendar,
   ShieldAlert,
   Mail,
-  Fingerprint,
   AlertTriangle,
   RefreshCcw,
   Coins,
@@ -50,7 +48,7 @@ import {
   Shield,
   CheckCircle2,
   Clock,
-  ArrowBigLeftDash, // Added Return Icon
+  ArrowBigLeftDash,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import Animated, {
@@ -60,9 +58,7 @@ import Animated, {
   withRepeat,
   withTiming,
   interpolate,
-  FadeInDown,
   Easing,
-  FadeInUp,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
@@ -83,15 +79,24 @@ if (
 // ─── STRICT THEME ENFORCEMENT ───
 const THEME = {
   obsidian: '#000012',
-  indigo: '#6366f1',
+  danger: '#FF007F',
+  success: '#32FF00',
+  warning: '#F59E0B',
+  cyan: '#00F0FF',
+  purple: '#8A2BE2',
   slate: '#94a3b8',
-  danger: '#FF007F', // Neon Pink
-  success: '#32FF00', // Neon Green
-  warning: '#F59E0B', // Amber
-  white: '#ffffff',
-  cyan: '#00F0FF', // Neon Cyan
-  purple: '#8A2BE2', // Neon Purple
 };
+
+// ─── STRICT INPUT FIX (Android Hover Bypass) ───
+const strictInputStyle = {
+  flex: 1,
+  height: '100%',
+  color: '#FFFFFF',
+  paddingVertical: 0,
+  margin: 0,
+  textAlignVertical: 'center',
+  ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
+} as any;
 
 type UserRole = Database['public']['Enums']['user_role'];
 
@@ -108,9 +113,7 @@ interface UserProfile {
   custom_api_key: string | null;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: AMBIENT ORB ENGINE (APK TOUCH-SAFE)
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── AMBIENT ORB ENGINE ───
 const AmbientOrb = ({
   color,
   size,
@@ -157,7 +160,7 @@ const AmbientOrb = ({
           left,
           right,
           bottom,
-          pointerEvents: 'none', // CRITICAL: Touch-safe for Android
+          pointerEvents: 'none',
         },
         anim,
       ]}
@@ -165,9 +168,6 @@ const AmbientOrb = ({
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: MAIN USER DIRECTORY COMPONENT
-// ══════════════════════════════════════════════════════════════════════════════
 export default function AdminUsersScreen() {
   const router = useRouter();
   const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -183,15 +183,11 @@ export default function AdminUsersScreen() {
   const [banModalVisible, setBanModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
-
-  // Custom Ban State
   const [customBanDays, setCustomBanDays] = useState('');
 
-  // ─── DATA FETCH ENGINE ───
   const loadUsers = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     try {
-      // Fetches all users, ensuring banned ones remain in the list
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -208,7 +204,6 @@ export default function AdminUsersScreen() {
     }
   }, []);
 
-  // ─── REAL-TIME SUBSCRIPTION ───
   useEffect(() => {
     loadUsers();
     const channelId = `admin_users_registry_${Date.now()}`;
@@ -222,7 +217,6 @@ export default function AdminUsersScreen() {
         },
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
@@ -238,19 +232,15 @@ export default function AdminUsersScreen() {
     }
   };
 
-  // ─── ADMIN ACTIONS ───
   const handleRoleUpdate = async (newValue: string) => {
     if (!selectedUser) return;
     triggerHaptic('selection');
-
     try {
       const { error } = await supabase
         .from('profiles')
         .update({ role: newValue as UserRole })
         .eq('id', selectedUser.id);
-
       if (error) throw error;
-
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setSelectedUser((prev) =>
         prev ? { ...prev, role: newValue as UserRole } : null,
@@ -278,7 +268,6 @@ export default function AdminUsersScreen() {
         .from('profiles')
         .update({ tokens_balance: newBalance })
         .eq('id', userId);
-
       if (error) throw error;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setUsers(
@@ -296,7 +285,6 @@ export default function AdminUsersScreen() {
     triggerHaptic('warning');
     setBanModalVisible(false);
     setCustomBanDays('');
-
     try {
       let bannedUntil = null;
       if (durationDays) {
@@ -306,14 +294,11 @@ export default function AdminUsersScreen() {
       } else {
         bannedUntil = '2099-12-31T23:59:59.000Z'; // Permanent Lock
       }
-
       const { error } = await supabase
         .from('profiles')
         .update({ status: 'banned', banned_until: bannedUntil })
         .eq('id', selectedUser.id);
-
       if (error) throw error;
-
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setUsers(
         users.map((u) =>
@@ -335,9 +320,7 @@ export default function AdminUsersScreen() {
         .from('profiles')
         .update({ status: 'active', banned_until: null })
         .eq('id', userId);
-
       if (error) throw error;
-
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setUsers(
         users.map((u) =>
@@ -352,15 +335,12 @@ export default function AdminUsersScreen() {
   const executeDelete = async () => {
     if (!selectedUser) return;
     setDeleteModalVisible(false);
-
     try {
       const { error } = await supabase
         .from('profiles')
         .delete()
         .eq('id', selectedUser.id);
-
       if (error) throw error;
-
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setUsers(users.filter((u) => u.id !== selectedUser.id));
       triggerHaptic('success');
@@ -369,7 +349,6 @@ export default function AdminUsersScreen() {
     }
   };
 
-  // ─── CARD RENDERER ───
   const renderUserCard = ({
     item,
     index,
@@ -378,11 +357,9 @@ export default function AdminUsersScreen() {
     index: number;
   }) => {
     const isBanned = item.status === 'banned' || item.banned_until !== null;
-
     const cardBgClass = isBanned
       ? 'bg-[#FF007F]/[0.05] border-[#FF007F]/30'
       : 'bg-white/[0.015] border-white/5';
-
     const joinDate = new Date(item.created_at).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -397,7 +374,6 @@ export default function AdminUsersScreen() {
             cardBgClass,
           )}
         >
-          {/* Top Section: Avatar & Info */}
           <View className="flex-row items-start gap-4 md:gap-5">
             <View
               className={cn(
@@ -476,7 +452,6 @@ export default function AdminUsersScreen() {
                 </Text>
               </View>
 
-              {/* Enhanced Stats Row */}
               <View className="flex-row flex-wrap items-center gap-x-4 md:gap-x-6 gap-y-2">
                 <View className="flex-row items-center gap-1.5">
                   <Coins size={12} color={THEME.warning} />
@@ -509,7 +484,7 @@ export default function AdminUsersScreen() {
             </View>
           </View>
 
-          {/* Action Buttons with Flex Wrap for perfect Mobile grid scaling */}
+          {/* Action Buttons */}
           <View className="flex-row flex-wrap items-center gap-2 pt-4 mt-4 border-t md:gap-3 border-white/5">
             <TouchableOpacity
               onPress={() => {
@@ -602,8 +577,10 @@ export default function AdminUsersScreen() {
         delay={2000}
       />
 
-      <View className="flex-1 w-full max-w-5xl mx-auto">
-        {/* HEADER SECTION */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        className="flex-1 w-full max-w-5xl mx-auto"
+      >
         <View className="flex-col px-6 pt-6 pb-4 border-b border-white/5">
           <TouchableOpacity
             onPress={() => router.replace('/admin')}
@@ -619,14 +596,11 @@ export default function AdminUsersScreen() {
 
           <View className="flex-row items-center justify-between">
             <View>
-              <Text className="text-3xl font-black tracking-tighter text-white uppercase">
-                Registry
-              </Text>
+              <Text className="text-3xl font-black tracking-tighter text-white uppercase"></Text>
               <Text className="text-[9px] md:text-[10px] font-bold text-white/40 uppercase tracking-[2px] mt-1">
                 {users.length} Active PID Logs
               </Text>
             </View>
-
             <TouchableOpacity
               onPress={() => loadUsers(false)}
               className="items-center justify-center w-10 h-10 border rounded-2xl bg-[#00F0FF]/10 border-[#00F0FF]/20 active:scale-95"
@@ -636,18 +610,20 @@ export default function AdminUsersScreen() {
           </View>
         </View>
 
-        {/* SEARCH INTERFACE */}
+        {/* SEARCH INTERFACE FIX */}
         <View className="w-full max-w-4xl px-4 mx-auto mt-6 mb-6 md:px-6">
           <GlassCard className="flex-row items-center gap-3 px-5 border shadow-lg h-14 rounded-[20px] bg-white/[0.02] border-white/5 shadow-black/20">
             <Search size={18} color={THEME.slate} opacity={0.5} />
-            <TextInput
-              className="flex-1 text-sm font-bold tracking-wide text-white outline-none"
-              placeholder="FILTER BY EMAIL OR UUID..."
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              value={search}
-              onChangeText={setSearch}
-              autoCapitalize="none"
-            />
+            <View className="justify-center flex-1 h-full">
+              <TextInput
+                style={strictInputStyle}
+                placeholder="FILTER BY EMAIL OR UUID..."
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+              />
+            </View>
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')}>
                 <XCircle size={18} color={THEME.slate} opacity={0.5} />
@@ -656,7 +632,9 @@ export default function AdminUsersScreen() {
           </GlassCard>
         </View>
 
+        {/* CRITICAL FIX: keyboardShouldPersistTaps="handled" */}
         <FlatList
+          keyboardShouldPersistTaps="handled"
           data={users.filter(
             (u) =>
               u.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -685,11 +663,9 @@ export default function AdminUsersScreen() {
             </View>
           }
         />
-      </View>
+      </KeyboardAvoidingView>
 
-      {/* ════════ 4. ADMIN MODALS ════════ */}
-
-      {/* ACCESS MODAL */}
+      {/* ════════ ADMIN MODALS ════════ */}
       <Modal visible={roleModalVisible} transparent animationType="slide">
         <View className="items-center justify-center flex-1 p-6 bg-[#000012]/90">
           <GlassCard className="w-full max-w-md p-8 border bg-[#050A15] border-[#00F0FF]/20 rounded-[40px] shadow-2xl shadow-cyan-900/20">
@@ -736,7 +712,6 @@ export default function AdminUsersScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-
             <TouchableOpacity
               onPress={() => setRoleModalVisible(false)}
               className="py-4 mt-2"
@@ -749,7 +724,6 @@ export default function AdminUsersScreen() {
         </View>
       </Modal>
 
-      {/* BAN MODAL WITH CUSTOM DAYS */}
       <Modal visible={banModalVisible} transparent animationType="fade">
         <View className="items-center justify-center flex-1 p-6 bg-[#000012]/95">
           <GlassCard className="w-full max-w-sm p-8 border bg-[#050A15] border-white/10 rounded-[40px] shadow-2xl shadow-black">
@@ -780,16 +754,17 @@ export default function AdminUsersScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Custom Days Input */}
             <View className="flex-row items-center gap-3 mb-3">
-              <TextInput
-                placeholder="Custom Days"
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                keyboardType="numeric"
-                value={customBanDays}
-                onChangeText={setCustomBanDays}
-                className="flex-1 h-14 px-4 font-mono text-xs text-white border rounded-2xl bg-white/[0.02] border-white/10 focus:border-amber-500"
-              />
+              <View className="justify-center flex-1 px-4 border h-14 rounded-2xl bg-white/[0.02] border-white/10 focus-within:border-amber-500">
+                <TextInput
+                  style={strictInputStyle}
+                  placeholder="Custom Days"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  keyboardType="numeric"
+                  value={customBanDays}
+                  onChangeText={setCustomBanDays}
+                />
+              </View>
               <TouchableOpacity
                 onPress={() => executeBan(parseInt(customBanDays) || 30)}
                 className="items-center justify-center px-4 border h-14 bg-amber-500/10 border-amber-500/30 rounded-2xl"
@@ -822,7 +797,6 @@ export default function AdminUsersScreen() {
         </View>
       </Modal>
 
-      {/* PURGE MODAL */}
       <Modal visible={deleteModalVisible} transparent animationType="slide">
         <View className="items-center justify-center flex-1 p-6 bg-[#000012]/95">
           <GlassCard className="w-full max-w-sm p-10 border bg-[#050A15] border-[#FF007F]/20 rounded-[50px] shadow-2xl shadow-pink-900/20">
@@ -839,7 +813,6 @@ export default function AdminUsersScreen() {
                 is an irreversible database transaction.
               </Text>
             </View>
-
             <TouchableOpacity
               onPress={executeDelete}
               className="py-5 mb-4 border bg-[#FF007F]/10 border-[#FF007F]/30 rounded-3xl hover:bg-[#FF007F]/20 active:scale-95"
@@ -848,7 +821,6 @@ export default function AdminUsersScreen() {
                 Execute Purge
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               onPress={() => setDeleteModalVisible(false)}
               className="py-4"

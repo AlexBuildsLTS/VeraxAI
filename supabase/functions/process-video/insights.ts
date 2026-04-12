@@ -1,19 +1,20 @@
 /**
  * supabase/functions/process-video/insights.ts
- * Master AI Insights Generation — Gemini 3.1 Flash-Lite [TITAN TIER]
+ * Master AI Insights Generation — Gemini 3.1 Flash-Lite
  * ----------------------------------------------------------------------------
  * ARCHITECTURE & PROTOCOLS:
  * 1. STRICT SCHEMA ENFORCEMENT: Guarantees 100% valid JSON payload parsing.
- * 2. NATIVE TRANSLATION MATRIX: Forces flawless native translation of all 
- * output values into the user's selected language, while strictly preserving 
- * English JSON keys to maintain database schema integrity.
- * 3. DYNAMIC CHRONOLOGY: AI autonomously determines chapter count (1-8) 
- * based on raw media length, prioritizing deep, analytical summaries over volume.
- * 4. SURVIVAL PROTOCOL: Exponential backoff handles 503s, 429s, and transient network errors.
+ * 2. CASCADING HYBRID ROTATION: Prioritizes the Master Env Key, then dynamically 
+ * queries the 'system_api_keys' database table for UI-injected fallback keys.
+ * 3. TELEMETRY SYNC: Autonomously updates the 'tokens_burned' column via RPC 
+ * if a database fallback key is utilized.
+ * 4. ELITE PROMPT ENGINEERING: Forces embedded Markdown, native translation, 
+ * and dynamic chapter scaling based on content duration.
  * ----------------------------------------------------------------------------
  */
 
 import { GoogleGenerativeAI, SchemaType, ResponseSchema } from 'npm:@google/generative-ai@^0.24.1';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 // ─── INTELLIGENCE SCHEMA DEFINITION ──────────────────────────────────────────
 const InsightsSchema: ResponseSchema = {
@@ -21,61 +22,37 @@ const InsightsSchema: ResponseSchema = {
   properties: {
     summary: {
       type: SchemaType.STRING,
-      description:
-        'A highly professional, comprehensive executive summary. Must scale dynamically in depth to perfectly cover the core themes, arguments, and conclusions of the entire content. Written with elite analytical precision.',
+      description: 'A highly professional, comprehensive executive summary. MUST utilize rich Markdown formatting (bolding key terms) for readability. Scales dynamically in depth.',
     },
     conclusion: {
       type: SchemaType.STRING,
-      description:
-        'A definitive, professional 2-3 sentence concluding synthesis. Distills the single most valuable outcome or lesson from the content. A powerful closing statement.',
+      description: 'A definitive, professional 2-3 sentence concluding synthesis. Distills the ultimate core lesson.',
     },
     chapters: {
       type: SchemaType.ARRAY,
-      description:
-        'Between 1 and 8 chronological chapters. The AI must scale this dynamically based on video length. Long videos get fewer, but massively detailed chapters.',
+      description: 'Chronological chapters mapping the narrative. Scales between 1 to 8 chapters based on length.',
       items: {
         type: SchemaType.OBJECT,
         properties: {
-          timestamp: {
-            type: SchemaType.STRING,
-            description: 'Estimated starting timestamp in MM:SS or HH:MM:SS format.',
-          },
-          title: {
-            type: SchemaType.STRING,
-            description: 'A highly professional, engaging title for this specific segment.',
-          },
-          description: {
-            type: SchemaType.STRING,
-            description: 'An extensive, deeply accurate explanation of the specific points, arguments, and events covered in this chapter.',
-          },
+          timestamp: { type: SchemaType.STRING, description: 'Format strictly as MM:SS or HH:MM:SS based on audio cues.' },
+          title: { type: SchemaType.STRING, description: 'A highly engaging, professional title for this segment.' },
+          description: { type: SchemaType.STRING, description: 'Deeply accurate explanation. Use Markdown bullet points if listing multiple sub-topics.' },
         },
         required: ['timestamp', 'title', 'description'],
       },
     },
     key_takeaways: {
       type: SchemaType.ARRAY,
-      description:
-        'The absolute most important, profound, and actionable insights extracted from the content. Maximum of 5 to 8 takeaways.',
+      description: 'The absolute most important, profound, and actionable insights. Max 5 to 8. Formatted as punchy, standalone statements.',
       items: { type: SchemaType.STRING },
     },
     seo_metadata: {
       type: SchemaType.OBJECT,
-      description: 'Highly optimized SEO metadata for content categorization and discovery.',
+      description: 'Highly optimized SEO metadata for content categorization and algorithmic discovery.',
       properties: {
-        tags: {
-          type: SchemaType.ARRAY,
-          description: 'Highly relevant keywords and topic tags.',
-          items: { type: SchemaType.STRING },
-        },
-        suggested_titles: {
-          type: SchemaType.ARRAY,
-          description: 'Engaging, highly accurate alternative titles for the overarching content.',
-          items: { type: SchemaType.STRING },
-        },
-        description: {
-          type: SchemaType.STRING,
-          description: 'A compelling, accurate meta description optimized for search indexing.',
-        },
+        tags: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: 'High-value search keywords.' },
+        suggested_titles: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: 'Click-optimized, professional title alternatives.' },
+        description: { type: SchemaType.STRING, description: 'A compelling 160-character meta description.' },
       },
       required: ['tags', 'suggested_titles', 'description'],
     },
@@ -100,9 +77,6 @@ export type InsightsResult = {
 
 // ─── UTILITY ENGINES ─────────────────────────────────────────────────────────
 
-/**
- * Extracts clean JSON even if the AI model wraps it in markdown blocks or prepends text.
- */
 function extractCleanJson(text: string): string {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -112,9 +86,6 @@ function extractCleanJson(text: string): string {
   return text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
-/**
- * Exponential backoff retry wrapper to survive transient Gemini API errors (503, 429).
- */
 async function withRetry<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
   let attempt = 0;
   while (attempt < maxAttempts) {
@@ -131,14 +102,50 @@ async function withRetry<T>(operation: () => Promise<T>, maxAttempts = 3): Promi
   throw new Error('Retry loop exhausted.');
 }
 
-/**
- * Categorizes the raw transcript by word count to inform the AI's generation depth.
- */
 function getContentCategory(transcript: string): 'short' | 'medium' | 'long' {
   const wordCount = transcript.split(/\s+/).length;
   if (wordCount < 1000) return 'short';
   if (wordCount < 5000) return 'medium';
   return 'long';
+}
+
+// ─── HYBRID KEY FETCHING ENGINE ─────────────────────────────────────────────
+
+async function getCascadingKeys(): Promise<{ id: string | null, key: string }[]> {
+  const keys: { id: string | null, key: string }[] = [];
+
+  // 1. Master Environment Key (Fastest, zero DB latency)
+  const primary = Deno.env.get('GEMINI_API_KEY');
+  if (primary) {
+    keys.push({ id: null, key: primary });
+  }
+
+  // 2. Fetch UI Fallback Keys (Wrapped in try/catch to survive DB timeouts)
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+    if (supabaseUrl && serviceKey) {
+      const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+      const { data: dbKeys, error } = await supabaseAdmin
+        .from('system_api_keys')
+        .select('id, encrypted_key')
+        .eq('status', 'active')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (dbKeys && dbKeys.length > 0) {
+        for (const k of dbKeys) {
+          keys.push({ id: k.id, key: k.encrypted_key });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Insights:KeyFetch] Failed to pull fallback keys from DB:', err);
+  }
+
+  return keys;
 }
 
 // ─── MAIN GENERATION PIPELINE ────────────────────────────────────────────────
@@ -148,23 +155,17 @@ export async function generateInsights(
   language: string,
   difficulty: string,
 ): Promise<InsightsResult> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) throw new Error('GEMINI_CONFIG_ERROR: Gemini API key is not configured.');
+
+  const apiKeys = await getCascadingKeys();
+
+  if (apiKeys.length === 0) {
+    throw new Error('GEMINI_CONFIG_ERROR: No API keys configured in Environment or Database.');
+  }
 
   const category = getContentCategory(transcript);
   const targetModel = 'gemini-3.1-flash-lite-preview';
 
-  console.log(`[Insights] Model: ${targetModel} | Target Language: ${language} | Category: ${category}`);
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: targetModel,
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: InsightsSchema,
-      temperature: 0.15, // Ultra-low temperature for maximum factual accuracy and strict adherence
-    },
-  });
+  console.log(`[Insights] Model: ${targetModel} | Target Language: ${language} | Keys Loaded: ${apiKeys.length}`);
 
   // Cap at 800k chars to stay safely within Flash-Lite's 1M context window limit
   const safeTranscript = transcript.length > 800000
@@ -173,38 +174,75 @@ export async function generateInsights(
 
   const prompt = buildPrompt(safeTranscript, language, difficulty, category);
 
-  try {
-    const startTime = Date.now();
+  let lastError: unknown;
 
-    const result = await withRetry(() => model.generateContent(prompt));
+  // ─── CASCADING ROTATION LOOP ───
+  for (let i = 0; i < apiKeys.length; i++) {
+    const currentKeyObj = apiKeys[i];
+    console.log(`[Insights] Attempting generation with API Key slot #${i + 1}`);
 
-    const responseText = result.response.text();
-    if (!responseText) throw new Error('EMPTY_RESPONSE: Gemini returned no content.');
+    try {
+      const genAI = new GoogleGenerativeAI(currentKeyObj.key);
+      const model = genAI.getGenerativeModel({
+        model: targetModel,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: InsightsSchema,
+          temperature: 0.15, // Ultra-low temperature for maximum factual precision
+        },
+      });
 
-    const parsed = JSON.parse(extractCleanJson(responseText));
+      const startTime = Date.now();
+      const result = await withRetry(() => model.generateContent(prompt));
 
-    const elapsed = Date.now() - startTime;
-    const tokens = result.response.usageMetadata?.totalTokenCount ?? 0;
+      const responseText = result.response.text();
+      if (!responseText) throw new Error('EMPTY_RESPONSE: Gemini returned no content.');
 
-    console.log(`[Insights] ✓ Intelligence Generated in ${elapsed}ms | Tokens: ${tokens} | Chapters: ${parsed.chapters?.length ?? 0}`);
+      const parsed = JSON.parse(extractCleanJson(responseText));
+      const elapsed = Date.now() - startTime;
+      const tokens = result.response.usageMetadata?.totalTokenCount ?? 0;
 
-    return {
-      model: targetModel,
-      summary: parsed.summary ?? '',
-      conclusion: parsed.conclusion ?? '',
-      chapters: Array.isArray(parsed.chapters) ? parsed.chapters : [],
-      key_takeaways: Array.isArray(parsed.key_takeaways) ? parsed.key_takeaways : [],
-      seo_metadata: parsed.seo_metadata ?? { tags: [], suggested_titles: [], description: '' },
-      tokens_used: tokens,
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Insights:FATAL]', msg);
-    throw new Error(`INSIGHTS_GENERATION_FAILED: ${msg}`);
+      console.log(`[Insights] ✓ Success! Generated in ${elapsed}ms using Key #${i + 1} | Tokens: ${tokens}`);
+
+      // ─── TELEMETRY SYNC ───
+      if (currentKeyObj.id) {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+          const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+          if (supabaseUrl && serviceKey) {
+            const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+            await supabaseAdmin.rpc('increment_key_burn', {
+              key_id: currentKeyObj.id,
+              token_amount: tokens
+            });
+          }
+        } catch (telemetryErr) {
+          console.warn('[Insights:Telemetry] Failed to sync token burn to DB:', telemetryErr);
+        }
+      }
+
+      return {
+        model: targetModel,
+        summary: parsed.summary ?? '',
+        conclusion: parsed.conclusion ?? '',
+        chapters: Array.isArray(parsed.chapters) ? parsed.chapters : [],
+        key_takeaways: Array.isArray(parsed.key_takeaways) ? parsed.key_takeaways : [],
+        seo_metadata: parsed.seo_metadata ?? { tags: [], suggested_titles: [], description: '' },
+        tokens_used: tokens,
+      };
+
+    } catch (err: unknown) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Insights:KeyRotation] Key slot #${i + 1} failed: ${msg}. Falling back to next key...`);
+    }
   }
+
+  console.error('[Insights:FATAL] All provided API keys exhausted or rate-limited.');
+  throw new Error(`INSIGHTS_GENERATION_FAILED: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
-// ─── PROMPT ENGINEERING CORE ─────────────────────────────────────────────────
+// ─── ELITE PROMPT ENGINEERING CORE ───────────────────────────────────────────
 
 function buildPrompt(
   transcript: string,
@@ -213,38 +251,42 @@ function buildPrompt(
   category: 'short' | 'medium' | 'long',
 ): string {
   const difficultyGuides: Record<string, string> = {
-    beginner: 'Use highly accessible, clear language. Define any complex terminology simply and accurately.',
+    beginner: 'Use highly accessible, clear language. Define complex terminology simply. Emphasize clarity and approachability.',
     standard: 'Maintain a pristine, professional executive tone. Balance analytical depth with optimal readability.',
-    advanced: 'Assume elite domain expertise. Use precise technical or industry-standard terminology. Provide nuanced, forensic-level analysis.',
+    advanced: 'Assume elite domain expertise. Use precise technical, academic, or industry-standard terminology. Provide nuanced, forensic-level analysis.',
   };
 
   const depthGuide = {
-    short: 'Write a highly concentrated 2-paragraph summary. Output 1 to 3 distinct chapters based on natural shifts in the content.',
-    medium: 'Write an elite 3-4 paragraph executive summary. Output 3 to 6 detailed chapters mapping the chronology.',
-    long: 'Write a massive, profound 4-6 paragraph executive summary. Output exactly 5 to 8 major chronological chapters. Do not spam micro-chapters. Group large timeframes into massive, highly detailed chapter descriptions.',
+    short: 'Write a highly concentrated 2-paragraph summary. Output exactly 1 to 3 distinct chapters mapping the core shifts.',
+    medium: 'Write an elite 3-4 paragraph executive summary. Output exactly 3 to 6 detailed chapters mapping the chronology.',
+    long: 'Write a massive, profound 4-6 paragraph executive dossier. Output exactly 5 to 8 major chronological chapters. Do not spam micro-chapters. Group large timeframes into massive, highly detailed descriptions.',
   }[category];
 
-  return `You are an elite, top-tier Senior Intelligence Analyst tasked with producing a flawless, publication-ready dossier.
+  return `You are VerAI's elite, top-tier Senior Intelligence Analyst and Linguistic Expert tasked with producing a flawless, publication-ready dossier.
 
-TASK: Decrypt and analyze the verbatim transcript below to produce perfectly structured, extremely accurate insights.
+TASK: Decrypt and analyze the verbatim transcript below to produce perfectly structured, profound insights.
 
-TARGET OUTPUT LANGUAGE: ${language}
+TARGET OUTPUT LANGUAGE: ${language.toUpperCase()}
 AUDIENCE CALIBRATION: ${difficulty} — ${difficultyGuides[difficulty] ?? difficultyGuides.standard}
 
-CRITICAL TRANSLATION PROTOCOL (MANDATORY):
-1. The JSON keys MUST remain in pure English (e.g., "summary", "conclusion", "chapters").
-2. ALL string values INSIDE the JSON (the actual generated text, titles, descriptions, takeaways, tags) MUST be translated into ${language} with absolute grammatical perfection and native fluency. 
-3. Do not output English content inside the values if the Target Language is not English.
+CRITICAL TRANSLATION PROTOCOL (ABSOLUTE OVERRIDE):
+1. The JSON schema structure and keys (e.g., "summary", "conclusion", "chapters", "title") MUST remain in pure English. Never translate the JSON keys.
+2. ALL string values INSIDE the JSON (the actual generated text, descriptions, takeaways, tags) MUST be translated into ${language.toUpperCase()} with native, grammatical perfection and fluency.
+3. If the target language is NOT English, under no circumstances should English text appear in the values unless it is an untranslatable proper noun.
 
-CRITICAL COVERAGE PROTOCOL (MANDATORY):
+RICH FORMATTING PROTOCOL (MANDATORY):
+- You MUST utilize rich Markdown formatting INSIDE the JSON string values.
+- Use **bolding** for crucial terms, metrics, or names to make the text scannable.
+- Use Markdown lists (- item) inside chapter descriptions if explaining multi-step processes.
+
+CRITICAL COVERAGE PROTOCOL:
 - You MUST process the narrative from the absolute 00:00 mark to the FINAL WORD of the transcript. Do not stop analyzing halfway through.
 - ${depthGuide}
-- Prioritize extreme quality and analytical depth over sheer volume. A summary of a chapter should be comprehensive, accurate, and highly professional.
+- Prioritize extreme quality and analytical depth over sheer volume.
 
 STRICT RULES:
-1. Your ENTIRE response must be valid JSON matching the schema exactly.
-2. NO markdown formatting outside of the JSON string values. NO preamble.
-3. Zero hallucinations. Extract data strictly from the provided text.
+1. OUTPUT ONLY VALID JSON. No conversational preamble. No backticks framing the output.
+2. Zero hallucinations. Extract and synthesize data strictly from the provided text.
 
 VERBATIM TRANSCRIPT:
 """

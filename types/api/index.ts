@@ -1,6 +1,6 @@
 /**
  * types/api/index.ts
- * Comprehensive type definitions for TranscriberPro API layer.
+ * Comprehensive type definitions for VeraxAI API layer.
  * ----------------------------------------------------------------------------
  * FEATURES:
  * 1. 100% DB SYNC: Nullable fields perfectly match database.types.ts.

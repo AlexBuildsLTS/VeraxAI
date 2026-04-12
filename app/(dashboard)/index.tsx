@@ -465,7 +465,7 @@ export default function DashboardScreen() {
                 <View className="flex-row items-center gap-3 px-4 py-2 mb-4 border rounded-full bg-gradient-to-r from-blue-500/30 to-purple-500/30 border-white/10">
                   <SmallBadgeIcon width={20} height={20} color="#60A5FA" />
                   <Text className="text-sm font-bold tracking-wide text-blue-400">
-                    Transcriber Engine 1.0
+                    VeraxAI Engine 1.0
                   </Text>
                 </View>
 

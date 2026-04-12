@@ -339,7 +339,7 @@ export default function SignInScreen() {
     setMessage(null);
     try {
       const redirectUri = AuthSession.makeRedirectUri({
-        scheme: 'transcriber-pro',
+        scheme: 'veraxai',
         path: 'auth/callback',
       });
       const { data, error } = await supabase.auth.signInWithOAuth({

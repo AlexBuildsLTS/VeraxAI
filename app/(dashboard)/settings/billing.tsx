@@ -5,13 +5,13 @@
  * PROTOCOL:
  * 1. TRIPLE-FLEX ARCHITECTURE: SafetyView -> Keyboard -> Scroll flex mapping.
  * 2. REAL-TIME LEDGER: Bi-directional sync with Supabase profiles and usage logs.
- * 3. TOKEN ECONOMY: Member (50 Daily Refill) | Pro (2000 Monthly) | Enterprise (10K+ Custom).
+ * 3. TOKEN ECONOMY: Member (50 Daily Refill) | Premium ($10 Monthly) | Admin (10K+ Custom).
  * 4. WEB STABILITY: Native shadow props used to bypass NativeWind boxShadow crashes.
  * 5. SCROLL ENGINE: flexGrow: 1 with 150px padding offset for infinite scroll.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -30,15 +30,13 @@ import {
   Zap,
   Star,
   Crown,
-  TrendingUp,
   Info,
   Coins,
   RefreshCw,
   Activity,
   ShieldCheck,
-  Clock,
   ChevronRight,
-  Database,
+  DatabaseZap,
   History,
   ZapOff,
 } from 'lucide-react-native';
@@ -47,6 +45,7 @@ import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
+import { Database } from '../../../types/database/database.types';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -58,7 +57,13 @@ import Animated, {
 
 // ─── MODULE 1: AMBIENT VISUAL ENGINE ────────────────────────────────────────
 
-const NeuralOrb = ({ delay = 0, color = '#8A2BE2' }) => {
+const NeuralOrb = ({
+  delay = 0,
+  color = '#8A2BE2',
+}: {
+  delay?: number;
+  color?: string;
+}) => {
   const pulse = useSharedValue(0);
   const { width } = Dimensions.get('window');
 
@@ -97,54 +102,63 @@ const NeuralOrb = ({ delay = 0, color = '#8A2BE2' }) => {
 
 // ─── MODULE 2: ECONOMIC CONFIGURATION ───────────────────────────────────────
 
-const TIER_CONFIG = {
-  free: {
+const ROLE_CONFIG = {
+  member: {
     label: 'Standard Member',
     color: '#00F0FF',
     icon: Zap,
-    badge: 'DAILY REFILL',
+    badge: 'FREE PLAN',
     allowance: 50,
     resetLabel: 'Refills daily at 00:00 UTC',
   },
-  pro: {
-    label: 'Premium Teams',
+  premium: {
+    label: 'Premium',
     color: '#FFD700',
     icon: Star,
-    badge: 'PRO ACCESS',
+    badge: 'PREMIUM ($10/MO)',
     allowance: 2000,
     resetLabel: 'Monthly quota reset active',
   },
-  enterprise: {
-    label: 'Enterprise',
+  admin: {
+    label: 'Enterprise / Admin',
     color: '#FF3366',
     icon: Crown,
     badge: 'UNLIMITED',
     allowance: 10000,
     resetLabel: 'High-volume reserve active',
   },
+  support: {
+    label: 'Support Node',
+    color: '#8A2BE2',
+    icon: ShieldCheck,
+    badge: 'SUPPORT',
+    allowance: 5000,
+    resetLabel: 'Support quota active',
+  },
 };
 
 const PROTOCOLS = {
-  free: [
+  member: [
     '50 Token Daily Refill Protocol',
     'Standard Speech-to-Text Speed',
     'YouTube Metadata Extraction (Free)',
     'Community Support Infrastructure',
   ],
-  pro: [
-    '2,000 Token Monthly Reservoir',
+  premium: [
+    '2,000 Token Monthly Reservoir for $10/mo',
+    'Use your own API key for a small fee',
     'Priority Neural Processing',
     'Full Export Layers (SRT/VTT/JSON)',
-    'Gemini 3.1 Flash-Lite Support',
     'Dedicated Slack Support Node',
   ],
-  enterprise: [
+  admin: [
     'Custom Bulk Token Allocation',
     'Zero-Latency Synthesis Node',
     'Custom Prompt Engineering Vault',
     'Batch Video Submission Access',
     'Dedicated Account Architect',
   ],
+  support: ['Support network access', 'System diagnostic tools'],
 };
 
 // ─── MODULE 3: MAIN COMPONENT ───────────────────────────────────────────────
@@ -152,13 +166,11 @@ const PROTOCOLS = {
 export default function BillingScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const [tier, setTier] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [role, setRole] =
+    useState<Database['public']['Enums']['user_role']>('member');
   const [balance, setBalance] = useState(0);
   const [consumed, setConsumed] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-
-  const { width: SCREEN_WIDTH } = Dimensions.get('window');
-  const isMobile = SCREEN_WIDTH < 768;
 
   // ── DATA FETCH ENGINE ──
   const syncEconomy = useCallback(async () => {
@@ -167,20 +179,22 @@ export default function BillingScreen() {
       // 1. Sync Base Profile
       const { data: profile, error: pErr } = await supabase
         .from('profiles')
-        .select('tier, tokens_balance')
+        .select('role, tokens_balance')
         .eq('id', user.id)
         .single();
 
       if (pErr) throw pErr;
 
-      const currentTier = (profile.tier as any) ?? 'free';
-      setTier(currentTier);
-      setBalance(profile.tokens_balance ?? 0);
+      if (!profile) throw new Error('Profile not found');
+
+      const currentRole = profile.role || 'member';
+      setRole(currentRole);
+      setBalance(profile.tokens_balance || 0);
 
       // 2. Aggregate Consumption Logs
       const now = new Date();
       const cycleStart =
-        currentTier === 'free'
+        currentRole === 'member'
           ? new Date(
               now.getFullYear(),
               now.getMonth(),
@@ -198,7 +212,7 @@ export default function BillingScreen() {
         logs?.reduce((acc, log) => acc + (log.tokens_consumed || 0), 0) || 0;
       setConsumed(totalBurn);
     } catch (err) {
-      console.error('[ECONOMY FAULT]: Identity Sync Interrupted.');
+      console.error('[ECONOMY FAULT]: Identity Sync Interrupted.', err);
     } finally {
       setIsLoading(false);
     }
@@ -208,11 +222,8 @@ export default function BillingScreen() {
     syncEconomy();
   }, [syncEconomy]);
 
-  const config = TIER_CONFIG[tier] || TIER_CONFIG.free;
-  const usagePercentage = Math.min(
-    100,
-    config.allowance > 0 ? Math.round((consumed / config.allowance) * 100) : 0,
-  );
+  const config = ROLE_CONFIG[role] || ROLE_CONFIG.member;
+  const usagePercentage = Math.min(100, (consumed / config.allowance) * 100);
 
   if (isLoading) {
     return (
@@ -275,9 +286,9 @@ export default function BillingScreen() {
                 <View style={styles.statusHeaderRow}>
                   <View>
                     <Text style={styles.metaLabel}>Active clearance</Text>
-                    <View style={styles.tierNameBlock}>
+                    <View style={styles.roleNameBlock}>
                       <config.icon size={26} color={config.color} />
-                      <Text style={styles.tierLabelText}>{config.label}</Text>
+                      <Text style={styles.roleLabelText}>{config.label}</Text>
                     </View>
                   </View>
                   <View
@@ -314,7 +325,7 @@ export default function BillingScreen() {
                         {
                           width: `${100 - usagePercentage}%`,
                           backgroundColor: config.color,
-                          // SAFE NATIVE SHADOWS - NO BOX-SHADOW STRING
+                          // SAFE NATIVE SHADOWS
                           shadowColor: config.color,
                           shadowOffset: { width: 0, height: 0 },
                           shadowOpacity: 0.8,
@@ -338,104 +349,91 @@ export default function BillingScreen() {
                 <View style={styles.protocolBlock}>
                   <Text style={styles.metaLabel}>Active Network Protocols</Text>
                   <View style={styles.protocolList}>
-                    {PROTOCOLS[tier].map((protocol, i) => (
-                      <View key={i} style={styles.protocolRow}>
-                        <ShieldCheck size={14} color={`${config.color}70`} />
-                        <Text style={styles.protocolText}>{protocol}</Text>
+                    {role !== 'member' && (
+                      <View style={styles.protocolRow}>
+                        <ZapOff size={14} color={`${config.color}70`} />
+                        <Text style={styles.protocolText}>
+                          {role === 'premium'
+                            ? 'Bypass Standard Queue Protocol'
+                            : 'Standard Priority Queue Access'}
+                        </Text>
                       </View>
-                    ))}
+                    )}
+
+                    {(PROTOCOLS[role] || PROTOCOLS.member).map(
+                      (protocol, i) => (
+                        <View key={i} style={styles.protocolRow}>
+                          <ShieldCheck size={14} color={`${config.color}70`} />
+                          <Text style={styles.protocolText}>{protocol}</Text>
+                        </View>
+                      ),
+                    )}
                   </View>
                 </View>
               </GlassCard>
             </FadeIn>
 
             {/* ── MODULE: SCALING OPTIONS ── */}
-            {tier !== 'enterprise' && (
+            {role === 'member' && (
               <FadeIn delay={200}>
                 <GlassCard style={styles.glassCardOverride}>
                   <View style={styles.upgradeHeader}>
-                    <Database size={20} color="#FF3366" />
+                    <DatabaseZap size={20} color="#FFD700" />
                     <Text style={styles.upgradeTitle}>
                       Expand Core Reservoirs
                     </Text>
                   </View>
                   <Text style={styles.upgradeSubtext}>
-                    Initiate token migration to unlock high-priority neural
-                    lanes and infinite synthesis.
+                    Upgrade to PREMIUM for $10 USD/mo to get 2,000 tokens each
+                    month, and use your own API key for a small fee.
                   </Text>
 
                   <View style={styles.ctaGrid}>
-                    {tier === 'free' && (
-                      <TouchableOpacity
-                        onPress={() =>
-                          Linking.openURL('https://transcriber-pro.vercel.app/')
-                        }
-                        style={styles.proCta}
-                        activeOpacity={0.8}
-                      >
-                        <Star size={18} color="#00F0FF" />
-                        <Text style={styles.proCtaText}>Teams Plan — $29</Text>
-                        <ChevronRight size={14} color="#00F0FF" />
-                      </TouchableOpacity>
-                    )}
-
                     <TouchableOpacity
                       onPress={() =>
-                        Linking.openURL('https://transcriber-pro.vercel.app/')
+                        Linking.openURL('https://veraxai.vercel.app/')
                       }
-                      style={styles.enterpriseCta}
+                      style={styles.proCta}
                       activeOpacity={0.8}
                     >
-                      <Crown size={18} color="#FF3366" />
-                      <Text style={styles.enterpriseCtaText}>Enterprise</Text>
-                      <ChevronRight size={14} color="#FF3366" />
+                      <Star size={18} color="#FFD700" />
+                      <Text style={styles.proCtaText}>
+                        Upgrade to Premium ($10/mo)
+                      </Text>
+                      <ChevronRight size={14} color="#FFD700" />
                     </TouchableOpacity>
                   </View>
-
-                  <Text style={styles.stripeDisclaimer}>
-                    Transactions secured via AES-256 Stripe Infrastructure
-                  </Text>
                 </GlassCard>
               </FadeIn>
             )}
 
-            {/* ── MODULE: LEDGER LOGIC ── */}
+            {/* ── MODULE: TRANSACTION LEDGER ── */}
             <FadeIn delay={300}>
-              <View style={styles.footerLedger}>
-                <View style={styles.ledgerHeaderRow}>
-                  <Clock size={16} color="#FFF" />
-                  <Text style={styles.ledgerTitle}>Ledger Logic</Text>
-                </View>
-                <View style={styles.ledgerList}>
-                  <View style={styles.ledgerRow}>
-                    <View style={styles.ledgerBullet} />
-                    <Text style={styles.ledgerText}>
-                      <Text style={styles.boldWhite}>Daily Refill:</Text> Member
-                      tiers receive 50 tokens at 00:00 UTC. Non-accumulative.
-                    </Text>
-                  </View>
-                  <View style={styles.ledgerRow}>
-                    <View style={styles.ledgerBullet} />
-                    <Text style={styles.ledgerText}>
-                      <Text style={styles.boldWhite}>Synthesis Cost:</Text> 1
-                      Token is depleted per 60 seconds of AI speech-to-text.
-                    </Text>
-                  </View>
-                  <View style={styles.ledgerRow}>
-                    <View style={styles.ledgerBullet} />
-                    <Text style={styles.ledgerText}>
-                      <Text style={styles.boldWhite}>Captions:</Text> YouTube
-                      caption extraction is bypass-certified (Zero Cost).
-                    </Text>
-                  </View>
-                </View>
+              <View style={styles.ledgerHeader}>
+                <History size={18} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.ledgerTitleText}>System Ledger</Text>
               </View>
+
+              <GlassCard style={styles.glassCardOverride}>
+                <View style={styles.ledgerEmptyState}>
+                  <Activity size={32} color="rgba(255,255,255,0.1)" />
+                  <Text style={styles.ledgerEmptyText}>
+                    No recent token migrations detected.
+                  </Text>
+                  <Text style={styles.ledgerEmptySub}>
+                    All resource allocations are logged in real-time.
+                  </Text>
+                </View>
+              </GlassCard>
             </FadeIn>
 
-            {/* SYSTEM FOOTER */}
-            <View style={styles.systemManifest}>
-              <History size={16} color="rgba(255,255,255,0.15)" />
-              <Text style={styles.manifestText}>VertAI ENGINE</Text>
+            {/* ── FOOTER ── */}
+            <View style={styles.footerBlock}>
+              <Info size={14} color="rgba(255,255,255,0.3)" />
+              <Text style={styles.footerLegal}>
+                Resource allocation is subject to the VertAI Protocol Terms of
+                Service. Token refills occur at 00:00 UTC for Standard Members.
+              </Text>
             </View>
           </View>
         </ScrollView>
@@ -444,323 +442,273 @@ export default function BillingScreen() {
   );
 }
 
-// ─── MODULE 4: STYLING KERNEL ───────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  rootContainer: {
-    flex: 1,
-    backgroundColor: '#020205',
-  },
-  flexOne: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 150,
-  },
+  rootContainer: { flex: 1, backgroundColor: '#010314' },
+  flexOne: { flex: 1 },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#020205',
+    backgroundColor: '#010314',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
     color: '#00F0FF',
-    marginTop: 24,
+    marginTop: 20,
     fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 6,
     textTransform: 'uppercase',
+    letterSpacing: 2,
+    opacity: 0.6,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 150,
+    paddingHorizontal: 20,
   },
   maxLayoutWidth: {
-    width: '100%',
     maxWidth: 800,
     alignSelf: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 60,
+    width: '100%',
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 40,
-    gap: 12,
+    marginTop: 20,
+    marginBottom: 32,
+    gap: 10,
   },
   backText: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 3,
-    textTransform: 'uppercase',
-  },
-  headerTitleBlock: {
-    marginBottom: 48,
-  },
-  moduleBadge: {
-    color: 'rgba(255,255,255,0.2)',
     fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 8,
     textTransform: 'uppercase',
-    marginBottom: 16,
+    letterSpacing: 2,
+  },
+  headerTitleBlock: {
+    marginBottom: 40,
+  },
+  moduleBadge: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+    marginBottom: 8,
   },
   mainTitle: {
-    color: '#FFF',
-    fontSize: 42,
+    fontSize: 32,
     fontWeight: '900',
-    letterSpacing: -2,
-    textTransform: 'uppercase',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
   },
   titleRule: {
-    width: 60,
-    height: 4,
-    marginTop: 20,
-    borderRadius: 2,
+    height: 2,
+    width: 40,
+    marginTop: 16,
+    borderRadius: 1,
   },
   glassCardOverride: {
-    padding: 32,
-    marginBottom: 32,
+    padding: 24,
+    marginBottom: 24,
+    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
   },
   statusHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   metaLabel: {
-    color: 'rgba(255,255,255,0.25)',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 3,
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'uppercase',
-    marginBottom: 8,
+    letterSpacing: 1,
+    marginBottom: 12,
   },
-  tierNameBlock: {
+  roleNameBlock: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
-  tierLabelText: {
-    color: '#FFF',
-    fontSize: 26,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-    textTransform: 'uppercase',
+  roleLabelText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   badgeContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
     borderWidth: 1,
   },
   badgeText: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   meterContainer: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 20,
-    padding: 24,
+    marginBottom: 24,
   },
   meterInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   meterLabelBlock: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   meterTitle: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '600',
   },
   balanceValue: {
-    color: '#FFF',
-    fontSize: 22,
-    fontWeight: '900',
-    fontFamily: Platform.OS === 'web' ? 'monospace' : 'Menlo',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   progressBarTrack: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 3,
-    overflow: 'visible', // Changed to visible so glow is seen
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 12,
   },
   progressBarFill: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 4,
   },
   meterFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 16,
   },
   footerInfoBlock: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   footerText: {
-    color: 'rgba(255,255,255,0.2)',
-    fontSize: 9,
-    fontWeight: '800',
-    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
   },
   consumedText: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '500',
   },
   protocolBlock: {
-    marginTop: 40,
+    marginTop: 8,
   },
   protocolList: {
-    gap: 14,
-    marginTop: 12,
+    gap: 12,
   },
   protocolRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   protocolText: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 13,
-    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
   },
   upgradeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
+    gap: 8,
+    marginBottom: 12,
   },
   upgradeTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: '900',
-    textTransform: 'uppercase',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   upgradeSubtext: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 28,
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
   },
   ctaGrid: {
+    flexDirection: 'column',
     gap: 12,
   },
   proCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    backgroundColor: 'rgba(0,240,255,0.05)',
-    borderColor: 'rgba(0,240,255,0.2)',
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
     borderWidth: 1,
-    borderRadius: 14,
-    gap: 12,
+    borderColor: 'rgba(255, 215, 0, 0.3)',
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 8,
   },
   proCtaText: {
-    color: '#00F0FF',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
+    color: '#FFD700',
+    fontSize: 14,
+    fontWeight: '700',
   },
   enterpriseCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    backgroundColor: 'rgba(255,51,102,0.05)',
-    borderColor: 'rgba(255,51,102,0.2)',
+    backgroundColor: 'rgba(255, 51, 102, 0.1)',
     borderWidth: 1,
-    borderRadius: 14,
-    gap: 12,
+    borderColor: 'rgba(255, 51, 102, 0.3)',
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 8,
   },
   enterpriseCtaText: {
     color: '#FF3366',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
+    fontSize: 14,
+    fontWeight: '700',
   },
-  stripeDisclaimer: {
-    textAlign: 'center',
-    marginTop: 20,
-    color: 'rgba(255,255,255,0.12)',
-    fontSize: 8,
-    fontFamily: 'monospace',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-  },
-  footerLedger: {
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 24,
-    padding: 24,
-    marginTop: 20,
-  },
-  ledgerHeaderRow: {
+  ledgerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 20,
+    gap: 8,
+    marginBottom: 16,
+    paddingHorizontal: 4,
   },
-  ledgerTitle: {
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 4,
-    textTransform: 'uppercase',
+  ledgerTitleText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
   },
-  ledgerList: {
-    gap: 16,
-  },
-  ledgerRow: {
-    flexDirection: 'row',
+  ledgerEmptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
     gap: 12,
   },
-  ledgerBullet: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginTop: 6,
+  ledgerEmptyText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 8,
   },
-  ledgerText: {
+  ledgerEmptySub: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  footerBlock: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 32,
+    paddingHorizontal: 4,
+  },
+  footerLegal: {
     flex: 1,
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  boldWhite: {
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '800',
-  },
-  systemManifest: {
-    alignItems: 'center',
-    marginTop: 100,
-    opacity: 0.1,
-  },
-  manifestText: {
-    color: '#FFF',
-    fontSize: 8,
-    fontFamily: 'monospace',
-    letterSpacing: 8,
-    marginTop: 10,
-    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
