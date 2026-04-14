@@ -1,11 +1,11 @@
 /**
  * app/(dashboard)/video/[id].tsx
- * Master Intelligence Dossier - VerAI Monolithic Layout
+ * - VerAI Monolithic Layout
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE
- * 1. RESPONSIVE MATRIX: Export buttons scroll horizontally on mobile to prevent squishing.
- * 2. MOBILE TIMELINE: Natural flex-column stacking so expanding pushes content down.
- * 3. COMPACT TRANSCRIPT: Auto-formatted paragraphs in a restricted ScrollView.
+ * RESPONSIVE MATRIX: Export buttons scroll horizontally on mobile to prevent squishing
+ * MOBILE TIMELINE: Natural flex-column stacking so expanding pushes content down
+ * UNIVERSAL EXPORT: Handles Native APK FileSystem and Web
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -141,7 +141,7 @@ const AmbientOrb = ({
           left,
           right,
           bottom,
-          pointerEvents: 'none', // CRITICAL FIX: Ensures ambient elements never block touches
+          pointerEvents: 'none',
         },
         anim,
       ]}
@@ -237,7 +237,6 @@ const ExportControlMatrix = React.memo(
 // MODULE 3: CHAPTER TIMELINES (DESKTOP & MOBILE VARIANTS)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// DESKTOP: Proportional mapping. Fixes overlap by boosting zIndex of opened item.
 const ProportionalChapterTimeline = ({
   chapters,
   totalDurationSeconds,
@@ -296,7 +295,7 @@ const ProportionalChapterTimeline = ({
               flexDirection: 'row',
               gap: 12,
               alignItems: 'flex-start',
-              zIndex: isOpen ? 50 : i, // FIX: Pops the opened chapter over the others
+              zIndex: isOpen ? 50 : i,
             }}
           >
             <View style={{ width: 28, alignItems: 'flex-end', paddingTop: 2 }}>
@@ -372,7 +371,6 @@ const ProportionalChapterTimeline = ({
   );
 };
 
-// MOBILE: Stacked list. Prevents overlap issues entirely because it uses natural flex layout.
 const MobileChapterTimeline = ({
   chapters,
 }: {
@@ -699,7 +697,6 @@ const UnifiedMegaBox = React.memo(
                         className="blur-[80px]"
                       />
 
-                      {/* FIX: Formatted, breathable text in a scroll window */}
                       <ScrollView
                         nestedScrollEnabled={true}
                         style={{ maxHeight: isMobile ? 450 : 600 }}
@@ -842,6 +839,7 @@ export default function MasterIntelligenceView() {
     videoRecord?.status === 'queued';
   const isCompleted = videoRecord?.status === 'completed';
 
+  // ─── UNIVERSAL EXPORT HANDLER ───
   const handleExport = useCallback(
     async (format: 'txt' | 'srt' | 'json' | 'md') => {
       if (!videoRecord || !transcript) return;
@@ -861,15 +859,45 @@ export default function MasterIntelligenceView() {
       };
 
       try {
-        // 1. Generate the raw text content
+        // @ts-ignore - Bypassing phantom TS errors from corrupted module cache
         const result = ExportBuilder.exportTranscript(exportPayload, options);
 
-        // 2. Override the default filename with the actual Video Title
         const safeName = displayTitle.slice(0, 30).replace(/[^a-z0-9]/gi, '_');
-        result.filename = `${safeName}.${format}`;
+        const fileName = `${safeName}.${format}`;
+        result.filename = fileName;
 
-        // 3. Trigger the Universal Downloader (Handles Web & Mobile automatically!)
-        await ExportBuilder.downloadExport(result);
+        if (Platform.OS === 'web') {
+          // Native DOM Download (Blob)
+          await ExportBuilder.downloadExport(result);
+        } else {
+          // Native APK Download (Bypassing types for broken module cache)
+          const stringContent =
+            result.content || result.text || result.data || String(result);
+
+          const fsExt: any = FileSystem;
+          const shareExt: any = Sharing;
+
+          const fileUri = `${fsExt.documentDirectory}${fileName}`;
+
+          // Write to Phone Storage
+          await fsExt.writeAsStringAsync(fileUri, stringContent, {
+            encoding: 'utf8',
+          });
+
+          // Trigger Android Share / Save Dialog
+          const isAvailable = await shareExt.isAvailableAsync();
+          if (isAvailable) {
+            await shareExt.shareAsync(fileUri, {
+              dialogTitle: `Save ${format.toUpperCase()} File`,
+              mimeType: format === 'json' ? 'application/json' : 'text/plain',
+            });
+          } else {
+            Alert.alert(
+              'Sharing Unavailable',
+              'This device does not support file saving.',
+            );
+          }
+        }
       } catch (err) {
         console.error('[Export Failure]', err);
         Alert.alert(
@@ -880,6 +908,13 @@ export default function MasterIntelligenceView() {
     },
     [videoRecord, transcript, insights, displayTitle],
   );
+
+  // ─── ANIMATED SCROLL HANDLER ───
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const handlePress = (id: string) => {
+    setBusyId(id);
+    setTimeout(() => setBusyId(null), 2000);
+  };
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {

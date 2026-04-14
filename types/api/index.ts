@@ -1,6 +1,6 @@
 /**
  * types/api/index.ts
- * Comprehensive type definitions for VeraxAI API layer.
+ *VeraxAI API layer Comprehensive type definitions
  * ----------------------------------------------------------------------------
  * FEATURES:
  * 1. 100% DB SYNC: Nullable fields perfectly match database.types.ts.
@@ -187,6 +187,8 @@ export interface ExportOptions {
 }
 
 export interface ExportResult {
+  text: string;
+  data: any;
   content: string;
   filename: string;
   mimeType: string;

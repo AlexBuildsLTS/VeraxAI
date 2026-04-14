@@ -1,12 +1,12 @@
 /**
  * services/exportBuilder.ts
- * Enterprise-Grade Export & Formatting Engine
+ * VertaxAIExport & Formatting Engine
  * ----------------------------------------------------------------------------
  * FEATURES:
  * - 100% Type-Safe: Defensive parsing for Supabase JSON fields.
  * - Unified Output: TXT and MD files contain BOTH the AI Summaries and the Raw Transcript.
  * - Smart Fallbacks: Auto-calculates SRT/VTT timestamps if native segments fail.
- * - Platform Agnostic: Triggers browser downloads on Web, and Native Share Sheets on iOS/Android.
+ * - Triggers browser downloads on Web, and Native Share Sheets on iOS/Android.
  */
 
 import { Platform } from 'react-native';
@@ -272,7 +272,11 @@ export function exportTranscript(data: ExportData, options: ExportOptions): Expo
     default: content = exportToTxt(data, options);
   }
 
-  return { content, filename, mimeType: MIME_TYPES[format] || 'text/plain' };
+  return {
+    content, filename, mimeType: MIME_TYPES[format] || 'text/plain',
+    text: '',
+    data: undefined,
+  };
 }
 
 // ─── UNIVERSAL DOWNLOAD HANDLER (WEB + MOBILE) ───────────────────────────────
@@ -338,3 +342,4 @@ export const ExportBuilder = {
   formats: ['txt', 'srt', 'vtt', 'json', 'md'] as ExportFormat[],
   mimeTypes: MIME_TYPES
 };
+

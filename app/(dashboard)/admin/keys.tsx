@@ -1,9 +1,10 @@
 /**
  * app/(dashboard)/admin/keys.tsx
- * VeraxAI — API Keys & Telemetry Analytics
+ * VeraxAI — Enterprise API Key Vault & Telemetry Analytics
  * ----------------------------------------------------------------------------
- *  MULTI-LINE SVG PROCESSOR ENGINE Custom-built 7D velocity chart using raw SVGs
- *  TIMELINES: Generates rigid 7-day/12-month frames to prevent layout collapse.
+ * MODULE OVERVIEW:
+ *  MULTI-LINE VELOCITY: Top chart tracks 7D velocity using native SVG lines.
+ *  DYNAMIC HOVERS: Interactive Web/APK overlays with exact token isolation.
  * ----------------------------------------------------------------------------
  */
 
@@ -34,7 +35,6 @@ import {
   BarChart2,
 } from 'lucide-react-native';
 import Animated, {
-  useSharedValue,
   useAnimatedStyle,
   withSpring,
   withTiming,
@@ -44,32 +44,36 @@ import { supabase } from '../../../lib/supabase/client';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 
-// ─── THEME & COLOR GENERATION ────────────────────────────────────────────────
+// ─── CONFIGURATION: API KEY COLORS ───────────────────────────────────────────
+const KEY_COLORS: Record<string, string> = {
+  ENV_MASTER: '#00F0FF', // Neon Cyan
+  GEMINIAPI_KEY_1: '#FF007F', // Neon Pink
+  GEMINIAPI_KEY_2: '#32FF00', // Neon Green
+  GEMINIAPI_KEY_3: '#8A2BE2', // Electric Purple
+  GEMINIAPI_KEY_4: '#F59E0B', // Warning Amber
+};
+
+const getColorForKey = (keyName: string) => {
+  if (KEY_COLORS[keyName]) return KEY_COLORS[keyName];
+  let hash = 0;
+  for (let i = 0; i < keyName.length; i++)
+    hash = keyName.charCodeAt(i) + ((hash << 5) - hash);
+  const fallbackColors = [
+    '#3B82F6',
+    '#EC4899',
+    '#10B981',
+    '#F59E0B',
+    '#6366F1',
+  ];
+  return fallbackColors[Math.abs(hash) % fallbackColors.length];
+};
+
 const THEME = {
   obsidian: '#000012',
   cyan: '#00F0FF',
   danger: '#FF007F',
   success: '#32FF00',
   purple: '#8A2BE2',
-  slate: '#94a3b8',
-};
-
-const CHART_COLORS = [
-  THEME.cyan,
-  THEME.danger,
-  THEME.success,
-  THEME.purple,
-  '#F59E0B',
-  '#3B82F6',
-  '#EC4899',
-];
-
-const getColorForKey = (keyName: string) => {
-  if (keyName === 'ENV_MASTER') return THEME.cyan;
-  let hash = 0;
-  for (let i = 0; i < keyName.length; i++)
-    hash = keyName.charCodeAt(i) + ((hash << 5) - hash);
-  return CHART_COLORS[Math.abs(hash) % CHART_COLORS.length];
 };
 
 const strictInputStyle = {
@@ -90,11 +94,10 @@ type SystemKey = {
   status: string;
   tokens_burned: number;
 };
-type RawUsage = {
-  usage_date?: string;
-  usage_month?: string;
-  api_key_name: string;
-  total_tokens: number;
+type RawLog = {
+  tokens_consumed: number;
+  created_at: string;
+  metadata: { api_key_name: string };
 };
 
 type ChartDataPoint = {
@@ -104,20 +107,45 @@ type ChartDataPoint = {
   breakdown: { keyName: string; tokens: number; color: string }[];
 };
 
-// ─── FIXED TIMELINE GENERATORS ───────────────────────────────────────────────
-// Forces exactly 7 days, ending today.
-const generateLast7Days = () => {
-  const dates = [];
+// ─── TIMELINE GENERATORS (Strict JS Parsing) ─────────────────────────────────
+
+const buildDailyData = (logs: RawLog[]): ChartDataPoint[] => {
+  const bins = [];
+  const today = new Date();
+
+  // 7 Days back, chronological
   for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().split('T')[0]);
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const datePrefix = d.toISOString().split('T')[0];
+    const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+    bins.push({ label, fullDate: datePrefix, prefix: datePrefix });
   }
-  return dates;
+
+  return bins.map((bin) => {
+    const binLogs = logs.filter((log) => log.created_at.startsWith(bin.prefix));
+    const keyMap: Record<string, number> = {};
+    let total = 0;
+
+    binLogs.forEach((log) => {
+      const keyName = log.metadata?.api_key_name || 'UNKNOWN_KEY';
+      keyMap[keyName] = (keyMap[keyName] || 0) + log.tokens_consumed;
+      total += log.tokens_consumed;
+    });
+
+    const breakdown = Object.keys(keyMap).map((keyName) => ({
+      keyName,
+      tokens: keyMap[keyName],
+      color: getColorForKey(keyName),
+    }));
+
+    return { label: bin.label, fullDate: bin.fullDate, total, breakdown };
+  });
 };
 
-// Forces exactly 12 months, ending this month.
-const generateLast12Months = () => {
+const buildMonthlyData = (logs: RawLog[]): ChartDataPoint[] => {
+  const bins = [];
+  const currentYear = new Date().getFullYear();
   const monthsArr = [
     'Jan',
     'Feb',
@@ -132,16 +160,37 @@ const generateLast12Months = () => {
     'Nov',
     'Dec',
   ];
-  const dates = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date();
-    d.setMonth(d.getMonth() - i);
-    dates.push(`${monthsArr[d.getMonth()]} ${d.getFullYear()}`);
+
+  // STRICT REQUIREMENT: Jan -> Dec of current calendar year
+  for (let i = 0; i < 12; i++) {
+    const monthPrefix = `${currentYear}-${String(i + 1).padStart(2, '0')}`;
+    const label = monthsArr[i];
+    const fullDate = `${label} ${currentYear}`;
+    bins.push({ label, fullDate, prefix: monthPrefix });
   }
-  return dates;
+
+  return bins.map((bin) => {
+    const binLogs = logs.filter((log) => log.created_at.startsWith(bin.prefix));
+    const keyMap: Record<string, number> = {};
+    let total = 0;
+
+    binLogs.forEach((log) => {
+      const keyName = log.metadata?.api_key_name || 'UNKNOWN_KEY';
+      keyMap[keyName] = (keyMap[keyName] || 0) + log.tokens_consumed;
+      total += log.tokens_consumed;
+    });
+
+    const breakdown = Object.keys(keyMap).map((keyName) => ({
+      keyName,
+      tokens: keyMap[keyName],
+      color: getColorForKey(keyName),
+    }));
+
+    return { label: bin.label, fullDate: bin.fullDate, total, breakdown };
+  });
 };
 
-// ─── CUSTOM SVG MULTI-LINE CHART (7D VELOCITY) ───────────────────────────────
+// ─── MODULE 1: MULTI-LINE SVG CHART ──────────────────────────────────────────
 const SvgMultiLineChart = ({
   data,
   allUniqueKeys,
@@ -158,35 +207,30 @@ const SvgMultiLineChart = ({
   const VIEWBOX_W = 1000;
   const VIEWBOX_H = 200;
   const PADDING_Y = 20;
-  const PADDING_X = 20; // Keeps dots from clipping the edges
+  const PADDING_X = 20;
 
   const activeKeys = Array.from(allUniqueKeys).filter(
     (k) => !hiddenKeys.has(k),
   );
 
-  // Find the absolute maximum token value across any single key on any day for scaling
+  // Max value calculation for scaling the lines perfectly
   const maxVal = Math.max(
-    ...data.map((d) =>
-      Math.max(
-        ...d.breakdown
-          .filter((b) => !hiddenKeys.has(b.keyName))
-          .map((b) => b.tokens),
-        0,
-      ),
+    ...data.flatMap((d) =>
+      d.breakdown
+        .filter((b) => !hiddenKeys.has(b.keyName))
+        .map((b) => b.tokens),
     ),
-    10, // Fallback max to prevent division by zero
+    10,
   );
 
   return (
     <View className="relative w-full h-full">
-      {/* Background Grid Lines */}
       <View className="absolute inset-0 flex-col justify-between py-[10%]">
         <View className="w-full h-px bg-white/5" />
         <View className="w-full h-px bg-white/5" />
         <View className="w-full h-px bg-white/5" />
       </View>
 
-      {/* Scalable SVG Render Engine */}
       <View className="absolute inset-0 pointer-events-none">
         <Svg
           width="100%"
@@ -197,11 +241,12 @@ const SvgMultiLineChart = ({
           {activeKeys.map((keyName, keyIdx) => {
             const color = getColorForKey(keyName);
 
-            // Calculate coordinates
             const points = data.map((d, i) => {
               const b = d.breakdown.find((x) => x.keyName === keyName);
               const val = b ? b.tokens : 0;
-              const x = PADDING_X + (i / 6) * (VIEWBOX_W - PADDING_X * 2);
+              const x =
+                PADDING_X +
+                (i / (data.length - 1)) * (VIEWBOX_W - PADDING_X * 2);
               const y =
                 VIEWBOX_H -
                 PADDING_Y -
@@ -209,12 +254,10 @@ const SvgMultiLineChart = ({
               return { x, y, val };
             });
 
-            // SVG Path String
             const dStr = `M ${points.map((p) => `${p.x},${p.y}`).join(' L ')}`;
 
             return (
               <React.Fragment key={keyName}>
-                {/* The main connecting line */}
                 <Path
                   d={dStr}
                   stroke={color}
@@ -222,8 +265,6 @@ const SvgMultiLineChart = ({
                   fill="none"
                   opacity={0.8}
                 />
-
-                {/* The data points (Dots) */}
                 {points.map((p, i) => (
                   <Circle
                     key={`dot-${keyIdx}-${i}`}
@@ -233,7 +274,7 @@ const SvgMultiLineChart = ({
                     fill={THEME.obsidian}
                     stroke={color}
                     strokeWidth={2}
-                    opacity={p.val > 0 || i === selectedIndex ? 1 : 0} // Hide 0-value dots unless hovered
+                    opacity={p.val > 0 || i === selectedIndex ? 1 : 0}
                   />
                 ))}
               </React.Fragment>
@@ -242,7 +283,6 @@ const SvgMultiLineChart = ({
         </Svg>
       </View>
 
-      {/* Interactive Hover Columns Overlay */}
       <View className="absolute inset-0 flex-row">
         {data.map((point, idx) => {
           const hoverProps = Platform.select({
@@ -250,20 +290,17 @@ const SvgMultiLineChart = ({
             default: { onPress: () => setSelectedIndex(idx) },
           });
 
-          const isSelected = selectedIndex === idx;
-
           return (
             <Pressable
               key={idx}
               {...hoverProps}
               className="items-center justify-end flex-1 h-full"
             >
-              {/* Highlight bar to show which column is active */}
               <View
-                className={`w-full h-full bg-white transition-opacity duration-200 ${isSelected ? 'opacity-5' : 'opacity-0'}`}
+                className={`w-full h-full bg-white transition-opacity duration-200 ${selectedIndex === idx ? 'opacity-5' : 'opacity-0'}`}
               />
               <Text
-                className={`absolute bottom-[-24px] text-[9px] uppercase tracking-wider ${isSelected ? 'text-white font-bold' : 'text-white/30'}`}
+                className={`absolute bottom-[-24px] text-[9px] uppercase tracking-wider ${selectedIndex === idx ? 'text-white font-bold' : 'text-white/30'}`}
               >
                 {point.label}
               </Text>
@@ -275,7 +312,7 @@ const SvgMultiLineChart = ({
   );
 };
 
-// ─── CUSTOM REANIMATED STACKED BAR (12M VOLUME) ──────────────────────────────
+// ─── MODULE 2: ANIMATED STACKED BAR CHART ────────────────────────────────────
 const AnimatedStackedBar = ({
   dataPoint,
   maxVisibleTotal,
@@ -314,10 +351,10 @@ const AnimatedStackedBar = ({
   });
 
   return (
-    <View className="items-center justify-end flex-1 h-full mx-1 max-w-[40px]">
+    <View className="items-center justify-end flex-1 h-full mx-1 max-w-[48px]">
       <Pressable
         {...hoverProps}
-        className="items-center justify-end w-full h-full group"
+        className="items-center justify-end w-full h-full"
       >
         <View className="absolute bottom-0 w-full h-full bg-white/[0.02] rounded-md border border-white/[0.05]" />
         <Animated.View
@@ -352,7 +389,9 @@ const AnimatedStackedBar = ({
           })}
         </Animated.View>
         <Text
-          className={`text-[8px] md:text-[10px] uppercase tracking-wider mt-4 ${isSelected ? 'text-white font-bold' : 'text-white/30'}`}
+          className={`text-[8px] md:text-[10px] uppercase tracking-wider mt-4 ${
+            isSelected ? 'text-white font-bold' : 'text-white/30'
+          }`}
           numberOfLines={1}
         >
           {dataPoint.label}
@@ -374,11 +413,13 @@ export default function ApiKeysDashboard() {
   const [dailyData, setDailyData] = useState<ChartDataPoint[]>([]);
   const [monthlyData, setMonthlyData] = useState<ChartDataPoint[]>([]);
   const [allUniqueKeys, setAllUniqueKeys] = useState<Set<string>>(new Set());
-
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
 
-  const [selectedDailyIdx, setSelectedDailyIdx] = useState<number>(6); // Default to today
-  const [selectedMonthlyIdx, setSelectedMonthlyIdx] = useState<number>(11); // Default to this month
+  // Default selections: Today for Daily, Current Month for Monthly
+  const [selectedDailyIdx, setSelectedDailyIdx] = useState<number>(6);
+  const [selectedMonthlyIdx, setSelectedMonthlyIdx] = useState<number>(
+    new Date().getMonth(),
+  );
 
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyValue, setNewKeyValue] = useState('');
@@ -398,84 +439,32 @@ export default function ApiKeysDashboard() {
       if (keyError) throw keyError;
       if (keyData) setKeys(keyData as SystemKey[]);
 
-      const { data: rawDaily, error: dailyError } = await supabase.rpc(
-        'get_daily_usage_by_key',
-        { days_back: 6 },
-      );
-      if (dailyError) throw dailyError;
-      setDailyData(processDailyTimeline(rawDaily as RawUsage[]));
+      // Fetch all telemetry data for the current calendar year
+      const startOfYear = new Date(new Date().getFullYear(), 0, 1);
 
-      const { data: rawMonthly, error: monthlyError } = await supabase.rpc(
-        'get_monthly_usage_by_key',
-        { months_back: 11 },
-      );
-      if (monthlyError) throw monthlyError;
-      setMonthlyData(processMonthlyTimeline(rawMonthly as RawUsage[]));
+      const { data: rawLogs, error: logsError } = await supabase
+        .from('usage_logs')
+        .select('tokens_consumed, created_at, metadata')
+        .gte('created_at', startOfYear.toISOString());
+
+      if (logsError) throw logsError;
+
+      const typedLogs = (rawLogs || []) as RawLog[];
+
+      setDailyData(buildDailyData(typedLogs));
+      setMonthlyData(buildMonthlyData(typedLogs));
 
       const unique = new Set<string>();
-      rawDaily?.forEach((r) => unique.add(r.api_key_name));
-      rawMonthly?.forEach((r) => unique.add(r.api_key_name));
+      typedLogs.forEach((r) => {
+        if (r.metadata?.api_key_name) unique.add(r.metadata.api_key_name);
+      });
       setAllUniqueKeys(unique);
-
-      // Default HUD to the right-most (latest) values
-      setSelectedDailyIdx(6);
-      setSelectedMonthlyIdx(11);
     } catch (err: any) {
       console.error('[Admin Analytics Error]', err);
       Alert.alert('Telemetry Sync Error', err.message);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Inject empty days to guarantee 7 slots
-  const processDailyTimeline = (dbData: RawUsage[]): ChartDataPoint[] => {
-    const timeline = generateLast7Days();
-    return timeline.map((dateStr) => {
-      const matchedRows = dbData.filter((r) => r.usage_date === dateStr);
-      let total = 0;
-      const breakdown = matchedRows.map((row) => {
-        const tokens = Number(row.total_tokens);
-        total += tokens;
-        return {
-          keyName: row.api_key_name,
-          tokens,
-          color: getColorForKey(row.api_key_name),
-        };
-      });
-      return {
-        label: new Date(dateStr).toLocaleDateString('en-US', {
-          weekday: 'short',
-        }),
-        fullDate: dateStr,
-        total,
-        breakdown,
-      };
-    });
-  };
-
-  // Inject empty months to guarantee 12 slots
-  const processMonthlyTimeline = (dbData: RawUsage[]): ChartDataPoint[] => {
-    const timeline = generateLast12Months();
-    return timeline.map((monthStr) => {
-      const matchedRows = dbData.filter((r) => r.usage_month === monthStr);
-      let total = 0;
-      const breakdown = matchedRows.map((row) => {
-        const tokens = Number(row.total_tokens);
-        total += tokens;
-        return {
-          keyName: row.api_key_name,
-          tokens,
-          color: getColorForKey(row.api_key_name),
-        };
-      });
-      return {
-        label: monthStr.split(' ')[0],
-        fullDate: monthStr,
-        total,
-        breakdown,
-      };
-    });
   };
 
   const toggleKeyVisibility = (keyName: string) => {
@@ -494,7 +483,7 @@ export default function ApiKeysDashboard() {
         0,
       ),
     ),
-    1,
+    10,
   );
 
   const handleAddKey = async () => {
@@ -538,6 +527,7 @@ export default function ApiKeysDashboard() {
     <View className="flex-row flex-wrap items-center gap-4 pt-6 mt-6 border-t border-white/5">
       {Array.from(allUniqueKeys).map((keyName) => {
         const isHidden = hiddenKeys.has(keyName);
+        const keyColor = getColorForKey(keyName);
         return (
           <TouchableOpacity
             key={keyName}
@@ -546,9 +536,7 @@ export default function ApiKeysDashboard() {
             className={`flex-row items-center gap-2 px-3 py-1.5 rounded-full border transition-colors ${isHidden ? 'border-white/10 bg-white/5' : 'border-white/20 bg-white/10'}`}
           >
             <View
-              style={{
-                backgroundColor: isHidden ? '#333' : getColorForKey(keyName),
-              }}
+              style={{ backgroundColor: isHidden ? '#333' : keyColor }}
               className="w-2.5 h-2.5 rounded-full shadow-[0_0_8px] shadow-black"
             />
             <Text
@@ -564,6 +552,13 @@ export default function ApiKeysDashboard() {
 
   const activeDailyPoint = dailyData[selectedDailyIdx];
   const activeMonthlyPoint = monthlyData[selectedMonthlyIdx];
+
+  // Helper to isolate only the tokens of the VISIBLE keys
+  const getVisibleTotal = (point: ChartDataPoint) =>
+    point.breakdown.reduce(
+      (sum, b) => (hiddenKeys.has(b.keyName) ? sum : sum + b.tokens),
+      0,
+    );
 
   return (
     <SafeAreaView className="flex-1 bg-[#000012]">
@@ -625,7 +620,7 @@ export default function ApiKeysDashboard() {
             />
           ) : (
             <>
-              {/* ─── MODULE 1: DAILY VELOCITY CHART (MULTI-LINE SVG) ─── */}
+              {/* ─── MODULE 1: DAILY VELOCITY CHART (MULTI-LINE) ─── */}
               <FadeIn delay={200}>
                 <GlassCard className="p-6 md:p-8 mb-8 border bg-white/[0.015] border-white/5 rounded-3xl md:rounded-[32px]">
                   <View className="flex-row items-center justify-between mb-8">
@@ -637,7 +632,6 @@ export default function ApiKeysDashboard() {
                     </View>
                   </View>
 
-                  {/* SVG Render Area */}
                   <View className="h-56 pb-8 md:h-64">
                     {dailyData.length > 0 && (
                       <SvgMultiLineChart
@@ -650,9 +644,10 @@ export default function ApiKeysDashboard() {
                     )}
                   </View>
 
-                  {/* Dynamic HUD */}
+                  {/* DYNAMIC HOVER HUD (DAILY) */}
                   <View className="justify-end h-28">
-                    {activeDailyPoint && activeDailyPoint.total > 0 ? (
+                    {activeDailyPoint &&
+                    getVisibleTotal(activeDailyPoint) > 0 ? (
                       <View className="p-4 mt-6 border border-white/10 rounded-2xl bg-white/5">
                         <Text className="text-[#00F0FF] text-[10px] font-black uppercase tracking-widest mb-3">
                           Token Burn: {activeDailyPoint.fullDate}
@@ -691,7 +686,7 @@ export default function ApiKeysDashboard() {
                 </GlassCard>
               </FadeIn>
 
-              {/* ─── MODULE 2: MONTHLY VOLUME CHART (STACKED BARS) ─── */}
+              {/* ─── MODULE 2: MONTHLY VOLUME CHART (JAN -> DEC STACKED BARS) ─── */}
               <FadeIn delay={300}>
                 <GlassCard className="p-6 md:p-8 mb-8 border bg-white/[0.015] border-white/5 rounded-3xl md:rounded-[32px]">
                   <View className="flex-row items-center justify-between mb-8">
@@ -717,8 +712,10 @@ export default function ApiKeysDashboard() {
                     ))}
                   </View>
 
+                  {/* DYNAMIC HOVER HUD (MONTHLY) */}
                   <View className="justify-end h-28">
-                    {activeMonthlyPoint && activeMonthlyPoint.total > 0 ? (
+                    {activeMonthlyPoint &&
+                    getVisibleTotal(activeMonthlyPoint) > 0 ? (
                       <View className="p-4 mt-6 border border-white/10 rounded-2xl bg-white/5">
                         <Text className="text-[#8A2BE2] text-[10px] font-black uppercase tracking-widest mb-3">
                           Total Volume: {activeMonthlyPoint.fullDate}
