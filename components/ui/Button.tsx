@@ -51,7 +51,7 @@ export const Button = ({
               className={cn(
                 'text-base font-bold tracking-widest uppercase',
                 children ? 'ml-2' : '',
-                variant === 'primary' ? 'text-[#00a87e]' : 'text-white',
+                variant === 'primary' ? 'text-[#010218]' : 'text-white',
               )}
             >
               {title}

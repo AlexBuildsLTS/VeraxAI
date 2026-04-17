@@ -51,7 +51,7 @@ function exportToTxt(data: ExportData, options: ExportOptions): string {
   const takeaways = safeArray<string>(insights?.key_takeaways);
 
   lines.push('════════════════════════════════════════════════════════════════════════');
-  lines.push(`VerAI TRANSCRIPT: ${video.title || 'Unknown Media Asset'}`);
+  lines.push(`VeraxAI TRANSCRIPT: ${video.title || 'Unknown Media Asset'}`);
   lines.push('════════════════════════════════════════════════════════════════════════\n');
   lines.push(`Source URL : ${video.youtube_url}`);
   if (video.duration_seconds) lines.push(`Duration   : ${formatDuration(video.duration_seconds)}`);
@@ -69,7 +69,7 @@ function exportToTxt(data: ExportData, options: ExportOptions): string {
   }
 
   if (options.includeChapters && chapters.length > 0) {
-    lines.push('─── VerAI CHAPTER TIMELINE───────────────────────────────────────────────────\n');
+    lines.push('─── VeraxAI CHAPTER TIMELINE───────────────────────────────────────────────────\n');
     chapters.forEach((chapter) => {
       lines.push(`[${chapter.timestamp}] ${chapter.title.toUpperCase()}`);
       if (chapter.description) lines.push(`    ${chapter.description}`);
@@ -100,7 +100,7 @@ function exportToTxt(data: ExportData, options: ExportOptions): string {
   }
 
   lines.push('\n════════════════════════════════════════════════════════════════════════');
-  lines.push('Preserved Securely by VerAI Vault');
+  lines.push('Preserved Securely by VeraxAI Vault');
   lines.push('════════════════════════════════════════════════════════════════════════');
 
   return lines.join('\n');
@@ -162,7 +162,7 @@ function exportToMarkdown(data: ExportData, options: ExportOptions): string {
     });
   }
 
-  lines.push('---\n*Preserved Securely by VerAI Vault*');
+  lines.push('---\n*Preserved Securely by VeraxAI Vault*');
   return lines.join('\n');
 }
 
@@ -260,7 +260,7 @@ function exportToJson(data: ExportData, options: ExportOptions): string {
 
 export function exportTranscript(data: ExportData, options: ExportOptions): ExportResult {
   const format = options.format || 'txt';
-  const filename = `VerAI_TranscriptExport_${Date.now()}.${format}`;
+  const filename = `VeraxAI_TranscriptExport_${Date.now()}.${format}`;
 
   let content = '';
   switch (format) {

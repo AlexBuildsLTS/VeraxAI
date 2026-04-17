@@ -1,6 +1,6 @@
 /**
  * lib/supabase/client.ts
- * VerAI- Production Supabase Client
+ * VeraxAI- Production Supabase Client
  */
 import { Platform } from 'react-native';
 import { createClient } from '@supabase/supabase-js';

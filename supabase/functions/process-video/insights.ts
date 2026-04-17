@@ -269,7 +269,7 @@ function buildPrompt(
     long: 'Write a massive, profound 4-6 paragraph executive dossier. Output exactly 5 to 8 major chronological chapters. Do not spam micro-chapters. Group large timeframes into massive, highly detailed descriptions.',
   }[category];
 
-  return `You are VerAI's elite, top-tier Senior Intelligence Analyst and Linguistic Expert tasked with producing a flawless, publication-ready dossier.
+  return `You are VeraxAI's elite, top-tier Senior Intelligence Analyst and Linguistic Expert tasked with producing a flawless, publication-ready dossier.
 
 TASK: Decrypt and analyze the verbatim transcript below to produce perfectly structured, profound insights.
 

@@ -44,7 +44,7 @@ const getRoleConfig = (role?: string) => {
       return {
         label: 'ADMIN',
         bg: 'rgba(255,51,102,0.15)',
-        text: '#fccf03', // Inherited brand color for Admin text
+        text: '#fefefe', // Inherited brand color for Admin text
         border: 'rgba(133, 4, 36,0.3)',
         shadow: '#30010d',
       };
@@ -111,7 +111,7 @@ export const ProfileDropdown = () => {
         onPress={() => setIsOpen(!isOpen)}
         activeOpacity={0.8}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        className="w-10 h-10 rounded-full bg-[#0101278c] border border-white/40 items-center justify-center"
+        className="w-10 h-10 rounded-full bg-[#010127e1] border border-white/60 items-center justify-center"
         style={{
           // Safely apply web-only cursor
           ...(Platform.OS === 'web' ? { cursor: 'pointer' as never } : {}),
@@ -171,7 +171,7 @@ export const ProfileDropdown = () => {
               style={{
                 padding: 12,
                 borderBottomWidth: 1,
-                borderBottomColor: 'rgba(255,255,255,0.08)',
+                borderBottomColor: 'rgba(255,255,255,0.02)',
               }}
             >
               <View
@@ -179,7 +179,7 @@ export const ProfileDropdown = () => {
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: 4,
+                  marginBottom: 8,
                 }}
               >
                 <Text
@@ -208,7 +208,7 @@ export const ProfileDropdown = () => {
                   <Text
                     style={{
                       color: roleConfig.text,
-                      fontSize: 8,
+                      fontSize: 10,
                       fontWeight: '900',
                       letterSpacing: 1,
                     }}
@@ -218,7 +218,7 @@ export const ProfileDropdown = () => {
                 </View>
               </View>
               <Text
-                style={{ color: 'rgba(52, 168, 83,0.6)', fontSize: 12 }}
+                style={{ color: 'rgba(117, 180, 250,0.9)', fontSize: 13 }}
                 numberOfLines={1}
               >
                 {email}
@@ -241,7 +241,7 @@ export const ProfileDropdown = () => {
                 />
                 <Text
                   style={{
-                    color: 'rgba(2, 207, 128,0.8)',
+                    color: 'rgba(254, 254, 254,0.8)',
                     fontSize: 12,
                     fontWeight: '700',
                     letterSpacing: 1,
@@ -265,7 +265,7 @@ export const ProfileDropdown = () => {
                 />
                 <Text
                   style={{
-                    color: 'rgba(2, 146, 207,0.8)',
+                    color: 'rgba(254, 254, 254,0.8)',
                     fontSize: 12,
                     fontWeight: '700',
                     letterSpacing: 1,
@@ -290,7 +290,7 @@ export const ProfileDropdown = () => {
                     onPress={() => handleNavigate('/admin')}
                     activeOpacity={0.8}
                     className="flex-row items-center p-3 rounded-xl"
-                    style={{ backgroundColor: 'rgba(3, 168, 39,0.15)' }}
+                    style={{ backgroundColor: 'rgba(31, 49, 87,0.15)' }}
                   >
                     <DatabaseZap
                       size={16}
@@ -299,7 +299,7 @@ export const ProfileDropdown = () => {
                     />
                     <Text
                       style={{
-                        color: '#cf023f',
+                        color: '#fefefe',
                         fontSize: 12,
                         fontWeight: '900',
                         letterSpacing: 1,
@@ -311,7 +311,7 @@ export const ProfileDropdown = () => {
                   <View
                     style={{
                       height: 1,
-                      backgroundColor: 'rgba(255,255,255,0.05)',
+                      backgroundColor: 'rgba(255,255,255,0.08)',
                       marginVertical: 4,
                     }}
                   />
