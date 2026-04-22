@@ -5,7 +5,7 @@
  * ARCHITECTURE & PROTOCOL
  * TOUCH ISOLATION: Reverted to standard TouchableOpacity and natural DOM flow.
  * Aggressive zIndex forcing removed to allow Android's native gesture responder
- * to process taps reliably.
+ * to process taps reliably. Touch delays mitigated via delayPressIn={0}.
  * AMBIENT ENGINE: Hardware-accelerated Wandering Core & Nebula engine
  * maintained at 120fps, isolated via pointerEvents="none".
  * UX SYSTEM: Liquid Neon glassmorphism enforced across all interactive nodes.
@@ -55,6 +55,7 @@ import Animated, {
   useFrameCallback,
 } from 'react-native-reanimated';
 
+// Animated wrapper for SVG sub-components allowing direct Reanimated prop injection
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─── LIQUID NEON THEME CONSTANTS ──────────────────────────────────────────────
@@ -65,8 +66,9 @@ const THEME = {
   pink: '#FF007F',
   green: '#32FF00',
   red: '#FF3333',
-};
+} as const;
 
+// Environment flag for platform-specific rendering (e.g., CSS BoxShadow vs Native Shadow)
 const IS_WEB = Platform.OS === 'web';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -106,8 +108,9 @@ interface WanderingCoreProps {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * SingleRipple: Calculates independent mathematical waves for the Nebula effect.
- * Strictly non-interactive (pointerEvents="none").
+ * SingleRipple Component
+ * Calculates independent mathematical waves for the background Nebula effect.
+ * Strictly non-interactive (pointerEvents="none") to prevent touch collision.
  */
 const SingleRipple = React.memo(
   ({ color, delay, duration, maxSize }: SingleRippleProps) => {
@@ -153,8 +156,9 @@ const SingleRipple = React.memo(
 );
 
 /**
- * WanderingCore: Trigonometric frame-callback calculation for fluid drift.
- * Handles Web CSS BoxShadow parity vs Native shadowProps.
+ * WanderingCore Component
+ * Trigonometric frame-callback calculation for fluid drift.
+ * Handles cross-platform shadow parity between Web and Native.
  */
 const WanderingCore = React.memo(
   ({
@@ -169,6 +173,7 @@ const WanderingCore = React.memo(
 
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
+      // Normalizing time delta for consistent velocity across refresh rates
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
 
@@ -248,8 +253,9 @@ const WanderingCore = React.memo(
 );
 
 /**
- * AmbientArchitecture: Foundation layer.
- * pointerEvents="none" strictly prevents touch interception.
+ * AmbientArchitecture Component
+ * Foundation wrapper for the background engine.
+ * PointerEvents enforced globally to guarantee touch falls through to the ScrollView.
  */
 const AmbientArchitecture = React.memo(() => {
   const { width, height } = Dimensions.get('window');
@@ -275,8 +281,9 @@ const AmbientArchitecture = React.memo(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * AnimatedSettingsIcon: Complex multi-node SVG sequence.
- * Floating transform isolated to prevent layout trashing.
+ * AnimatedSettingsIcon Component
+ * Complex multi-node SVG sequence. Transform float is explicitly isolated
+ * from the layout thread to prevent layout trashing and optimize 120fps capability.
  */
 const AnimatedSettingsIcon = React.memo(() => {
   const floatY = useSharedValue(0);
@@ -438,6 +445,7 @@ export default function SettingsHubScreen() {
   const { profile } = useAuthStore();
   const userRole = profile?.role || 'member';
 
+  // Memoized configuration block mapping settings domains to Liquid Neon styling
   const SETTING_MODULES: SettingsCardItem[] = useMemo(() => {
     const modules: SettingsCardItem[] = [
       {
@@ -486,7 +494,7 @@ export default function SettingsHubScreen() {
       },
     ];
 
-    // Admin module injected dynamically based on Auth payload
+    // RBAC: Admin Module conditionally unmounted
     if (userRole === 'admin') {
       modules.push({
         id: 'admin',
@@ -510,8 +518,7 @@ export default function SettingsHubScreen() {
       <AmbientArchitecture />
 
       {/* ── FOREGROUND LAYER ──
-       * Standard natural DOM flow to guarantee Android gesture responder
-       * prioritizes ScrollView and TouchableOpacity natively.
+       * SafeAreaView restricts boundaries cleanly to device notches.
        */}
       <SafeAreaView
         style={{ flex: 1 }}
@@ -522,6 +529,7 @@ export default function SettingsHubScreen() {
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
           keyboardShouldPersistTaps="handled"
+          // Removed the invalid typing prop here to respect the strict TS environment.
           contentContainerStyle={{
             padding: isMobile ? 16 : 60,
             paddingTop: isMobile ? 60 : 80,
@@ -552,6 +560,8 @@ export default function SettingsHubScreen() {
               className="flex-row items-center mb-10 gap-x-2"
               activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              // ARCHITECTURE FIX: Bypasses Android's scroll-wait time
+              delayPressIn={0}
             >
               <ArrowBigLeftDash size={18} color={THEME.cyan} />
             </TouchableOpacity>
@@ -561,7 +571,6 @@ export default function SettingsHubScreen() {
             <View className="gap-y-4 md:gap-y-6">
               {SETTING_MODULES.map((mod, index) => (
                 <FadeIn key={mod.id} delay={index * 100}>
-                  {/* Reverted to TouchableOpacity to resolve Android gesture conflicts */}
                   <TouchableOpacity
                     onPress={() => {
                       if (mod.routeOverride) {
@@ -569,6 +578,8 @@ export default function SettingsHubScreen() {
                       }
                     }}
                     activeOpacity={0.7}
+                    // ARCHITECTURE FIX: Explicitly prevents the ScrollView from trapping the first touch intent on Android
+                    delayPressIn={0}
                   >
                     <GlassCard
                       glowColor={mod.color}

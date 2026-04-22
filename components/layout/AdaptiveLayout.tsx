@@ -92,7 +92,7 @@ export const AdaptiveLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <View
-      className="flex-1 bg-[#010b1f8c] relative overflow-hidden"
+      className="flex-1 bg-[#010b1f71] relative overflow-hidden"
       style={{ flex: 1 }}
     >
       {/* Removes scrollbars for native app feel on browsers */}

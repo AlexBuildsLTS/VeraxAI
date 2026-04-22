@@ -1,13 +1,11 @@
 /**
  * @file app/(dashboard)/settings/support.tsx
- * @description VeraxAI Enterprise Support & Secure Messaging Hub.
+ * @description VeraxAI Support & Secure Messaging Hub
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE
- * bounding boxes and allowing the Liquid Neon background 
- *  Strict flexShrink: 0 on all horizontal scrolling elements
+ * bounding boxes and allowing the Liquid Neon background
  * prevents tab squashing on Mobile Web and APK
- *  Pure TouchableOpacity for flawless gesture parity
- *  Modern, tasteful emojis added to data models and UI prompts
+ * Pure TouchableOpacity for flawless gesture parity
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -203,13 +201,13 @@ const RoleBadge = ({ role }: { role: string | undefined }) => {
 
   if (safeRole === 'admin') {
     IconComponent = Shield;
-    label = 'ADMIN 👑';
+    label = 'ADMIN';
   } else if (safeRole === 'support') {
     IconComponent = ShieldCheck;
-    label = 'SUPPORT 🛠️';
+    label = 'SUPPORT';
   } else if (safeRole === 'premium') {
     IconComponent = Zap;
-    label = 'PRO ⭐';
+    label = 'PREMIUM';
   }
 
   return (
@@ -567,7 +565,6 @@ const AnimatedSupportIcon = () => {
   );
 };
 
-// ─── MASTER PAGE CONTROLLER (SUPPORT SCREEN) ───
 // ─── MASTER PAGE CONTROLLER (SUPPORT SCREEN) ─────────────────────────────────
 
 /**
@@ -584,37 +581,6 @@ export default function SupportScreen() {
 
   const isMobile = SCREEN_WIDTH < 768;
 
-  // ─── KEYBOARD & PADDING MANAGEMENT ───
-  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSub = Keyboard.addListener(showEvent, () => {
-      setKeyboardVisible(true);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  // Strict dynamic math: Pushes up gracefully when closed, shrinks tight to keyboard when open.
-  const bottomChatPadding = isMobile
-    ? isKeyboardVisible
-      ? 12
-      : Math.max(insets.bottom + 120, 130)
-    : 24;
-
   // ─── ROLE LOGIC ───
   const realRole = (profile?.role || 'member').toLowerCase() as UserRole;
   const isStaff = STAFF_ROLES.includes(realRole);
@@ -626,7 +592,9 @@ export default function SupportScreen() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'detail' | 'create'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'detail' | 'create'>(
+    'list',
+  );
   const [selectedTicket, setSelectedTicket] = useState<TicketUI | null>(null);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
 
@@ -668,7 +636,7 @@ export default function SupportScreen() {
         const { data, error } = await supabase
           .from('ticket_messages')
           .select(
-            `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`
+            `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`,
           )
           .eq('id', payload.new.id)
           .single();
@@ -710,7 +678,7 @@ export default function SupportScreen() {
       let query = supabase
         .from('tickets')
         .select(
-          `*, user:profiles!tickets_user_id_fkey (full_name, email, role, avatar_url)`
+          `*, user:profiles!tickets_user_id_fkey (full_name, email, role, avatar_url)`,
         );
 
       if (!isStaff) {
@@ -779,7 +747,7 @@ export default function SupportScreen() {
       const { data, error } = await supabase
         .from('ticket_messages')
         .select(
-          `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`
+          `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`,
         )
         .eq('ticket_id', ticket.id)
         .order('created_at', { ascending: true });
@@ -821,7 +789,7 @@ export default function SupportScreen() {
           is_internal: isInternal,
         })
         .select(
-          `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`
+          `*, author:profiles!ticket_messages_user_id_fkey (full_name, email, role, avatar_url)`,
         )
         .single();
 
@@ -1453,18 +1421,18 @@ export default function SupportScreen() {
                 keyboardShouldPersistTaps="handled"
               />
 
-              {/* * SLEEK MODERN INPUT CONTAINER
-               * Clustered tightly (gap: 8), strictly width-controlled, padded properly above bottom nav.
-               */}
+              {/* ─── SLEEK MODERN INPUT CONTAINER ─── */}
               <View
                 style={{
                   paddingHorizontal: 12,
                   paddingTop: 12,
-                  paddingBottom: bottomChatPadding,
+                  // Safely delegates to KeyboardAvoidingView on iOS and adjustResize on Android
+                  paddingBottom: IS_WEB ? 24 : Math.max(insets.bottom, 12) + 10,
                   backgroundColor: 'transparent',
                   width: '100%',
                   maxWidth: 600,
                   alignSelf: 'center',
+                  zIndex: 10,
                 }}
               >
                 {isStaff && (
@@ -1527,7 +1495,7 @@ export default function SupportScreen() {
                       borderWidth: 1,
                       borderColor: 'rgba(255, 255, 255, 0.1)',
                       minHeight: 48,
-                      maxHeight: 100,
+                      maxHeight: 120,
                       justifyContent: 'center',
                     }}
                   >
@@ -1537,7 +1505,7 @@ export default function SupportScreen() {
                         paddingHorizontal: 16,
                         paddingTop: Platform.OS === 'ios' ? 14 : 10,
                         paddingBottom: Platform.OS === 'ios' ? 14 : 10,
-                        fontSize: 13,
+                        fontSize: 15,
                         ...(Platform.OS === 'web'
                           ? ({ outlineStyle: 'none' } as any)
                           : {}),
@@ -1561,6 +1529,7 @@ export default function SupportScreen() {
                       borderRadius: 24,
                       alignItems: 'center',
                       justifyContent: 'center',
+                      marginBottom: 0,
                     }}
                   >
                     {isSubmitting ? (
