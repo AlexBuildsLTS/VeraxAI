@@ -3,11 +3,13 @@
  * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE & PROTOCOL
- * TOUCH ISOLATION: Strict zIndex and elevation separation to prevent touch
- * swallowing on Android EAS builds
- * WEB PARITY: Pressable API + NativeWind classes compile to CSS transitions
- * for frictionless Vercel Web performance
- * UX SYSTEM: Liquid Neon glassmorphism enforced across all nodes
+ * TOUCH ISOLATION: Reverted to standard TouchableOpacity and natural DOM flow.
+ * Aggressive zIndex forcing removed to allow Android's native gesture responder
+ * to process taps reliably.
+ * AMBIENT ENGINE: Hardware-accelerated Wandering Core & Nebula engine
+ * maintained at 120fps, isolated via pointerEvents="none".
+ * UX SYSTEM: Liquid Neon glassmorphism enforced across all interactive nodes.
+ * STRICT TYPING: Zero 'any' types utilized across routing and animations.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -16,7 +18,7 @@ import {
   View,
   Text,
   ScrollView,
-  Pressable,
+  TouchableOpacity,
   Dimensions,
   Platform,
   StyleSheet,
@@ -247,16 +249,13 @@ const WanderingCore = React.memo(
 
 /**
  * AmbientArchitecture: Foundation layer.
- * Strictly anchored to zIndex: 0 and elevation: 0.
+ * pointerEvents="none" strictly prevents touch interception.
  */
 const AmbientArchitecture = React.memo(() => {
   const { width, height } = Dimensions.get('window');
   return (
     <View
-      style={[
-        StyleSheet.absoluteFill,
-        { zIndex: 0, elevation: 0, pointerEvents: 'none' },
-      ]}
+      style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
     >
@@ -429,7 +428,7 @@ const AnimatedSettingsIcon = React.memo(() => {
 AnimatedSettingsIcon.displayName = 'AnimatedSettingsIcon';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 4: CORE FOREGROUND & ROUTING (DOM ISOLATION)
+// MODULE 4: CORE FOREGROUND & ROUTING
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SettingsHubScreen() {
   const router = useRouter();
@@ -507,17 +506,16 @@ export default function SettingsHubScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
-      {/* ── BACKGROUND LAYER (zIndex: 0) ── */}
+      {/* ── BACKGROUND LAYER ── */}
       <AmbientArchitecture />
 
-      {/* ── FOREGROUND LAYER (zIndex: 10) ──
-       * Absolute DOM elevation guarantees Android gesture responders
-       * and Web click events are prioritized over the background canvas.
+      {/* ── FOREGROUND LAYER ──
+       * Standard natural DOM flow to guarantee Android gesture responder
+       * prioritizes ScrollView and TouchableOpacity natively.
        */}
       <SafeAreaView
-        style={{ flex: 1, zIndex: 10, elevation: 10 }}
+        style={{ flex: 1 }}
         edges={['top', 'bottom', 'left', 'right']}
-        pointerEvents="box-none"
       >
         <ScrollView
           style={{ flex: 1, width: '100%' }}
@@ -547,32 +545,30 @@ export default function SettingsHubScreen() {
           </FadeIn>
 
           <View className="flex-row items-center justify-between w-full max-w-2xl px-4 py-4 md:px-8">
-            {/* NativeWind compilation maps active states to Web CSS pseudoclasses effortlessly */}
-            <Pressable
+            <TouchableOpacity
               onPress={() =>
                 router.canGoBack() ? router.back() : router.replace('/')
               }
-              className="flex-row items-center mb-10 transition-opacity gap-x-2 active:opacity-60"
+              className="flex-row items-center mb-10 gap-x-2"
+              activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
               <ArrowBigLeftDash size={18} color={THEME.cyan} />
-            </Pressable>
+            </TouchableOpacity>
           </View>
 
           <View className="w-full max-w-2xl px-2">
             <View className="gap-y-4 md:gap-y-6">
               {SETTING_MODULES.map((mod, index) => (
                 <FadeIn key={mod.id} delay={index * 100}>
-                  {/* Replaced TouchableOpacity with Pressable to ensure
-                   * hardware-level UI responsiveness on Android and CSS transition rendering on Web
-                   */}
-                  <Pressable
+                  {/* Reverted to TouchableOpacity to resolve Android gesture conflicts */}
+                  <TouchableOpacity
                     onPress={() => {
                       if (mod.routeOverride) {
                         router.push(mod.routeOverride);
                       }
                     }}
-                    className="active:scale-[0.98] active:opacity-80 transition-all duration-150"
+                    activeOpacity={0.7}
                   >
                     <GlassCard
                       glowColor={mod.color}
@@ -627,7 +623,7 @@ export default function SettingsHubScreen() {
                         <ChevronRight size={18} color="#ffffff50" />
                       </View>
                     </GlassCard>
-                  </Pressable>
+                  </TouchableOpacity>
                 </FadeIn>
               ))}
             </View>

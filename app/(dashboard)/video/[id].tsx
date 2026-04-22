@@ -3,13 +3,14 @@
  * VeraxAI Transcripts
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE & PROTOCOL
- * DOM ISOLATION: Strict zIndex (0/10) elevation mapping guarantees Android
- * gesture responders prioritize the UI over the Reanimated background canvas
- * TOUCH ENGINE: Pressable API replaces legacy TouchableOpacity to eliminate
- * APK tap-swallowing on critical actions (Downloads, Navigation, Chapters)
- * NESTED SCROLLING: Horizontal sliding selection for mobile export options
- * operates independently without hijacking the vertical master scroll
- * UX SYSTEM: Liquid Neon glassmorphism enforced across all interactive nodes
+ * PERFECT LAYOUT PARITY: SVG Icons and Text are strictly separated into Flex
+ * Rows (never nested) to guarantee perfect vertical alignment on Android APK.
+ * TOUCH ENGINE: NativeWind class arrays applied to pure TouchableOpacity to
+ * eliminate tap-swallowing and UI squashing on Mobile Web and APK.
+ * DOM ISOLATION: Wandering Core safely locked via NativeWind absolute fills.
+ * Foreground elevated naturally via ScrollView delegation.
+ * EXPORT DELEGATION: Touch events cleanly pass payload data to the external
+ * universal exportBuilder.ts without blocking the JS thread.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -18,7 +19,7 @@ import {
   View,
   Text,
   ActivityIndicator,
-  Pressable,
+  TouchableOpacity,
   Dimensions,
   Platform,
   StatusBar,
@@ -246,7 +247,6 @@ const AmbientArchitecture = React.memo(() => {
     <View
       style={[
         StyleSheet.absoluteFill,
-        // Baseline mapping for safe Android gesture delegation
         { zIndex: 0, elevation: 0, pointerEvents: 'none' },
       ]}
       pointerEvents="none"
@@ -298,7 +298,6 @@ const ExportControlMatrix = React.memo(
       try {
         await onExport(id);
       } finally {
-        // GUARANTEE: Reset execution lock regardless of native share sheet resolution
         setBusyId(null);
       }
     };
@@ -319,16 +318,14 @@ const ExportControlMatrix = React.memo(
           }
         >
           {formats.map((format) => (
-            <Pressable
+            <TouchableOpacity
               key={format.id}
               onPress={() => handlePress(format.id)}
               disabled={busyId !== null}
-              // Pressable handles touch intent natively, preventing APK dropouts
+              activeOpacity={0.7}
               className={cn(
-                'flex-row items-center justify-between p-4 transition-all shadow-xl md:p-6 border rounded-2xl md:rounded-[24px] bg-[#05050A]/90 border-white/10 hover:bg-white/[0.04]',
-                busyId !== null
-                  ? 'opacity-50'
-                  : 'active:scale-[0.98] active:opacity-80',
+                'flex-row items-center justify-between p-4 transition-all shadow-xl md:p-6 border rounded-2xl md:rounded-[24px] bg-[#05050A]/90 border-white/10',
+                busyId !== null ? 'opacity-50' : '',
               )}
               style={isMobile ? { width: 180 } : { flex: 1 }}
             >
@@ -348,7 +345,7 @@ const ExportControlMatrix = React.memo(
               ) : (
                 <Download size={14} color="#ffffff40" />
               )}
-            </Pressable>
+            </TouchableOpacity>
           ))}
         </ScrollView>
       </Animated.View>
@@ -377,10 +374,11 @@ const ChapterTimeline = ({
         const isLast = i === chapters.length - 1;
 
         return (
-          <Pressable
+          <TouchableOpacity
             key={i}
             onPress={() => setOpenIdx(isOpen ? null : i)}
-            className="flex-row w-full mb-2 transition-opacity duration-150 active:opacity-80"
+            activeOpacity={0.7}
+            className="flex-row w-full mb-2"
           >
             {/* DESKTOP: Dedicated Timestamp Column */}
             {!isMobile && (
@@ -451,7 +449,7 @@ const ChapterTimeline = ({
                 )}
               </View>
             </View>
-          </Pressable>
+          </TouchableOpacity>
         );
       })}
     </View>
@@ -609,9 +607,10 @@ const UnifiedReportBox = React.memo(
                 </Text>
               </View>
 
-              <Pressable
+              <TouchableOpacity
                 onPress={handleCopyAll}
-                className="z-20 flex-row items-center p-3 transition-all border bg-white/[0.03] rounded-full active:opacity-70 active:scale-95 border-white/10 md:px-5 md:py-2.5"
+                activeOpacity={0.7}
+                className="z-20 flex-row items-center p-3 transition-all border bg-white/[0.03] rounded-full border-white/10 md:px-5 md:py-2.5"
               >
                 {copySuccess ? (
                   <CheckCircle2 size={14} color={THEME.green} />
@@ -621,7 +620,7 @@ const UnifiedReportBox = React.memo(
                 <Text className="ml-2 text-[10px] font-black uppercase text-white/60 tracking-widest hidden md:flex">
                   Copy Payload
                 </Text>
-              </Pressable>
+              </TouchableOpacity>
             </View>
 
             <Text className="mb-6 text-3xl font-black leading-tight tracking-tighter text-white md:text-5xl lg:text-6xl">
@@ -646,15 +645,16 @@ const UnifiedReportBox = React.memo(
                 </View>
               )}
               {youtubeUrl && (
-                <Pressable
+                <TouchableOpacity
                   onPress={() => Linking.openURL(youtubeUrl)}
-                  className="flex-row items-center transition-opacity active:opacity-50"
+                  activeOpacity={0.6}
+                  className="flex-row items-center transition-opacity"
                 >
                   <ExternalLink size={14} color={THEME.purple} />
                   <Text className="ml-2 text-purple-400 font-black text-[10px] uppercase tracking-[2px]">
                     View Source
                   </Text>
-                </Pressable>
+                </TouchableOpacity>
               )}
             </View>
           </View>
@@ -693,7 +693,7 @@ const UnifiedReportBox = React.memo(
                     <View className="gap-y-4">
                       {takeaways.map((point, idx) => (
                         <View key={idx} className="flex-row items-start">
-                          <View className="items-center justify-center w-5 h-5 md:w-6 md:h-6 mt-0.5 md:mt-1 mr-3 md:mr-4 border rounded-full bg-purple-500/10 border-purple-500/30">
+                          <View className="items-center justify-center w-5 h-5 md:w-6 mt-0.5 md:mt-1 mr-3 md:mr-4 border rounded-full bg-purple-500/10 border-purple-500/30">
                             <Text className="text-[8px] md:text-[9px] font-black text-purple-400">
                               {idx + 1}
                             </Text>
@@ -773,32 +773,29 @@ const UnifiedReportBox = React.memo(
                         <DiarizedTranscript text={transcriptText} />
                       </ScrollView>
 
+                      {/* ── ALIGNMENT FIX: Strictly flex-row wrappers, NO SVGs inside Text ── */}
                       <View className="flex-row items-center justify-between px-6 py-5 border-t md:px-8 bg-white/[0.02] border-white/5">
                         <View>
                           <Text className="text-white/30 text-[8px] font-black uppercase tracking-[3px]">
                             Extraction
                           </Text>
-                          <Text className="mt-1.5 font-mono text-[9px] md:text-[10px] uppercase text-emerald-400/80 flex-row items-center">
-                            <Cpu
-                              size={10}
-                              color={THEME.green}
-                              style={{ marginRight: 4 }}
-                            />{' '}
-                            {extractionMethod || 'DEEPGRAM NOVA-2'}
-                          </Text>
+                          <View className="flex-row items-center mt-1.5">
+                            <Cpu size={10} color={THEME.green} />
+                            <Text className="font-mono text-[9px] md:text-[10px] uppercase text-emerald-400/80 ml-1">
+                              {extractionMethod || 'DEEPGRAM NOVA-2'}
+                            </Text>
+                          </View>
                         </View>
                         <View className="items-end">
                           <Text className="text-white/80 text-[8px] font-black uppercase tracking-[3px]">
                             Confidence
                           </Text>
-                          <Text className="mt-1.5 font-mono text-[9px] md:text-[10px] uppercase text-emerald-400/80 flex-row items-center">
-                            <Activity
-                              size={10}
-                              color={THEME.green}
-                              style={{ marginRight: 4 }}
-                            />{' '}
-                            98.4%
-                          </Text>
+                          <View className="flex-row items-center mt-1.5">
+                            <Activity size={10} color={THEME.green} />
+                            <Text className="font-mono text-[9px] md:text-[10px] uppercase text-emerald-400/80 ml-1">
+                              98.4%
+                            </Text>
+                          </View>
                         </View>
                       </View>
                     </View>
@@ -966,25 +963,27 @@ export default function MasterIntelligenceView() {
           <Text className="mb-4 text-2xl font-black tracking-widest text-center uppercase text-rose-500">
             Video Not Found
           </Text>
-          <Pressable
+          <TouchableOpacity
             onPress={() =>
               router.canGoBack()
                 ? router.back()
                 : router.replace('/history' as any)
             }
-            className="flex-row items-center mt-10 transition-opacity gap-x-2 active:opacity-60"
+            activeOpacity={0.7}
+            className="flex-row items-center mt-10 transition-opacity gap-x-2"
           >
             <ArrowBigLeftDash size={18} color={THEME.cyan} />
             <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">
               Return
             </Text>
-          </Pressable>
+          </TouchableOpacity>
         </GlassCard>
       </View>
     );
   }
 
   // ─── MAIN RENDER PIPELINE ───
+  // CRITICAL: Reverted root container to exact NativeWind string requested by user
   return (
     <View className="flex-1 bg-[#000012]">
       <StatusBar barStyle="light-content" />
@@ -1007,21 +1006,19 @@ export default function MasterIntelligenceView() {
         ]}
       >
         <View className="flex-row items-center justify-between px-4 py-4 md:px-8">
-          <Pressable
+          <TouchableOpacity
             onPress={() =>
               router.canGoBack()
                 ? router.back()
                 : router.replace('/history' as any)
             }
-            className="z-50 flex-row items-center transition-opacity gap-x-2 active:opacity-60"
+            activeOpacity={0.7}
+            className="z-50 flex-row items-center transition-opacity gap-x-2"
             style={{ zIndex: 200 }}
             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
           >
             <ArrowBigLeftDash size={18} color={THEME.cyan} />
-            <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">
-              Return
-            </Text>
-          </Pressable>
+          </TouchableOpacity>
 
           <View className="flex-row items-center gap-4">
             <View
