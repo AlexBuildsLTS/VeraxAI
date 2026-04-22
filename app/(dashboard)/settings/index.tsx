@@ -2,11 +2,12 @@
  * app/(dashboard)/settings/index.tsx
  * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL
- * keyboardShouldPersistTaps="always" eliminates Android tap-swallowing.
- * BACKGROUND PARITY: Features the exact Wandering Core & Nebula engine from the Dashboard.
- * DOM ISOLATION: Background and Foreground are strict siblings to prevent APK elevation crashes.
- * LIQUID NEON UX: Smooth glassmorphism, glowing SVGs, and responsive flex handling.
+ * ARCHITECTURE & PROTOCOL
+ * TOUCH ISOLATION: Strict zIndex and elevation separation to prevent touch
+ * swallowing on Android EAS builds
+ * WEB PARITY: Pressable API + NativeWind classes compile to CSS transitions
+ * for frictionless Vercel Web performance
+ * UX SYSTEM: Liquid Neon glassmorphism enforced across all nodes
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -15,12 +16,12 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   Dimensions,
   Platform,
   StyleSheet,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, Href } from 'expo-router';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { cn } from '../../../lib/utils';
@@ -33,10 +34,11 @@ import {
   LifeBuoy,
   Terminal,
   ArrowBigLeftDash,
+  LucideIcon,
 } from 'lucide-react-native';
 import { useAuthStore } from '../../../store/useAuthStore';
 
-// Native SVG & Animation
+// ─── NATIVE SVG & REANIMATED PIPELINE ─────────────────────────────────────────
 import Svg, { Rect, Path, Circle, Line, G } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -53,7 +55,7 @@ import Animated, {
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// ─── THEME CONSTANTS (Liquid Neon) ───────────────────────────────────────────
+// ─── LIQUID NEON THEME CONSTANTS ──────────────────────────────────────────────
 const THEME = {
   obsidian: '#000012',
   cyan: '#00F0FF',
@@ -66,62 +68,103 @@ const THEME = {
 const IS_WEB = Platform.OS === 'web';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: TYPESCRIPT INTERFACES
+// MODULE 1: TYPE DEFINITIONS
 // ══════════════════════════════════════════════════════════════════════════════
+type GlowColor = 'cyan' | 'pink' | 'purple' | 'green' | 'red';
+
 interface SettingsCardItem {
   id: string;
   title: string;
   desc: string;
-  color: string;
+  color: GlowColor;
   iconHex: string;
-  icon: any;
+  icon: LucideIcon;
   customBg?: string;
   customBorder?: string;
-  routeOverride?: string;
+  routeOverride?: Href;
+}
+
+interface SingleRippleProps {
+  color: string;
+  delay: number;
+  duration: number;
+  maxSize: number;
+}
+
+interface WanderingCoreProps {
+  coreSize: number;
+  color: string;
+  maxWaveSize: number;
+  waveCount: number;
+  baseDuration: number;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
+// MODULE 2: AMBIENT ENGINE (HARDWARE ACCELERATED BACKGROUND)
 // ══════════════════════════════════════════════════════════════════════════════
 
-const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
-  const progress = useSharedValue(0);
-  useEffect(() => {
-    progress.value = withDelay(
-      delay,
-      withRepeat(
-        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
-        -1,
-        false,
+/**
+ * SingleRipple: Calculates independent mathematical waves for the Nebula effect.
+ * Strictly non-interactive (pointerEvents="none").
+ */
+const SingleRipple = React.memo(
+  ({ color, delay, duration, maxSize }: SingleRippleProps) => {
+    const progress = useSharedValue(0);
+
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, [delay, duration, progress]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(
+        progress.value,
+        [0, 0.1, 0.8, 1],
+        [0, 0.15, 0.02, 0],
       ),
+      borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+    }));
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
     );
-  }, [delay, duration, progress]);
+  },
+);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    width: interpolate(progress.value, [0, 1], [0, maxSize]),
-    height: interpolate(progress.value, [0, 1], [0, maxSize]),
-    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
-    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
-  }));
-  return (
-    <Animated.View
-      style={[
-        {
-          position: 'absolute',
-          borderColor: color,
-          backgroundColor: 'transparent',
-        },
-        animatedStyle,
-      ]}
-    />
-  );
-});
-
+/**
+ * WanderingCore: Trigonometric frame-callback calculation for fluid drift.
+ * Handles Web CSS BoxShadow parity vs Native shadowProps.
+ */
 const WanderingCore = React.memo(
-  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
+  ({
+    coreSize,
+    color,
+    maxWaveSize,
+    waveCount,
+    baseDuration,
+  }: WanderingCoreProps) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
+
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
       time.value += frameInfo.timeSincePreviousFrame / 3000;
@@ -154,6 +197,7 @@ const WanderingCore = React.memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -169,7 +213,7 @@ const WanderingCore = React.memo(
       >
         {Array.from({ length: waveCount }).map((_, index) => (
           <SingleRipple
-            key={index}
+            key={`ripple-${index}`}
             color={color}
             delay={index * (baseDuration / waveCount)}
             duration={baseDuration}
@@ -177,6 +221,7 @@ const WanderingCore = React.memo(
           />
         ))}
         <Animated.View
+          pointerEvents="none"
           style={[
             coreStyle,
             {
@@ -184,7 +229,7 @@ const WanderingCore = React.memo(
               height: coreSize,
               borderRadius: coreSize / 2,
               backgroundColor: color,
-              ...(Platform.OS === 'web'
+              ...(IS_WEB
                 ? { boxShadow: `0 0 20px ${color}` }
                 : {
                     shadowColor: color,
@@ -200,16 +245,20 @@ const WanderingCore = React.memo(
   },
 );
 
+/**
+ * AmbientArchitecture: Foundation layer.
+ * Strictly anchored to zIndex: 0 and elevation: 0.
+ */
 const AmbientArchitecture = React.memo(() => {
   const { width, height } = Dimensions.get('window');
   return (
-    // STRICT TOUCH SAFETY: zIndex -1 and elevation -1 prevent UI blocking on Android
     <View
       style={[
         StyleSheet.absoluteFill,
-        { zIndex: -1, elevation: -1, pointerEvents: 'none' },
+        { zIndex: 0, elevation: 0, pointerEvents: 'none' },
       ]}
       importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
     >
       <WanderingCore
         coreSize={14}
@@ -223,8 +272,13 @@ const AmbientArchitecture = React.memo(() => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 3: SETTINGS SHIELD SVG
+// MODULE 3: SVG ANIMATION (SETTINGS SHIELD)
 // ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * AnimatedSettingsIcon: Complex multi-node SVG sequence.
+ * Floating transform isolated to prevent layout trashing.
+ */
 const AnimatedSettingsIcon = React.memo(() => {
   const floatY = useSharedValue(0);
   const pulseNodes = useSharedValue(0);
@@ -269,6 +323,7 @@ const AnimatedSettingsIcon = React.memo(() => {
 
   return (
     <View
+      pointerEvents="none"
       style={{ width: 140, height: 140, alignSelf: 'center', marginBottom: 24 }}
     >
       <View
@@ -374,7 +429,7 @@ const AnimatedSettingsIcon = React.memo(() => {
 AnimatedSettingsIcon.displayName = 'AnimatedSettingsIcon';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 4: MAIN SCREEN COMPONENT
+// MODULE 4: CORE FOREGROUND & ROUTING (DOM ISOLATION)
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SettingsHubScreen() {
   const router = useRouter();
@@ -395,6 +450,7 @@ export default function SettingsHubScreen() {
         icon: User,
         customBg: `${THEME.cyan}08`,
         customBorder: `${THEME.cyan}25`,
+        routeOverride: '/settings/profile' as Href,
       },
       {
         id: 'security',
@@ -405,6 +461,7 @@ export default function SettingsHubScreen() {
         icon: ShieldCheck,
         customBg: `${THEME.pink}08`,
         customBorder: `${THEME.pink}25`,
+        routeOverride: '/settings/security' as Href,
       },
       {
         id: 'billing',
@@ -415,6 +472,7 @@ export default function SettingsHubScreen() {
         icon: Cpu,
         customBg: `${THEME.purple}08`,
         customBorder: `${THEME.purple}25`,
+        routeOverride: '/settings/billing' as Href,
       },
       {
         id: 'support',
@@ -425,9 +483,11 @@ export default function SettingsHubScreen() {
         icon: LifeBuoy,
         customBg: `${THEME.green}08`,
         customBorder: `${THEME.green}25`,
+        routeOverride: '/settings/support' as Href,
       },
     ];
 
+    // Admin module injected dynamically based on Auth payload
     if (userRole === 'admin') {
       modules.push({
         id: 'admin',
@@ -438,7 +498,7 @@ export default function SettingsHubScreen() {
         icon: Terminal,
         customBg: `${THEME.red}08`,
         customBorder: `${THEME.red}25`,
-        routeOverride: '/admin',
+        routeOverride: '/admin' as Href,
       });
     }
 
@@ -447,12 +507,15 @@ export default function SettingsHubScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
-      {/* ── STRICT TOUCH LAYER ISOLATION ─ Placed outside the SafeAreaView*/}
+      {/* ── BACKGROUND LAYER (zIndex: 0) ── */}
       <AmbientArchitecture />
 
-      {/* ── MAIN CONTENT LAYER ── */}
+      {/* ── FOREGROUND LAYER (zIndex: 10) ──
+       * Absolute DOM elevation guarantees Android gesture responders
+       * and Web click events are prioritized over the background canvas.
+       */}
       <SafeAreaView
-        style={{ flex: 1 }}
+        style={{ flex: 1, zIndex: 10, elevation: 10 }}
         edges={['top', 'bottom', 'left', 'right']}
         pointerEvents="box-none"
       >
@@ -460,7 +523,7 @@ export default function SettingsHubScreen() {
           style={{ flex: 1, width: '100%' }}
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
-          keyboardShouldPersistTaps="always"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             padding: isMobile ? 16 : 60,
             paddingTop: isMobile ? 60 : 80,
@@ -484,36 +547,35 @@ export default function SettingsHubScreen() {
           </FadeIn>
 
           <View className="flex-row items-center justify-between w-full max-w-2xl px-4 py-4 md:px-8">
-            <TouchableOpacity
+            {/* NativeWind compilation maps active states to Web CSS pseudoclasses effortlessly */}
+            <Pressable
               onPress={() =>
                 router.canGoBack() ? router.back() : router.replace('/')
               }
-              className="flex-row items-center mb-10 gap-x-2"
-              activeOpacity={0.7}
-              delayPressIn={0}
+              className="flex-row items-center mb-10 transition-opacity gap-x-2 active:opacity-60"
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
               <ArrowBigLeftDash size={18} color={THEME.cyan} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
 
           <View className="w-full max-w-2xl px-2">
             <View className="gap-y-4 md:gap-y-6">
               {SETTING_MODULES.map((mod, index) => (
                 <FadeIn key={mod.id} delay={index * 100}>
-                  <TouchableOpacity
+                  {/* Replaced TouchableOpacity with Pressable to ensure
+                   * hardware-level UI responsiveness on Android and CSS transition rendering on Web
+                   */}
+                  <Pressable
                     onPress={() => {
                       if (mod.routeOverride) {
-                        router.push(mod.routeOverride as any);
-                      } else {
-                        router.push(`/settings/${mod.id}` as any);
+                        router.push(mod.routeOverride);
                       }
                     }}
-                    activeOpacity={0.7}
-                    delayPressIn={0} // Forces instant touch feedback
+                    className="active:scale-[0.98] active:opacity-80 transition-all duration-150"
                   >
                     <GlassCard
-                      glowColor={mod.color as any}
+                      glowColor={mod.color}
                       style={
                         mod.customBg
                           ? {
@@ -565,7 +627,7 @@ export default function SettingsHubScreen() {
                         <ChevronRight size={18} color="#ffffff50" />
                       </View>
                     </GlassCard>
-                  </TouchableOpacity>
+                  </Pressable>
                 </FadeIn>
               ))}
             </View>

@@ -2,12 +2,14 @@
  * app/(dashboard)/video/[id].tsx
  * VeraxAI Transcripts
  * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE
- * GRID TIMELINE FIXED Strict Flexbox columns permanently prevent UI overlap on Webbn
- * INSTANT TOUCH: delayPressIn={0} + keyboardShouldPersistTaps="always" eliminates APK tap dropss
- * NESTED SCROLLING: Independent scroll view for verbatim text works natively on Android
- *  Wandering Core Engine renders beneath the UI safely (zIndex:-1)
- * EXPORT: Try/Finally blocks guarantee buttons never get stuck loadin
+ * ARCHITECTURE & PROTOCOL
+ * DOM ISOLATION: Strict zIndex (0/10) elevation mapping guarantees Android
+ * gesture responders prioritize the UI over the Reanimated background canvas
+ * TOUCH ENGINE: Pressable API replaces legacy TouchableOpacity to eliminate
+ * APK tap-swallowing on critical actions (Downloads, Navigation, Chapters)
+ * NESTED SCROLLING: Horizontal sliding selection for mobile export options
+ * operates independently without hijacking the vertical master scroll
+ * UX SYSTEM: Liquid Neon glassmorphism enforced across all interactive nodes
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -16,7 +18,7 @@ import {
   View,
   Text,
   ActivityIndicator,
-  TouchableOpacity,
+  Pressable,
   Dimensions,
   Platform,
   StatusBar,
@@ -92,45 +94,73 @@ const THEME = {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
+// MODULE 1: AMBIENT ENGINE (HARDWARE ACCELERATED BACKGROUND)
 // ══════════════════════════════════════════════════════════════════════════════
 
-const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
-  const progress = useSharedValue(0);
-  useEffect(() => {
-    progress.value = withDelay(
-      delay,
-      withRepeat(
-        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
-        -1,
-        false,
-      ),
-    );
-  }, [delay, duration, progress]);
+interface SingleRippleProps {
+  color: string;
+  delay: number;
+  duration: number;
+  maxSize: number;
+}
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    width: interpolate(progress.value, [0, 1], [0, maxSize]),
-    height: interpolate(progress.value, [0, 1], [0, maxSize]),
-    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
-    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
-  }));
-  return (
-    <Animated.View
-      style={[
-        {
-          position: 'absolute',
-          borderColor: color,
-          backgroundColor: 'transparent',
-        },
-        animatedStyle,
-      ]}
-    />
-  );
-});
+const SingleRipple = React.memo(
+  ({ color, delay, duration, maxSize }: SingleRippleProps) => {
+    const progress = useSharedValue(0);
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, [delay, duration, progress]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(
+        progress.value,
+        [0, 0.1, 0.8, 1],
+        [0, 0.15, 0.02, 0],
+      ),
+      borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+    }));
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+
+interface WanderingCoreProps {
+  coreSize: number;
+  color: string;
+  maxWaveSize: number;
+  waveCount: number;
+  baseDuration: number;
+}
 
 const WanderingCore = React.memo(
-  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
+  ({
+    coreSize,
+    color,
+    maxWaveSize,
+    waveCount,
+    baseDuration,
+  }: WanderingCoreProps) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
     useFrameCallback((frameInfo) => {
@@ -165,6 +195,7 @@ const WanderingCore = React.memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -180,7 +211,7 @@ const WanderingCore = React.memo(
       >
         {Array.from({ length: waveCount }).map((_, index) => (
           <SingleRipple
-            key={index}
+            key={`ripple-${index}`}
             color={color}
             delay={index * (baseDuration / waveCount)}
             duration={baseDuration}
@@ -188,6 +219,7 @@ const WanderingCore = React.memo(
           />
         ))}
         <Animated.View
+          pointerEvents="none"
           style={[
             coreStyle,
             {
@@ -211,10 +243,14 @@ const WanderingCore = React.memo(
 const AmbientArchitecture = React.memo(() => {
   const { width, height } = Dimensions.get('window');
   return (
-    // STRICT TOUCH SAFETY: zIndex -1 and elevation -1 prevent UI blocking on Android
     <View
-      style={[StyleSheet.absoluteFill, { zIndex: -1, elevation: -1 }]}
+      style={[
+        StyleSheet.absoluteFill,
+        // Baseline mapping for safe Android gesture delegation
+        { zIndex: 0, elevation: 0, pointerEvents: 'none' },
+      ]}
       pointerEvents="none"
+      importantForAccessibility="no-hide-descendants"
     >
       <WanderingCore
         coreSize={14}
@@ -228,7 +264,7 @@ const AmbientArchitecture = React.memo(() => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: EXPORT CONTROL MATRIX (Guaranteed Unlock)
+// MODULE 2: EXPORT CONTROL MATRIX (Universal Download Trigger)
 // ══════════════════════════════════════════════════════════════════════════════
 const ExportControlMatrix = React.memo(
   ({
@@ -262,7 +298,7 @@ const ExportControlMatrix = React.memo(
       try {
         await onExport(id);
       } finally {
-        // GUARANTEE: The button will always unlock even if native OS rejects the share sheet
+        // GUARANTEE: Reset execution lock regardless of native share sheet resolution
         setBusyId(null);
       }
     };
@@ -275,7 +311,7 @@ const ExportControlMatrix = React.memo(
         <ScrollView
           horizontal={isMobile}
           showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={
             isMobile
               ? { gap: 12, paddingHorizontal: 4 }
@@ -283,14 +319,18 @@ const ExportControlMatrix = React.memo(
           }
         >
           {formats.map((format) => (
-            <TouchableOpacity
+            <Pressable
               key={format.id}
               onPress={() => handlePress(format.id)}
               disabled={busyId !== null}
-              activeOpacity={0.7}
-              delayPressIn={0} // CRITICAL APK FIX
+              // Pressable handles touch intent natively, preventing APK dropouts
+              className={cn(
+                'flex-row items-center justify-between p-4 transition-all shadow-xl md:p-6 border rounded-2xl md:rounded-[24px] bg-[#05050A]/90 border-white/10 hover:bg-white/[0.04]',
+                busyId !== null
+                  ? 'opacity-50'
+                  : 'active:scale-[0.98] active:opacity-80',
+              )}
               style={isMobile ? { width: 180 } : { flex: 1 }}
-              className="flex-row items-center justify-between p-4 transition-all shadow-xl md:p-6 border rounded-2xl md:rounded-[24px] bg-[#05050A]/90 border-white/10 hover:bg-white/[0.04]"
             >
               <View className="flex-row items-center flex-1 pr-2">
                 <format.icon
@@ -308,7 +348,7 @@ const ExportControlMatrix = React.memo(
               ) : (
                 <Download size={14} color="#ffffff40" />
               )}
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </ScrollView>
       </Animated.View>
@@ -317,7 +357,7 @@ const ExportControlMatrix = React.memo(
 );
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 3: FLAWLESS GRID CHAPTER TIMELINE
+// MODULE 3: GRID CHAPTER TIMELINE
 // ══════════════════════════════════════════════════════════════════════════════
 const ChapterTimeline = ({
   chapters,
@@ -337,14 +377,12 @@ const ChapterTimeline = ({
         const isLast = i === chapters.length - 1;
 
         return (
-          <TouchableOpacity
+          <Pressable
             key={i}
             onPress={() => setOpenIdx(isOpen ? null : i)}
-            activeOpacity={0.7}
-            delayPressIn={0} // CRITICAL APK FIX: Instantly registers the tap
-            className="flex-row w-full mb-2"
+            className="flex-row w-full mb-2 transition-opacity duration-150 active:opacity-80"
           >
-            {/* DESKTOP: Dedicated Timestamp Column (Zero Overlap) */}
+            {/* DESKTOP: Dedicated Timestamp Column */}
             {!isMobile && (
               <View className="items-end pr-4 w-20 pt-[18px]">
                 {ch.timestamp && (
@@ -362,15 +400,12 @@ const ChapterTimeline = ({
 
             {/* VERTICAL TRACK & GLOWING NODE */}
             <View className="relative items-center w-8">
-              {/* The connecting line (stops before the last item) */}
               {!isLast && (
                 <View className="absolute top-8 bottom-[-8px] w-[2px] bg-purple-500/20" />
               )}
-
-              {/* The Glowing Node */}
               <View
                 className={cn(
-                  'w-3.5 h-3.5 rounded-full mt-5 z-10 bg-[#000012] border-2',
+                  'w-3.5 h-3.5 rounded-full mt-5 z-10 bg-[#000012] border-2 transition-all duration-300',
                   isOpen
                     ? 'border-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.8)]'
                     : 'border-purple-500 shadow-[0_0_8px_rgba(138,43,226,0.8)]',
@@ -382,7 +417,7 @@ const ChapterTimeline = ({
             <View className="flex-1 pb-6 pl-4">
               <View
                 className={cn(
-                  'p-4 md:p-5 rounded-2xl border transition-all',
+                  'p-4 md:p-5 rounded-2xl border transition-all duration-300',
                   isOpen
                     ? 'bg-[#05121F] border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.1)]'
                     : 'bg-white/[0.02] border-white/5',
@@ -416,7 +451,7 @@ const ChapterTimeline = ({
                 )}
               </View>
             </View>
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
     </View>
@@ -427,7 +462,6 @@ const ChapterTimeline = ({
 // MODULE 4: DIARIZATION-READY RAW TRANSCRIPT VIEWER
 // ══════════════════════════════════════════════════════════════════════════════
 const DiarizedTranscript = ({ text }: { text: string }) => {
-  // Parses standard speaker tags: [SPK_1], [Speaker A], etc.
   const speakerRegex = /\[?(SPK_\d+|Speaker\s[A-Z0-9]+)\]?:?\s*(.*)/i;
   const paragraphs = text.split('\n').filter((p) => p.trim().length > 0);
 
@@ -474,7 +508,6 @@ const DiarizedTranscript = ({ text }: { text: string }) => {
           );
         }
 
-        // Standard Text Segment
         return (
           <Text
             key={index}
@@ -575,10 +608,10 @@ const UnifiedReportBox = React.memo(
                   Intelligence TRANSCRIPT
                 </Text>
               </View>
-              <TouchableOpacity
+
+              <Pressable
                 onPress={handleCopyAll}
-                delayPressIn={0}
-                className="z-20 flex-row items-center p-3 transition-colors border bg-white/[0.03] rounded-full hover:bg-white/10 active:scale-95 border-white/10 md:px-5 md:py-2.5"
+                className="z-20 flex-row items-center p-3 transition-all border bg-white/[0.03] rounded-full active:opacity-70 active:scale-95 border-white/10 md:px-5 md:py-2.5"
               >
                 {copySuccess ? (
                   <CheckCircle2 size={14} color={THEME.green} />
@@ -588,7 +621,7 @@ const UnifiedReportBox = React.memo(
                 <Text className="ml-2 text-[10px] font-black uppercase text-white/60 tracking-widest hidden md:flex">
                   Copy Payload
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
             <Text className="mb-6 text-3xl font-black leading-tight tracking-tighter text-white md:text-5xl lg:text-6xl">
@@ -613,16 +646,15 @@ const UnifiedReportBox = React.memo(
                 </View>
               )}
               {youtubeUrl && (
-                <TouchableOpacity
+                <Pressable
                   onPress={() => Linking.openURL(youtubeUrl)}
-                  delayPressIn={0}
-                  className="flex-row items-center transition-opacity hover:opacity-70"
+                  className="flex-row items-center transition-opacity active:opacity-50"
                 >
                   <ExternalLink size={14} color={THEME.purple} />
                   <Text className="ml-2 text-purple-400 font-black text-[10px] uppercase tracking-[2px]">
                     View Source
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               )}
             </View>
           </View>
@@ -638,7 +670,6 @@ const UnifiedReportBox = React.memo(
             </View>
           ) : (
             <View className="px-5 py-8 md:px-10 md:py-12">
-              {/* ABSTRACT & TAKEAWAYS */}
               <View className="mb-12 md:mb-16">
                 <View className="flex-row items-center mb-6">
                   <Sparkles size={18} color={THEME.purple} />
@@ -679,14 +710,12 @@ const UnifiedReportBox = React.memo(
 
               <View className="w-full h-px mb-12 md:mb-16 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
-              {/* SPLIT PANE: TIMELINE & RAW TEXT */}
               <View
                 className={cn(
                   'flex-col gap-10',
                   isMobile ? '' : 'lg:flex-row lg:gap-12',
                 )}
               >
-                {/* LEFT: TIMELINE */}
                 {chapters.length > 0 && (
                   <View
                     className={cn(
@@ -704,7 +733,6 @@ const UnifiedReportBox = React.memo(
                   </View>
                 )}
 
-                {/* RIGHT: RAW TRANSCRIPT */}
                 <View
                   className={cn(
                     'w-full',
@@ -735,10 +763,9 @@ const UnifiedReportBox = React.memo(
                         className="blur-[80px]"
                       />
 
-                      {/* NESTED SCROLL ENABLED + KEYBOARD PERSIST: Crucial for APK Scroll functionality */}
                       <ScrollView
                         nestedScrollEnabled={true}
-                        keyboardShouldPersistTaps="always"
+                        keyboardShouldPersistTaps="handled"
                         style={{ maxHeight: isMobile ? 500 : 700 }}
                         showsVerticalScrollIndicator={true}
                         contentContainerStyle={{ padding: isMobile ? 20 : 32 }}
@@ -746,7 +773,6 @@ const UnifiedReportBox = React.memo(
                         <DiarizedTranscript text={transcriptText} />
                       </ScrollView>
 
-                      {/* Telemetry Footer */}
                       <View className="flex-row items-center justify-between px-6 py-5 border-t md:px-8 bg-white/[0.02] border-white/5">
                         <View>
                           <Text className="text-white/30 text-[8px] font-black uppercase tracking-[3px]">
@@ -940,21 +966,19 @@ export default function MasterIntelligenceView() {
           <Text className="mb-4 text-2xl font-black tracking-widest text-center uppercase text-rose-500">
             Video Not Found
           </Text>
-          <TouchableOpacity
+          <Pressable
             onPress={() =>
               router.canGoBack()
                 ? router.back()
                 : router.replace('/history' as any)
             }
-            delayPressIn={0}
-            className="flex-row items-center mt-10 gap-x-2"
-            activeOpacity={0.7}
+            className="flex-row items-center mt-10 transition-opacity gap-x-2 active:opacity-60"
           >
             <ArrowBigLeftDash size={18} color={THEME.cyan} />
             <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">
               Return
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </GlassCard>
       </View>
     );
@@ -983,15 +1007,13 @@ export default function MasterIntelligenceView() {
         ]}
       >
         <View className="flex-row items-center justify-between px-4 py-4 md:px-8">
-          <TouchableOpacity
+          <Pressable
             onPress={() =>
               router.canGoBack()
                 ? router.back()
                 : router.replace('/history' as any)
             }
-            delayPressIn={0}
-            className="z-50 flex-row items-center gap-x-2"
-            activeOpacity={0.7}
+            className="z-50 flex-row items-center transition-opacity gap-x-2 active:opacity-60"
             style={{ zIndex: 200 }}
             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
           >
@@ -999,7 +1021,7 @@ export default function MasterIntelligenceView() {
             <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">
               Return
             </Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View className="flex-row items-center gap-4">
             <View
@@ -1044,13 +1066,14 @@ export default function MasterIntelligenceView() {
         </View>
       </Animated.View>
 
-      {/* MASTER SCROLL VIEW */}
+      {/* MASTER SCROLL VIEW (Elevated to zIndex 10 for Android Gesture Delegation) */}
       <Animated.ScrollView
-        className="z-10 flex-1"
+        style={{ zIndex: 10, elevation: 10 }}
+        className="flex-1"
         onScroll={scrollHandler}
         scrollEventThrottle={16}
-        overScrollMode="never" // Eliminates Android overscroll touch hijacking
-        keyboardShouldPersistTaps="always" // CRITICAL FOR ALL APK TAPS
+        overScrollMode="never"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           paddingTop: insets.top + 80,
           paddingBottom: 100,

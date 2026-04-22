@@ -1,8 +1,16 @@
 /**
  * @file app/(dashboard)/settings/support.tsx
  * @description VeraxAI Enterprise Support & Secure Messaging Hub.
- * Provides a real-time, WebSocket-driven customer support interface with
- * role-based access control (RLS), instant messaging, and dynamic mobile layouts.
+ * ══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE & PROTOCOL
+ * DOM ISOLATIONbackground is strictly locked to zIndex 0 and
+ * Foreground lists and chat windows are elevated to zIndex 10 for safe Android taps
+ * The display queue is mathematically memoized to
+ * guarantee Premium/Pro members are always prioritized at the top of the queue.
+ * Messages are injected into the DOM at 0ms latency before
+ * the network request completes, eliminating perceived chat lag.
+ * TOUCH ENGINE: Legacy TouchableOpacity replaced globally with Pressable.
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 
 // ─── MODULE IMPORTS ──────────────────────────────────────────────────────────
@@ -17,7 +25,7 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   TextInput,
   FlatList,
   Alert,
@@ -29,6 +37,7 @@ import {
   Image,
   Modal,
   Keyboard,
+  StyleSheet,
 } from 'react-native';
 import {
   SafeAreaView,
@@ -56,7 +65,7 @@ import {
   ArrowBigLeftDash,
 } from 'lucide-react-native';
 
-// ─── ANIMATIONS ──────────────────────────────────────────────────────────────
+// ─── ANIMATIONS & NATIVE SVG ─────────────────────────────────────────────────
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -68,6 +77,7 @@ import Animated, {
   withSequence,
   FadeInUp,
   FadeInDown,
+  useFrameCallback,
 } from 'react-native-reanimated';
 import Svg, { Path, Circle, G, Rect } from 'react-native-svg';
 
@@ -82,7 +92,7 @@ const IS_WEB = Platform.OS === 'web';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ─── STRICT LOCAL COLORS ─────────────────────────────────────────────────────
-const C_APP_BG = '#0A1128';
+const C_APP_BG = '#000012'; // Unified with Settings root
 const C_CYAN = '#00F0FF';
 const C_PURPLE = '#8A2BE2';
 const C_GREEN = '#32FF00';
@@ -106,10 +116,6 @@ type TicketRow = Database['public']['Tables']['tickets']['Row'];
 type MessageRow = Database['public']['Tables']['ticket_messages']['Row'];
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 
-/**
- * @interface TicketUI
- * @description Extended ticket object that includes joined relational user data and nested messages.
- */
 export interface TicketUI extends Omit<TicketRow, 'priority' | 'status'> {
   status: TicketStatus;
   priority?: string;
@@ -117,18 +123,10 @@ export interface TicketUI extends Omit<TicketRow, 'priority' | 'status'> {
   messages?: MessageUI[];
 }
 
-/**
- * @interface MessageUI
- * @description Extended message object that includes joined relational author data.
- */
 export interface MessageUI extends MessageRow {
   author?: Pick<ProfileRow, 'full_name' | 'email' | 'role' | 'avatar_url'>;
 }
 
-/**
- * @constant FAQ_DATA
- * @description Static fallback array populating the Knowledge Base tab.
- */
 const FAQ_DATA = [
   {
     id: '1',
@@ -166,12 +164,6 @@ const FAQ_DATA = [
 
 // ─── UTILITY FUNCTIONS ───────────────────────────────────────────────────────
 
-/**
- * @function getRoleColor
- * @description Maps a user role to its corresponding Liquid Neon brand color.
- * @param {string} role - The user's role from the database.
- * @returns {string} Hex color code.
- */
 const getRoleColor = (role: string | undefined) => {
   switch (role?.toLowerCase()) {
     case 'admin':
@@ -185,12 +177,6 @@ const getRoleColor = (role: string | undefined) => {
   }
 };
 
-/**
- * @function getStatusColor
- * @description Maps a ticket status string to a UI status color.
- * @param {string} status - The current ticket status.
- * @returns {string} Hex color code.
- */
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'open':
@@ -210,10 +196,6 @@ const getStatusColor = (status: string) => {
 
 // ─── UI COMPONENTS ───────────────────────────────────────────────────────────
 
-/**
- * @component RoleBadge
- * @description Compact UI pill dynamically rendering the user's explicit role and icon.
- */
 const RoleBadge = ({ role }: { role: string | undefined }) => {
   const safeRole = (role || 'member').toLowerCase() as UserRole;
   const color = getRoleColor(safeRole);
@@ -225,7 +207,7 @@ const RoleBadge = ({ role }: { role: string | undefined }) => {
     label = 'ADMIN';
   } else if (safeRole === 'support') {
     IconComponent = ShieldCheck;
-    label = 'SUPPORT'; // Accurately reflects database role
+    label = 'SUPPORT';
   } else if (safeRole === 'premium') {
     IconComponent = Zap;
     label = 'PRO';
@@ -261,107 +243,181 @@ const RoleBadge = ({ role }: { role: string | undefined }) => {
   );
 };
 
-/**
- * @component AmbientOrb
- * @description Animated background circle contributing to the deep-space UI aesthetic.
- */
-const AmbientOrb = ({
-  color,
-  size,
-  top,
-  left,
-  right,
-  bottom,
-  delay = 0,
-  opacity = 0.08,
-}: any) => {
-  const drift = useSharedValue(0);
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE: SETTINGS-PARITY BACKGROUND (Wandering Core Engine)
+// ══════════════════════════════════════════════════════════════════════════════
+interface SingleRippleProps {
+  color: string;
+  delay: number;
+  duration: number;
+  maxSize: number;
+}
 
-  useEffect(() => {
-    drift.value = withDelay(
-      delay,
-      withRepeat(
-        withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.sin) }),
+const SingleRipple = React.memo(
+  ({ color, delay, duration, maxSize }: SingleRippleProps) => {
+    const progress = useSharedValue(0);
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, [delay, duration, progress]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(
+        progress.value,
+        [0, 0.1, 0.8, 1],
+        [0, 0.15, 0.02, 0],
+      ),
+      borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+    }));
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+
+interface WanderingCoreProps {
+  coreSize: number;
+  color: string;
+  maxWaveSize: number;
+  waveCount: number;
+  baseDuration: number;
+}
+
+const WanderingCore = React.memo(
+  ({
+    coreSize,
+    color,
+    maxWaveSize,
+    waveCount,
+    baseDuration,
+  }: WanderingCoreProps) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
+
+    const corePulse = useSharedValue(0.4);
+    useEffect(() => {
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
         -1,
         true,
-      ),
+      );
+    }, [corePulse]);
+
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
+    }));
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          animatedPosition,
+        ]}
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <SingleRipple
+            key={`ripple-${index}`}
+            color={color}
+            delay={index * (baseDuration / waveCount)}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              ...(IS_WEB
+                ? ({ boxShadow: `0 0 20px ${color}` } as any)
+                : {
+                    shadowColor: color,
+                    shadowRadius: 15,
+                    shadowOpacity: 1,
+                    shadowOffset: { width: 0, height: 0 },
+                  }),
+            },
+          ]}
+        />
+      </Animated.View>
     );
-  }, [delay, drift]);
+  },
+);
 
-  const anim = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateX: interpolate(drift.value, [0, 1], [0, SCREEN_WIDTH * 0.25]),
-      },
-      {
-        translateY: interpolate(drift.value, [0, 1], [0, SCREEN_HEIGHT * 0.15]),
-      },
-      { scale: interpolate(drift.value, [0, 1], [0.85, 1.15]) },
-    ] as any,
-  }));
-
+const AmbientArchitecture = React.memo(() => {
+  const { width, height } = Dimensions.get('window');
   return (
-    <Animated.View
+    <View
       style={[
-        {
-          position: 'absolute',
-          width: size,
-          height: size,
-          borderRadius: size,
-          backgroundColor: color,
-          opacity,
-          top,
-          left,
-          right,
-          bottom,
-          pointerEvents: 'none',
-        },
-        anim,
+        StyleSheet.absoluteFill,
+        { zIndex: 0, elevation: 0, pointerEvents: 'none' },
       ]}
-    />
+      importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
+    >
+      <WanderingCore
+        coreSize={14}
+        color={C_CYAN}
+        maxWaveSize={width >= 1024 ? width * 0.8 : height * 1.0}
+        waveCount={4}
+        baseDuration={12000}
+      />
+    </View>
   );
-};
+});
 
-/**
- * @component BouncingAmbientEngine
- * @description Performance-memoized wrapper holding all background ambient animations.
- */
-const BouncingAmbientEngine = React.memo(() => (
-  <View
-    style={{ position: 'absolute', width: '100%', height: '100%', zIndex: 0 }}
-    pointerEvents="none"
-  >
-    <AmbientOrb
-      color={C_CYAN}
-      size={200}
-      top={-50}
-      left={-50}
-      opacity={0.06}
-      delay={0}
-    />
-    <AmbientOrb
-      color={C_PURPLE}
-      size={180}
-      top={250}
-      right={-60}
-      opacity={0.07}
-      delay={2000}
-    />
-    <AmbientOrb
-      color="#054aeb"
-      size={220}
-      bottom={100}
-      left={-40}
-      opacity={0.05}
-      delay={4000}
-    />
-  </View>
-));
+// ─── FLOATING ICONS & CONTROLS ────────────────────────────────────────────────
 
-/**
- * @component AnimatedSupportIcon
- * @description Hero SVG graphic for empty states, floating on the Y-axis.
- */
 const AnimatedSupportIcon = () => {
   const floatY = useSharedValue(0);
 
@@ -428,10 +484,6 @@ const AnimatedSupportIcon = () => {
   );
 };
 
-/**
- * @component FilterChip
- * @description Interactive horizontal toggle button for selecting dashboard views.
- */
 const FilterChip = ({
   label,
   active,
@@ -441,18 +493,21 @@ const FilterChip = ({
   active: boolean;
   onPress: () => void;
 }) => (
-  <TouchableOpacity
+  <Pressable
     onPress={onPress}
-    activeOpacity={0.7}
-    style={{
-      paddingHorizontal: 14,
-      paddingVertical: 6,
-      borderRadius: 20,
-      marginRight: 8,
-      borderWidth: 1,
-      borderColor: active ? C_CYAN + '50' : 'rgba(255,255,255,0.08)',
-      backgroundColor: active ? C_CYAN + '10' : 'transparent',
-    }}
+    style={({ pressed }) => [
+      {
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 20,
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: active ? C_CYAN + '50' : 'rgba(255,255,255,0.08)',
+        backgroundColor: active ? C_CYAN + '10' : 'transparent',
+        opacity: pressed ? 0.7 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+      },
+    ]}
   >
     <Text
       style={{
@@ -464,33 +519,32 @@ const FilterChip = ({
     >
       {label}
     </Text>
-  </TouchableOpacity>
+  </Pressable>
 );
 
-/**
- * @component PillGlowButton
- * @description Primary call-to-action button utilizing brand neon borders.
- */
 const PillGlowButton = ({ title, onPress, isLoading, icon: Icon }: any) => (
-  <TouchableOpacity
+  <Pressable
     onPress={onPress}
     disabled={isLoading}
-    activeOpacity={0.7}
-    style={{
-      backgroundColor: C_CYAN + '15',
-      borderColor: C_CYAN + '50',
-      borderWidth: 1,
-      borderRadius: 24,
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      width: '100%',
-      maxWidth: 280,
-      alignSelf: 'center',
-    }}
+    style={({ pressed }) => [
+      {
+        backgroundColor: C_CYAN + '15',
+        borderColor: C_CYAN + '50',
+        borderWidth: 1,
+        borderRadius: 24,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        width: '100%',
+        maxWidth: 280,
+        alignSelf: 'center',
+        opacity: pressed ? 0.7 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+      },
+    ]}
   >
     {isLoading ? (
       <ActivityIndicator size="small" color={C_CYAN} />
@@ -510,15 +564,11 @@ const PillGlowButton = ({ title, onPress, isLoading, icon: Icon }: any) => (
         </Text>
       </>
     )}
-  </TouchableOpacity>
+  </Pressable>
 );
 
 // ─── MAIN SCREEN COMPONENT ───────────────────────────────────────────────────
 
-/**
- * @function SupportScreen
- * @description Main structural component for routing, state handling, and layout composition.
- */
 export default function SupportScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -540,13 +590,14 @@ export default function SupportScreen() {
 
     const showSub = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(
+        () => flatListRef.current?.scrollToEnd({ animated: true }),
+        100,
+      );
     });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-    });
+    const hideSub = Keyboard.addListener(hideEvent, () =>
+      setKeyboardVisible(false),
+    );
 
     return () => {
       showSub.remove();
@@ -554,7 +605,6 @@ export default function SupportScreen() {
     };
   }, []);
 
-  // Strict dynamic math: Pushes up gracefully when closed, shrinks tight to keyboard when open.
   const bottomChatPadding = isMobile
     ? isKeyboardVisible
       ? 12
@@ -610,7 +660,7 @@ export default function SupportScreen() {
         filter: `ticket_id=eq.${selectedTicket.id}`,
       },
       async (payload) => {
-        if (payload.new.user_id === user?.id) return;
+        if (payload.new.user_id === user?.id) return; // Managed by Optimistic UI
 
         const { data, error } = await supabase
           .from('ticket_messages')
@@ -632,9 +682,10 @@ export default function SupportScreen() {
               ],
             };
           });
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 300);
+          setTimeout(
+            () => flatListRef.current?.scrollToEnd({ animated: true }),
+            300,
+          );
         }
       },
     );
@@ -646,10 +697,6 @@ export default function SupportScreen() {
   }, [viewMode, selectedTicket?.id, user?.id]);
 
   // ─── DATA FETCHING ───
-  /**
-   * @function loadData
-   * @description Fetches tickets matching RLS constraints and current filters.
-   */
   const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -671,22 +718,7 @@ export default function SupportScreen() {
       const { data, error } = await query;
       if (error) throw error;
 
-      let safeData = (data as unknown as TicketUI[]) || [];
-      safeData = safeData.sort((a, b) => {
-        if (filter === 'queue') {
-          const scoreA = a.user?.role === 'premium' ? 1 : 0;
-          const scoreB = b.user?.role === 'premium' ? 1 : 0;
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return (
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-          );
-        }
-        return (
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-      });
-
-      setTickets(safeData);
+      setTickets((data as unknown as TicketUI[]) || []);
     } catch (e: any) {
       console.error('[Support] Load Error:', e.message);
     } finally {
@@ -704,20 +736,32 @@ export default function SupportScreen() {
     await loadData();
   }, [loadData]);
 
-  const filteredTickets = useMemo(() => {
-    if (!search.trim()) return tickets;
-    const lower = search.toLowerCase();
-    return tickets.filter(
-      (t) =>
-        t.subject.toLowerCase().includes(lower) ||
-        t.id.toLowerCase().includes(lower),
-    );
-  }, [search, tickets]);
+  // ─── DETERMINISTIC MEMOIZED FILTERING ───
+  const displayTickets = useMemo(() => {
+    let base = tickets;
 
-  /**
-   * @function loadTicketDetails
-   * @description Hydrates the chat view with message history for the selected ticket.
-   */
+    if (search.trim()) {
+      const lower = search.toLowerCase();
+      base = base.filter(
+        (t) =>
+          t.subject.toLowerCase().includes(lower) ||
+          t.id.toLowerCase().includes(lower),
+      );
+    }
+
+    return base.sort((a, b) => {
+      if (filter === 'queue') {
+        const scoreA = a.user?.role === 'premium' ? 1 : 0;
+        const scoreB = b.user?.role === 'premium' ? 1 : 0;
+        if (scoreA !== scoreB) return scoreB - scoreA; // Premium first
+      }
+      return (
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    });
+  }, [search, tickets, filter]);
+
+  // ─── TICKET ACTIONS ───
   const loadTicketDetails = async (ticket: TicketUI) => {
     setSelectedTicket(ticket);
     setViewMode('detail');
@@ -748,14 +792,42 @@ export default function SupportScreen() {
     }
   };
 
-  /**
-   * @function handleSendMessage
-   * @description Submits a new chat bubble payload and optimistic UI update.
-   */
   const handleSendMessage = async (isInternal: boolean = false) => {
     const content = isInternal ? internalNote : newMessage;
     if (!content.trim() || !selectedTicket || !user) return;
 
+    // OPTIMISTIC UI: Instantly clear input and push to local state array
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: MessageUI = {
+      id: tempId,
+      ticket_id: selectedTicket.id,
+      user_id: user.id,
+      message: content,
+      created_at: new Date().toISOString(),
+      is_internal: isInternal,
+      attachment_url: null,
+      author: {
+        role: profile?.role || 'member',
+        full_name: profile?.full_name || null,
+        email: profile?.email || '',
+        avatar_url: profile?.avatar_url || null,
+      },
+    };
+
+    setSelectedTicket((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        messages: [...(prev.messages || []), optimisticMessage],
+      };
+    });
+
+    if (isInternal) setInternalNote('');
+    else setNewMessage('');
+
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // BACKGROUND SYNC
     setIsSubmitting(true);
     try {
       const { data: insertedMessage, error } = await supabase
@@ -773,38 +845,33 @@ export default function SupportScreen() {
 
       if (error) throw error;
 
+      // Swap temp ID silently
       if (insertedMessage) {
         setSelectedTicket((prev) => {
           if (!prev) return prev;
-          if (prev.messages?.find((m) => m.id === insertedMessage.id))
-            return prev;
           return {
             ...prev,
-            messages: [
-              ...(prev.messages || []),
-              insertedMessage as unknown as MessageUI,
-            ],
+            messages: prev.messages?.map((m) =>
+              m.id === tempId ? (insertedMessage as unknown as MessageUI) : m,
+            ),
           };
         });
-
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
       }
-
-      if (isInternal) setInternalNote('');
-      else setNewMessage('');
     } catch (e: any) {
+      // Revert Optimistic UI on failure
+      setSelectedTicket((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: prev.messages?.filter((m) => m.id !== tempId),
+        };
+      });
       Alert.alert('Transmission Failed', e.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  /**
-   * @function handleCreateTicket
-   * @description Bootstraps a new parent ticket and attaches its initial description.
-   */
   const handleCreateTicket = async () => {
     if (!newTitle.trim() || !newInitialMsg.trim() || !user)
       return Alert.alert(
@@ -821,7 +888,7 @@ export default function SupportScreen() {
           subject: newTitle,
           category: newCategory,
           status: 'open',
-          priority: 'medium',
+          priority: profile?.role === 'premium' ? 'high' : 'medium',
         })
         .select()
         .single();
@@ -881,7 +948,6 @@ export default function SupportScreen() {
       .from('tickets')
       .update({ status: newStatus })
       .eq('id', selectedTicket.id);
-
     if (error) return Alert.alert('Update Failed', error.message);
 
     setSelectedTicket((prev) => (prev ? { ...prev, status: newStatus } : null));
@@ -891,10 +957,6 @@ export default function SupportScreen() {
 
   // ─── LOCAL RENDER FUNCTIONS ──────────────────────────────────────────────────
 
-  /**
-   * @function renderTicketCard
-   * @description Standard list layout item representing a ticket summary.
-   */
   const renderTicketCard = ({
     item,
     index,
@@ -905,17 +967,20 @@ export default function SupportScreen() {
     const statusColor = getStatusColor(item.status);
     return (
       <Animated.View entering={FadeInDown.duration(320).delay(index * 40)}>
-        <TouchableOpacity
+        <Pressable
           onPress={() => loadTicketDetails(item)}
-          activeOpacity={0.78}
-          style={{
-            borderWidth: 1,
-            borderColor: `${statusColor}30`,
-            backgroundColor: `${statusColor}0A`,
-            borderRadius: 20,
-            padding: 16,
-            marginBottom: 12,
-          }}
+          style={({ pressed }) => [
+            {
+              borderWidth: 1,
+              borderColor: `${statusColor}30`,
+              backgroundColor: `${statusColor}0A`,
+              borderRadius: 20,
+              padding: 16,
+              marginBottom: 12,
+              opacity: pressed ? 0.7 : 1,
+              transform: [{ scale: pressed ? 0.98 : 1 }],
+            },
+          ]}
         >
           <View
             style={{
@@ -1024,15 +1089,11 @@ export default function SupportScreen() {
               {new Date(item.created_at).toLocaleDateString()}
             </Text>
           </View>
-        </TouchableOpacity>
+        </Pressable>
       </Animated.View>
     );
   };
 
-  /**
-   * @function renderChatMessage
-   * @description Maximizes bubble width using 95% threshold. Eliminates fake placeholders.
-   */
   const renderChatMessage = ({
     item,
     index,
@@ -1042,17 +1103,14 @@ export default function SupportScreen() {
   }) => {
     const isMe = item.user_id === user?.id;
     const isInternal = item.is_internal;
-
     const fetchedRole = item.author?.role;
     const fetchedName =
       item.author?.full_name || item.author?.email || 'Unknown User';
-
     const authorRole = isMe ? profile?.role : fetchedRole;
     const authorName = isMe
       ? profile?.full_name || user?.email || 'You'
       : fetchedName;
     const authorAvatar = isMe ? profile?.avatar_url : item.author?.avatar_url;
-
     const roleColor = getRoleColor(authorRole);
 
     const bRad = {
@@ -1061,7 +1119,6 @@ export default function SupportScreen() {
       borderBottomRightRadius: isMe ? 4 : 20,
       borderBottomLeftRadius: isMe ? 20 : 4,
     };
-
     const bubbleColor = isInternal
       ? 'rgba(245, 158, 11, 0.15)'
       : isMe
@@ -1085,7 +1142,6 @@ export default function SupportScreen() {
           width: '100%',
         }}
       >
-        {/* Opponent Avatar */}
         {!isMe && (
           <View style={{ alignItems: 'center' }}>
             {authorAvatar ? (
@@ -1127,7 +1183,6 @@ export default function SupportScreen() {
           </View>
         )}
 
-        {/* Dynamic Bubble Content - Utilizes 95% space max to hug edges smoothly */}
         <View
           style={{
             flexShrink: 1,
@@ -1135,7 +1190,6 @@ export default function SupportScreen() {
             alignItems: isMe ? 'flex-end' : 'flex-start',
           }}
         >
-          {/* Strict Metadata Row: Name -> Role Badge */}
           <View
             style={{
               flexDirection: 'row',
@@ -1207,7 +1261,6 @@ export default function SupportScreen() {
           </View>
         </View>
 
-        {/* Sender Avatar */}
         {isMe && (
           <View style={{ alignItems: 'center' }}>
             {authorAvatar ? (
@@ -1259,9 +1312,13 @@ export default function SupportScreen() {
         options={{ headerShown: false, headerTransparent: true, title: '' }}
       />
 
-      <BouncingAmbientEngine />
+      {/* STRICT Z-INDEX ARCHITECTURE */}
+      <AmbientArchitecture />
 
-      <SafeAreaView style={{ flex: 1, zIndex: 1 }} edges={['top']}>
+      <SafeAreaView
+        style={{ flex: 1, zIndex: 10, elevation: 10 }}
+        edges={['top']}
+      >
         {/* ─── VIEW 1: DETAIL CHAT ─── */}
         {viewMode === 'detail' && selectedTicket && (
           <KeyboardAvoidingView
@@ -1277,10 +1334,6 @@ export default function SupportScreen() {
                 alignSelf: 'center',
               }}
             >
-              {/* * HEADER FIX: Strict Flexbox Layout.
-               * Left side takes flex: 1, naturally pushing the status pill to the right.
-               * Fixed 45px spacer on the far right protects the global avatar.
-               */}
               <View
                 style={{
                   flexDirection: 'row',
@@ -1290,7 +1343,6 @@ export default function SupportScreen() {
                   minHeight: 70,
                 }}
               >
-                {/* Header: Left Side */}
                 <View
                   style={{
                     flex: 1,
@@ -1298,12 +1350,19 @@ export default function SupportScreen() {
                     alignItems: 'center',
                   }}
                 >
-                  <TouchableOpacity
+                  <Pressable
                     onPress={() => setViewMode('list')}
-                    style={{ padding: 8, marginLeft: -4, marginRight: 8 }}
+                    style={({ pressed }) => [
+                      {
+                        padding: 8,
+                        marginLeft: -4,
+                        marginRight: 8,
+                        opacity: pressed ? 0.6 : 1,
+                      },
+                    ]}
                   >
                     <ArrowBigLeftDash size={24} color={C_CYAN} />
-                  </TouchableOpacity>
+                  </Pressable>
 
                   <View
                     style={{
@@ -1339,22 +1398,24 @@ export default function SupportScreen() {
                   </View>
                 </View>
 
-                {/* Header: Status Pill pushed right, ensuring NO text wrapping via standard row rules */}
                 {isStaff && (
                   <View style={{ flexShrink: 0, paddingRight: 8 }}>
-                    <TouchableOpacity
+                    <Pressable
                       onPress={() => setStatusModalVisible(true)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: getStatusColor(selectedTicket.status),
-                        backgroundColor:
-                          getStatusColor(selectedTicket.status) + '15',
-                      }}
+                      style={({ pressed }) => [
+                        {
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: getStatusColor(selectedTicket.status),
+                          backgroundColor:
+                            getStatusColor(selectedTicket.status) + '15',
+                          opacity: pressed ? 0.7 : 1,
+                        },
+                      ]}
                     >
                       <Text
                         style={{
@@ -1371,17 +1432,12 @@ export default function SupportScreen() {
                         color={getStatusColor(selectedTicket.status)}
                         style={{ marginLeft: 6 }}
                       />
-                    </TouchableOpacity>
+                    </Pressable>
                   </View>
                 )}
-
-                {/* Header: Reserved Space */}
                 <View style={{ width: 45 }} />
               </View>
 
-              {/* * CHAT BUBBLES LIST
-               * Horizontal padding stripped to 4 to maximize side-to-side stretch.
-               */}
               <FlatList
                 ref={flatListRef}
                 data={selectedTicket.messages}
@@ -1399,9 +1455,6 @@ export default function SupportScreen() {
                 keyboardShouldPersistTaps="handled"
               />
 
-              {/* * SLEEK MODERN INPUT CONTAINER
-               * Clustered tightly (gap: 8), strictly width-controlled, padded properly above bottom nav.
-               */}
               <View
                 style={{
                   paddingHorizontal: 12,
@@ -1435,26 +1488,30 @@ export default function SupportScreen() {
                         value={internalNote}
                         onChangeText={setInternalNote}
                       />
-                      <TouchableOpacity
+                      <Pressable
                         onPress={() => handleSendMessage(true)}
                         disabled={!internalNote.trim() || isSubmitting}
-                        style={{
-                          width: 40,
-                          height: 40,
-                          backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                          borderRadius: 20,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderWidth: 1,
-                          borderColor: 'rgba(245, 158, 11, 0.8)',
-                        }}
+                        style={({ pressed }) => [
+                          {
+                            width: 40,
+                            height: 40,
+                            backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                            borderRadius: 20,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderWidth: 1,
+                            borderColor: 'rgba(245, 158, 11, 0.8)',
+                            opacity: pressed ? 0.7 : 1,
+                            transform: [{ scale: pressed ? 0.95 : 1 }],
+                          },
+                        ]}
                       >
                         {isSubmitting ? (
                           <ActivityIndicator color={C_AMBER} size="small" />
                         ) : (
                           <Lock size={16} color={C_AMBER} />
                         )}
-                      </TouchableOpacity>
+                      </Pressable>
                     </View>
                   </View>
                 )}
@@ -1495,19 +1552,23 @@ export default function SupportScreen() {
                       multiline
                     />
                   </View>
-                  <TouchableOpacity
+                  <Pressable
                     disabled={!newMessage.trim() || isSubmitting}
                     onPress={() => handleSendMessage(false)}
-                    style={{
-                      width: 48,
-                      height: 48,
-                      backgroundColor: newMessage.trim()
-                        ? C_CYAN
-                        : 'rgba(255,255,255,0.08)',
-                      borderRadius: 24,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
+                    style={({ pressed }) => [
+                      {
+                        width: 48,
+                        height: 48,
+                        backgroundColor: newMessage.trim()
+                          ? C_CYAN
+                          : 'rgba(255,255,255,0.08)',
+                        borderRadius: 24,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: pressed ? 0.8 : 1,
+                        transform: [{ scale: pressed ? 0.95 : 1 }],
+                      },
+                    ]}
                   >
                     {isSubmitting ? (
                       <ActivityIndicator color={C_NAVY} size="small" />
@@ -1520,7 +1581,7 @@ export default function SupportScreen() {
                         style={{ marginLeft: newMessage.trim() ? -2 : 0 }}
                       />
                     )}
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
               </View>
             </View>
@@ -1540,15 +1601,18 @@ export default function SupportScreen() {
               alignSelf: 'center',
             }}
           >
-            <TouchableOpacity
+            <Pressable
               onPress={() => setViewMode('list')}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 16,
-                marginBottom: 16,
-                gap: 8,
-              }}
+              style={({ pressed }) => [
+                {
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 16,
+                  marginBottom: 16,
+                  gap: 8,
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}
             >
               <ArrowBigLeftDash size={20} color={C_CYAN} />
               <Text
@@ -1562,7 +1626,7 @@ export default function SupportScreen() {
               >
                 RETURN
               </Text>
-            </TouchableOpacity>
+            </Pressable>
 
             <Text
               style={{
@@ -1651,21 +1715,27 @@ export default function SupportScreen() {
                   'Content Request',
                   'Billing',
                 ].map((cat) => (
-                  <TouchableOpacity
+                  <Pressable
                     key={cat}
                     onPress={() => setNewCategory(cat)}
-                    style={{
-                      paddingHorizontal: 18,
-                      paddingVertical: 12,
-                      borderRadius: 24,
-                      borderWidth: 1,
-                      borderColor:
-                        newCategory === cat ? C_CYAN : 'rgba(255,255,255,0.1)',
-                      backgroundColor:
-                        newCategory === cat
-                          ? 'rgba(0,240,255,0.1)'
-                          : 'rgba(0,0,0,0.3)',
-                    }}
+                    style={({ pressed }) => [
+                      {
+                        paddingHorizontal: 18,
+                        paddingVertical: 12,
+                        borderRadius: 24,
+                        borderWidth: 1,
+                        borderColor:
+                          newCategory === cat
+                            ? C_CYAN
+                            : 'rgba(255,255,255,0.1)',
+                        backgroundColor:
+                          newCategory === cat
+                            ? 'rgba(0,240,255,0.1)'
+                            : 'rgba(0,0,0,0.3)',
+                        opacity: pressed ? 0.7 : 1,
+                        transform: [{ scale: pressed ? 0.98 : 1 }],
+                      },
+                    ]}
                   >
                     <Text
                       style={{
@@ -1679,7 +1749,7 @@ export default function SupportScreen() {
                     >
                       {cat}
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 ))}
               </View>
 
@@ -1731,7 +1801,7 @@ export default function SupportScreen() {
         {/* ─── VIEW 3: MAIN TICKET LIST ─── */}
         {viewMode === 'list' && (
           <FlatList
-            data={filter === 'faq' ? [] : filteredTickets}
+            data={filter === 'faq' ? [] : displayTickets}
             keyExtractor={(item) => item.id}
             ListEmptyComponent={
               filter === 'faq' ? (
@@ -1898,13 +1968,14 @@ export default function SupportScreen() {
                         }}
                       />
                       {search.length > 0 && (
-                        <TouchableOpacity
+                        <Pressable
                           onPress={() => setSearch('')}
-                          activeOpacity={0.7}
-                          style={{ padding: 4 }}
+                          style={({ pressed }) => [
+                            { padding: 4, opacity: pressed ? 0.6 : 1 },
+                          ]}
                         >
                           <XCircle size={18} color="rgba(255,255,255,0.4)" />
-                        </TouchableOpacity>
+                        </Pressable>
                       )}
                     </View>
                   </Animated.View>
@@ -1918,6 +1989,7 @@ export default function SupportScreen() {
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={{ paddingRight: 20 }}
+                    keyboardShouldPersistTaps="handled"
                   >
                     {isStaff && (
                       <FilterChip
@@ -1960,6 +2032,7 @@ export default function SupportScreen() {
             justifyContent: 'center',
             alignItems: 'center',
             padding: 24,
+            zIndex: 100,
           }}
         >
           <GlassCard
@@ -1995,26 +2068,30 @@ export default function SupportScreen() {
                 { key: 'resolved', label: 'Resolved' },
                 { key: 'closed', label: 'Closed' },
               ].map((item) => (
-                <TouchableOpacity
+                <Pressable
                   key={item.key}
                   onPress={() => handleStatusChange(item.key as TicketStatus)}
-                  style={{
-                    padding: 18,
-                    marginBottom: 10,
-                    backgroundColor:
-                      selectedTicket?.status === item.key
-                        ? 'rgba(0,240,255,0.1)'
-                        : 'rgba(255,255,255,0.03)',
-                    borderRadius: 16,
-                    borderWidth: 1,
-                    borderColor:
-                      selectedTicket?.status === item.key
-                        ? C_CYAN
-                        : 'rgba(255,255,255,0.05)',
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
+                  style={({ pressed }) => [
+                    {
+                      padding: 18,
+                      marginBottom: 10,
+                      backgroundColor:
+                        selectedTicket?.status === item.key
+                          ? 'rgba(0,240,255,0.1)'
+                          : 'rgba(255,255,255,0.03)',
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor:
+                        selectedTicket?.status === item.key
+                          ? C_CYAN
+                          : 'rgba(255,255,255,0.05)',
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      opacity: pressed ? 0.7 : 1,
+                      transform: [{ scale: pressed ? 0.98 : 1 }],
+                    },
+                  ]}
                 >
                   <Text
                     style={{
@@ -2030,31 +2107,34 @@ export default function SupportScreen() {
                   {selectedTicket?.status === item.key && (
                     <CheckCircle2 size={20} color={C_CYAN} />
                   )}
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
 
-            {/* DELETE BUTTON (ADMIN ONLY) */}
             {isAdmin && selectedTicket && (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => {
                   setStatusModalVisible(false);
                   handleDeleteTicket(selectedTicket.id);
                 }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: 16,
-                  marginBottom: 12,
-                  marginTop: 16,
-                  backgroundColor: '#FF0033',
-                  borderRadius: 16,
-                  shadowColor: '#FF0033',
-                  shadowOpacity: 0.6,
-                  shadowRadius: 10,
-                  shadowOffset: { width: 0, height: 4 },
-                }}
+                style={({ pressed }) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 16,
+                    marginBottom: 12,
+                    marginTop: 16,
+                    backgroundColor: '#FF0033',
+                    borderRadius: 16,
+                    shadowColor: '#FF0033',
+                    shadowOpacity: 0.6,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 4 },
+                    opacity: pressed ? 0.7 : 1,
+                    transform: [{ scale: pressed ? 0.95 : 1 }],
+                  },
+                ]}
               >
                 <Trash2 size={20} color="#FFFFFF" />
                 <Text
@@ -2068,12 +2148,19 @@ export default function SupportScreen() {
                 >
                   Delete Ticket
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
 
-            <TouchableOpacity
+            <Pressable
               onPress={() => setStatusModalVisible(false)}
-              style={{ padding: 16, alignItems: 'center', marginTop: 4 }}
+              style={({ pressed }) => [
+                {
+                  padding: 16,
+                  alignItems: 'center',
+                  marginTop: 4,
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}
             >
               <Text
                 style={{
@@ -2085,7 +2172,7 @@ export default function SupportScreen() {
               >
                 Cancel
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           </GlassCard>
         </View>
       </Modal>

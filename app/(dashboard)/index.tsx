@@ -3,11 +3,11 @@
  * VeraxAI Dashboard — Master Orchestration UI
  * ══════════════════════════════════════════════════════════════════════════════
  * PROTOCOL:
- * 1. THE WANDERING CORE: A single, smooth-gliding cyan emitter.
- * 2. SOLID WAVES: The waves are now SOLID, glowing pulses (no hollow rings).
- * 3. DEEP NEBULA ENGINE: Soft, massive background blurs for depth.
- * 4. TOUCH SAFETY: 110% APK touch-safe using pointerEvents="none" and zIndex:-1.
- * 5. NATIVE SVG: Bypasses Metro bundler crashes using react-native-svg.
+ * THE WANDERING CORE: A single, smooth-gliding cyan emitter
+ * SOLID WAVES: The waves are now SOLID, glowing pulses (no hollow rings)
+ * DEEP NEBULA ENGINE: Soft, massive background blurs for depth
+ * tOUCH SAFETY: 110% APK touch-safe using pointerEvents="none" and zIndex:-1
+ * NATIVE SVG: Bypasses Metro bundler crashes using react-native-svg
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -817,7 +817,7 @@ export default function DashboardScreen() {
                   />
 
                   {displayError && (
-                    <View className="p-5 mt-6 border bg-rose-500/10 border-rose-500/20 rounded-2xl">
+                    <View className="p-5 mt-6 border bg-rose-500/40 border-rose-500/20 rounded-2xl">
                       <Text className="mb-2 text-xs font-bold tracking-widest uppercase text-rose-400">
                         Error Encountered
                       </Text>
@@ -852,7 +852,7 @@ export default function DashboardScreen() {
                             <Text className="text-white/80 text-[10px] font-semibold uppercase tracking-[2px] mb-1">
                               Job ID
                             </Text>
-                            <Text className="font-mono text-xs uppercase text-white/60">
+                            <Text className="font-mono text-xs uppercase text-white/80">
                               {currentVideoId?.split('-')[0] || 'INIT'}
                             </Text>
                           </View>

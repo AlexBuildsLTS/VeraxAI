@@ -2,24 +2,37 @@
  * services/exportBuilder.ts
  * VeraxAI Export & Formatting Engine
  * ══════════════════════════════════════════════════════════════════════════════
- * FEATURES:
- * - 100% Type-Safe: Defensive parsing for Supabase JSON fields.
- * - Unified Output: TXT and MD files contain BOTH the AI Summaries and Raw Transcript.
- * - Smart Fallbacks: Auto-calculates SRT/VTT timestamps if native segments fail.
- * - Cross-Platform Downloads: Triggers browser downloads on Web, and Native Share Sheets
- * (via expo-sharing & cacheDirectory) on iOS/Android APKs to bypass permission locks.
+ * ARCHITECTURE & PROTOCOL
+ * DOMAIN TYPING: 100% strict typing for all VeraxAI data payloads and algorithms.
+ * I/O BOUNDARY BYPASS: Defensive type-casting applied strictly to expo-file-system 
+ * and expo-sharing. This prevents TS2339 crashes when the IDE language server 
+ * incorrectly resolves React Native Web stubs instead of Native APK modules.
+ * HYBRID OS PIPELINE: HTML5 Blobs on Vercel Web; cacheDirectory on Android APK.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { formatTimestamp, formatSrtTimestamp, formatVttTimestamp, formatDuration } from '../utils/formatters/time';
-import type { ExportFormat, ExportOptions, ExportResult, Transcript, TranscriptSegment, AiInsights, Video } from '../types/api';
+import {
+  formatTimestamp,
+  formatSrtTimestamp,
+  formatVttTimestamp,
+  formatDuration
+} from '../utils/formatters/time';
+import type {
+  ExportFormat,
+  ExportOptions,
+  ExportResult,
+  Transcript,
+  TranscriptSegment,
+  AiInsights,
+  Video
+} from '../types/api';
 
 // ─── INTERFACES & GUARDS ─────────────────────────────────────────────────────
 
-interface ExportData {
+export interface ExportData {
   video: Video;
   transcript: Transcript;
   insights?: AiInsights | null;
@@ -43,7 +56,7 @@ const MIME_TYPES: Record<ExportFormat, string> = {
 
 const safeArray = <T>(data: unknown): T[] => (Array.isArray(data) ? (data as T[]) : []);
 
-// ─── PLAIN TEXT ENGINE ( RAW TXT) ───────────────────────────────────────
+// ─── PLAIN TEXT ENGINE (RAW TXT) ─────────────────────────────────────────────
 
 function exportToTxt(data: ExportData, options: ExportOptions): string {
   const { video, transcript, insights } = data;
@@ -70,7 +83,7 @@ function exportToTxt(data: ExportData, options: ExportOptions): string {
   }
 
   if (options.includeChapters && chapters.length > 0) {
-    lines.push('─── VeraxAI CHAPTER TIMELINE───────────────────────────────────────────────────\n');
+    lines.push('─── VeraxAI CHAPTER TIMELINE ──────────────────────────────────────────────────\n');
     chapters.forEach((chapter) => {
       lines.push(`[${chapter.timestamp}] ${chapter.title.toUpperCase()}`);
       if (chapter.description) lines.push(`    ${chapter.description}`);
@@ -78,7 +91,7 @@ function exportToTxt(data: ExportData, options: ExportOptions): string {
     });
   }
 
-  lines.push('─── VERBATIM DATA STREAM  ──────────────────────────────\n');
+  lines.push('─── VERBATIM DATA STREAM ──────────────────────────────────────────────────────\n');
 
   if (options.includeTimestamps && data.segments && data.segments.length > 0) {
     data.segments.forEach((segment) => {
@@ -270,7 +283,9 @@ export function exportTranscript(data: ExportData, options: ExportOptions): Expo
   }
 
   return {
-    content, filename, mimeType: MIME_TYPES[format] || 'text/plain',
+    content,
+    filename,
+    mimeType: MIME_TYPES[format] || 'text/plain',
     text: '',
     data: undefined,
   };
@@ -280,7 +295,6 @@ export function exportTranscript(data: ExportData, options: ExportOptions): Expo
 
 export async function downloadExport(result: ExportResult): Promise<void> {
   if (Platform.OS === 'web') {
-    // Next.js / SSR Safety Check
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
     try {
@@ -298,45 +312,44 @@ export async function downloadExport(result: ExportResult): Promise<void> {
       throw new Error('Failed to trigger file download in browser.');
     }
   } else {
-    // Native Mobile Handling (iOS / Android APK)
+    // ─── I/O BOUNDARY BYPASS (ANDROID / IOS APK) ───
+    // Casting to 'any' is required here. The VSCode TS server running in a hybrid 
+    // react-native-web workspace will improperly resolve expo-file-system's DOM stubs 
+    // during static analysis, falsely flagging native properties as undefined.
     try {
-      // BYPASS: Cast to 'any' to force compilation despite outdated local VSCode typings.
-      // This is necessary because expo-file-system types are sometimes stale in the local cache.
-      const fsExt: any = FileSystem;
-      const shareExt: any = Sharing;
+      const fsNative: any = FileSystem;
+      const shareNative: any = Sharing;
 
-      // CRITICAL: We MUST use cacheDirectory, not documentDirectory, for temporary files 
-      // meant for sharing to avoid scoped storage permission crashes on Android 11+.
-      if (!fsExt.cacheDirectory) {
-        throw new Error('Cache directory is not accessible on this device.');
+      if (!fsNative.cacheDirectory) {
+        throw new Error('Local OS cache directory is inaccessible.');
       }
 
-      const fileUri = `${fsExt.cacheDirectory}${result.filename}`;
+      const fileUri = `${fsNative.cacheDirectory}${result.filename}`;
 
-      // Write to Phone Cache
-      await fsExt.writeAsStringAsync(fileUri, result.content, {
-        encoding: 'utf8', // Hardcoded string to bypass EncodingType typing error
+      // Bypass EncodingType.UTF8 lookup failure by defaulting to the hardcoded 'utf8' string
+      await fsNative.writeAsStringAsync(fileUri, result.content, {
+        encoding: fsNative.EncodingType?.UTF8 || 'utf8',
       });
 
-      // Trigger Android Share / Save Dialog
-      const isAvailable = await shareExt.isAvailableAsync();
+      const isAvailable = await shareNative.isAvailableAsync();
+
       if (isAvailable) {
-        await shareExt.shareAsync(fileUri, {
+        await shareNative.shareAsync(fileUri, {
           mimeType: result.mimeType,
-          dialogTitle: `Save ${result.filename}`,
-          UTI: result.mimeType, // Better classification for iOS
+          dialogTitle: `Save Intelligence Payload: ${result.filename}`,
+          UTI: result.mimeType,
         });
       } else {
-        throw new Error('Native sharing is not available on this device.');
+        throw new Error('Native OS sharing mechanism is unavailable.');
       }
     } catch (error) {
-      console.error('[ExportBuilder] Mobile sharing failed:', error);
-      throw error; // Let the UI catch and display the alert
+      console.error('[ExportBuilder] Mobile sharing pipeline execution failed:', error);
+      throw error;
     }
   }
 }
 
-// ─── CRITICAL EXPORT DEFINITION ──────────────────────────────────────────────
+// ─── CORE EXPORT API ─────────────────────────────────────────────────────────
 
 export const ExportBuilder = {
   exportTranscript,
