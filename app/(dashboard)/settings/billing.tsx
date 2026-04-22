@@ -1,12 +1,10 @@
 /**
  * app/(dashboard)/settings/billing.tsx
- * VeraxAI — Resource Allocation & Token Economy
+ * VeraxAI Architect — Token Economy
  * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL:
- * 1. NEBULA AMBIENT ENGINE: 120fps organic drifting background. Touch-safe.
- * 2. ANIMATED SVG LEDGER: High-fidelity animated header replacing static text.
- * 3. REAL-TIME LEDGER: Bi-directional sync with Supabase `profiles` & `usage_logs`.
- * 4. TOKEN ECONOMY: Renders dynamic progress bars based on current user_role.
+ * NEBULA AMBIENT ENGINE
+ * REAL-TIME LEDGER: Bi-directional sync with Supabase `profiles` & `usage_logs`.
+ * TOKEN ECONOMY: Renders dynamic progress bars based on current user_role.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -187,7 +185,7 @@ const AmbientArchitecture = memo(() => {
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <CorePulse
         delay={0}
-        color={THEME.gold}
+        color={THEME.pink}
         size={basePulseSize}
         centerX={coreX}
         centerY={coreY}

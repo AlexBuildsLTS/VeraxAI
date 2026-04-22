@@ -2,7 +2,7 @@
  * app/(dashboard)/settings/_layout.tsx
  * ══════════════════════════════════════════════════════════════════════════════
  * Deep-level settings routing.
- * Nested transparency ensures zero background flashes during transitions.
+ * Nested transparency ensures zero background flashes during transitions
  */
 import { Stack } from 'expo-router';
 import { View } from 'react-native';

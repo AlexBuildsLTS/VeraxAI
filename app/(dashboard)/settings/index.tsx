@@ -1,12 +1,12 @@
 /**
  * app/(dashboard)/settings/index.tsx
- * VeraxAI Settings Dashboard — Master Configuration
+ * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL:
- * 1. NEBULA AMBIENT ENGINE: 120fps UI-thread physics using Sine/Cosine for organic drift.
- * 2. STRICT TOUCH SAFETY: zIndex & elevation separation guarantees APK touch works instantly.
- * 3. ADAPTIVE LAYOUT: Core pulse anchors perfectly behind the settings shield icon.
- * 4. STRICT THEME: Liquid Neon palette over an Obsidian (#000012) void.
+ * PROTOCOL
+ * keyboardShouldPersistTaps="always" eliminates Android tap-swallowing.
+ * BACKGROUND PARITY: Features the exact Wandering Core & Nebula engine from the Dashboard.
+ * DOM ISOLATION: Background and Foreground are strict siblings to prevent APK elevation crashes.
+ * LIQUID NEON UX: Smooth glassmorphism, glowing SVGs, and responsive flex handling.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -36,6 +36,7 @@ import {
 } from 'lucide-react-native';
 import { useAuthStore } from '../../../store/useAuthStore';
 
+// Native SVG & Animation
 import Svg, { Rect, Path, Circle, Line, G } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -50,10 +51,9 @@ import Animated, {
   useFrameCallback,
 } from 'react-native-reanimated';
 
-const AnimatedLine = Animated.createAnimatedComponent(Line);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// ─── THEME CONSTANTS ─────────────────────────────────────────────────────────
+// ─── THEME CONSTANTS (Liquid Neon) ───────────────────────────────────────────
 const THEME = {
   obsidian: '#000012',
   cyan: '#00F0FF',
@@ -81,193 +81,146 @@ interface SettingsCardItem {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: NEBULA AMBIENT ENGINE (Organic UI-Thread Physics)
+// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
 // ══════════════════════════════════════════════════════════════════════════════
 
-const CorePulse = React.memo(
-  ({ delay, color, size, centerX, centerY }: any) => {
-    const pulse = useSharedValue(0);
+const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+        -1,
+        false,
+      ),
+    );
+  }, [delay, duration, progress]);
 
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, maxSize]),
+    height: interpolate(progress.value, [0, 1], [0, maxSize]),
+    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
+    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+  }));
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          borderColor: color,
+          backgroundColor: 'transparent',
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+});
+
+const WanderingCore = React.memo(
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
+
+    const corePulse = useSharedValue(0.4);
     useEffect(() => {
-      pulse.value = withDelay(
-        delay,
-        withRepeat(
-          withTiming(1, { duration: 8000, easing: Easing.out(Easing.cubic) }),
-          -1,
-          false,
-        ),
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
+        -1,
+        true,
       );
-    }, [delay, pulse]);
+    }, [corePulse]);
 
-    const animatedStyle = useAnimatedStyle(() => ({
-      transform: [{ scale: interpolate(pulse.value, [0, 1], [0.8, 2.5]) }],
-      opacity: interpolate(pulse.value, [0, 0.4, 1], [0.3, 0.1, 0]),
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
     }));
 
     return (
       <Animated.View
-        pointerEvents="none"
-        style={[
-          animatedStyle,
-          {
-            position: 'absolute',
-            left: centerX - size / 2,
-            top: centerY - size / 2,
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: `${color}15`,
-            ...(IS_WEB ? ({ filter: 'blur(20px)' } as any) : {}),
-          },
-        ]}
-      />
-    );
-  },
-);
-CorePulse.displayName = 'CorePulse';
-
-interface OrganicOrbProps {
-  color: string;
-  size: number;
-  initialX: number;
-  initialY: number;
-  speedX: number;
-  speedY: number;
-  phaseOffsetX: number;
-  phaseOffsetY: number;
-  opacityBase: number;
-}
-
-const OrganicOrb = React.memo(
-  ({
-    color,
-    size,
-    initialX,
-    initialY,
-    speedX,
-    speedY,
-    phaseOffsetX,
-    phaseOffsetY,
-    opacityBase,
-  }: OrganicOrbProps) => {
-    const { width, height } = Dimensions.get('window');
-    const time = useSharedValue(0);
-
-    // 120fps UI Thread loop utilizing Sine/Cosine for smooth, non-linear drifting
-    useFrameCallback((frameInfo) => {
-      if (frameInfo.timeSincePreviousFrame === null) return;
-      time.value += frameInfo.timeSincePreviousFrame / 1000;
-    });
-
-    const animatedStyle = useAnimatedStyle(() => {
-      const xOffset =
-        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
-      const yOffset =
-        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
-      const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
-
-      return {
-        transform: [
-          { translateX: initialX + xOffset },
-          { translateY: initialY + yOffset },
-          { scale: breathe },
-        ],
-        opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
-      };
-    });
-
-    return (
-      <Animated.View
-        pointerEvents="none"
         style={[
           {
             position: 'absolute',
-            top: -size / 2,
-            left: -size / 2,
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: color,
-            ...(IS_WEB ? ({ filter: 'blur(60px)' } as any) : {}),
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
           },
-          animatedStyle,
+          animatedPosition,
         ]}
-      />
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <SingleRipple
+            key={index}
+            color={color}
+            delay={index * (baseDuration / waveCount)}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+        <Animated.View
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              ...(Platform.OS === 'web'
+                ? { boxShadow: `0 0 20px ${color}` }
+                : {
+                    shadowColor: color,
+                    shadowRadius: 15,
+                    shadowOpacity: 1,
+                    shadowOffset: { width: 0, height: 0 },
+                  }),
+            },
+          ]}
+        />
+      </Animated.View>
     );
   },
 );
-OrganicOrb.displayName = 'OrganicOrb';
 
 const AmbientArchitecture = React.memo(() => {
   const { width, height } = Dimensions.get('window');
-  const isDesktop = width >= 1024;
-
-  const coreX = width / 2;
-  const coreY = isDesktop ? 160 : 120;
-  const basePulseSize = isDesktop ? 300 : 200;
-
   return (
-    // Inner wrapper also enforcing pointerEvents="none"
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <CorePulse
-        delay={0}
+    // STRICT TOUCH SAFETY: zIndex -1 and elevation -1 prevent UI blocking on Android
+    <View
+      style={[
+        StyleSheet.absoluteFill,
+        { zIndex: -1, elevation: -1, pointerEvents: 'none' },
+      ]}
+      importantForAccessibility="no-hide-descendants"
+    >
+      <WanderingCore
+        coreSize={14}
         color={THEME.cyan}
-        size={basePulseSize}
-        centerX={coreX}
-        centerY={coreY}
-      />
-      <CorePulse
-        delay={2500}
-        color={THEME.purple}
-        size={basePulseSize}
-        centerX={coreX}
-        centerY={coreY}
-      />
-      <CorePulse
-        delay={5000}
-        color={THEME.pink}
-        size={basePulseSize}
-        centerX={coreX}
-        centerY={coreY}
-      />
-
-      <OrganicOrb
-        color={THEME.pink}
-        size={width * 0.5}
-        initialX={width * 0.6}
-        initialY={height * 0.3}
-        speedX={0.2}
-        speedY={0.15}
-        phaseOffsetX={0}
-        phaseOffsetY={Math.PI / 2}
-        opacityBase={0.06}
-      />
-      <OrganicOrb
-        color={THEME.purple}
-        size={width * 0.6}
-        initialX={width * 0.8}
-        initialY={height * 0.4}
-        speedX={0.15}
-        speedY={0.25}
-        phaseOffsetX={Math.PI}
-        phaseOffsetY={0}
-        opacityBase={0.08}
-      />
-      <OrganicOrb
-        color={THEME.green}
-        size={width * 0.4}
-        initialX={width * 0.4}
-        initialY={height * 0.8}
-        speedX={0.25}
-        speedY={0.1}
-        phaseOffsetX={Math.PI / 4}
-        phaseOffsetY={Math.PI}
-        opacityBase={0.05}
+        maxWaveSize={width >= 1024 ? width * 0.8 : height * 1.0}
+        waveCount={4}
+        baseDuration={12000}
       />
     </View>
   );
 });
-AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 3: SETTINGS SHIELD SVG
@@ -316,13 +269,7 @@ const AnimatedSettingsIcon = React.memo(() => {
 
   return (
     <View
-      style={{
-        width: 140,
-        height: 140,
-        alignSelf: 'center',
-        marginBottom: 24,
-        zIndex: 10,
-      }}
+      style={{ width: 140, height: 140, alignSelf: 'center', marginBottom: 24 }}
     >
       <View
         style={{
@@ -499,26 +446,21 @@ export default function SettingsHubScreen() {
   }, [userRole]);
 
   return (
-    <SafeAreaView className="flex-1 bg-[#000012]">
-      {/* ── STRICT TOUCH LAYER ISOLATION ── 
-          By wrapping the background in zIndex: -1 and elevation: -1, we mathematically 
-          guarantee Android's touch matrix completely ignores it. */}
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          { pointerEvents: 'none', zIndex: -1, elevation: -1 },
-        ]}
-        pointerEvents="none"
-      >
-        <AmbientArchitecture />
-      </View>
+    <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
+      {/* ── STRICT TOUCH LAYER ISOLATION ─ Placed outside the SafeAreaView*/}
+      <AmbientArchitecture />
 
-      {/* ── MAIN CONTENT LAYER ──
-          Forced to zIndex: 1 so it sits cleanly above the background logic. */}
-      <View style={{ flex: 1, zIndex: 1, elevation: 1 }}>
+      {/* ── MAIN CONTENT LAYER ── */}
+      <SafeAreaView
+        style={{ flex: 1 }}
+        edges={['top', 'bottom', 'left', 'right']}
+        pointerEvents="box-none"
+      >
         <ScrollView
           style={{ flex: 1, width: '100%' }}
-          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          keyboardShouldPersistTaps="always"
           contentContainerStyle={{
             padding: isMobile ? 16 : 60,
             paddingTop: isMobile ? 60 : 80,
@@ -526,7 +468,6 @@ export default function SettingsHubScreen() {
             flexGrow: 1,
             alignItems: 'center',
           }}
-          showsVerticalScrollIndicator={false}
         >
           <FadeIn>
             <View className="items-center w-full max-w-2xl mb-10 md:mb-16">
@@ -549,12 +490,10 @@ export default function SettingsHubScreen() {
               }
               className="flex-row items-center mb-10 gap-x-2"
               activeOpacity={0.7}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              delayPressIn={0}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
               <ArrowBigLeftDash size={18} color={THEME.cyan} />
-              <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">
-                Return
-              </Text>
             </TouchableOpacity>
           </View>
 
@@ -570,8 +509,8 @@ export default function SettingsHubScreen() {
                         router.push(`/settings/${mod.id}` as any);
                       }
                     }}
-                    activeOpacity={0.8}
-                    delayPressIn={0}
+                    activeOpacity={0.7}
+                    delayPressIn={0} // Forces instant touch feedback
                   >
                     <GlassCard
                       glowColor={mod.color as any}
@@ -632,7 +571,7 @@ export default function SettingsHubScreen() {
             </View>
           </View>
         </ScrollView>
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

@@ -1,16 +1,17 @@
 /**
  * app/(dashboard)/admin/index.tsx
  * VeraxAI - ADMIN Command Center
- * ----------------------------------------------------------------------------
- * MODULE OVERVIEW:
- * 1. TELEMETRY KERNEL: Syncs live DB data, calculating active tokens & failures
- * 2. SYSTEM API VAULT (SUMMARY): Routes to the new secure `/admin/keys` page
- * 3. SAAS FORECASTER financial engine with Platform Fees & TAX :(
- * 4. IDENTITY REGISTRY: Fully touchable rows to instantly access `/admin/users`
- * ----------------------------------------------------------------------------
+ * ══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE
+ * PROP SAFETY: Strict JS ternary logic for responsive sizing.
+ * ZERO-DROP TOUCH: keyboardShouldPersistTaps="always" + delayPressIn={0} eradicates APK tap drops
+ * Real-Time Stream locked into a strict w-1/3, flex-1, w-24 grid for Web
+ * ADAPTIVE COLLAPSE: Tables switch from horizontal grids to clean vertical stacks on APK, WEB, MOBILE
+ * DOM ISOLATION: Ambient background is a strict sibling node to prevent elevation overlaps
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -24,6 +25,7 @@ import {
   UIManager,
   ActivityIndicator,
   KeyboardAvoidingView,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -36,6 +38,7 @@ import Animated, {
   interpolate,
   FadeInDown,
   Easing,
+  useFrameCallback,
 } from 'react-native-reanimated';
 import {
   Users,
@@ -61,12 +64,14 @@ import {
   Clock,
 } from 'lucide-react-native';
 
-import { Database as DBTypes } from '../../../types/database/database.types';
+// ─── STRICT DATABASE DEPENDENCIES ───
 import { supabase } from '../../../lib/supabase/client';
+import { Database } from '../../../types/database/database.types';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { cn } from '../../../lib/utils';
 
+// Enable LayoutAnimation for Android
 if (
   Platform.OS === 'android' &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -74,7 +79,25 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// ─── STRICT THEME ENFORCEMENT ───
+// ─── STRICT SUPABASE TYPING (Restored) ───
+type UserRole = Database['public']['Enums']['user_role'];
+
+interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  role: UserRole;
+  tokens_balance: number;
+  status: string | null;
+  banned_until: string | null;
+  created_at: string;
+  custom_api_key: string | null;
+}
+
+type DBTypes = Database;
+
+// ─── STRICT THEME ENFORCEMENT (Liquid Neon) ───
 const THEME = {
   obsidian: '#000012',
   cyan: '#00F0FF',
@@ -83,7 +106,10 @@ const THEME = {
   warning: '#F59E0B',
   purple: '#8A2BE2',
   slate: '#94a3b8',
+  pink: '#FF007F',
 };
+
+const IS_WEB = Platform.OS === 'web';
 
 const strictInputStyle = {
   flex: 1,
@@ -93,65 +119,256 @@ const strictInputStyle = {
   paddingVertical: 0,
   margin: 0,
   textAlignVertical: 'center',
-  ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
+  ...(IS_WEB ? { outlineStyle: 'none' } : {}),
 } as any;
 
-// ─── AMBIENT ORB ENGINE ───
-const AmbientOrb = ({
-  color,
-  size,
-  top,
-  left,
-  right,
-  bottom,
-  opacity = 0.05,
-  delay = 0,
-}: any) => {
-  const { width, height } = Dimensions.get('window');
-  const drift = useSharedValue(0);
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
+// ══════════════════════════════════════════════════════════════════════════════
 
+const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
+  const progress = useSharedValue(0);
   useEffect(() => {
-    drift.value = withDelay(
+    progress.value = withDelay(
       delay,
       withRepeat(
-        withTiming(1, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
+        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
         -1,
-        true,
+        false,
       ),
     );
-  }, [delay, drift]);
-
-  const anim = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: interpolate(drift.value, [0, 1], [0, width * 0.1]) },
-      { translateY: interpolate(drift.value, [0, 1], [0, height * 0.05]) },
-      { scale: interpolate(drift.value, [0, 1], [0.9, 1.2]) },
-    ],
+  }, []);
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, maxSize]),
+    height: interpolate(progress.value, [0, 1], [0, maxSize]),
+    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
+    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
   }));
-
   return (
     <Animated.View
       style={[
         {
           position: 'absolute',
-          width: size,
-          height: size,
-          borderRadius: size,
-          backgroundColor: color,
-          opacity,
-          top,
-          left,
-          right,
-          bottom,
-          pointerEvents: 'none',
+          borderColor: color,
+          backgroundColor: 'transparent',
         },
-        anim,
+        animatedStyle,
       ]}
     />
   );
-};
+});
 
-// ─── TYPES ───
+// ─── PART B: THE GLIDING CORE ───
+interface GlidingEmitterProps {
+  coreSize: number;
+  color: string;
+  maxWaveSize: number;
+  waveCount: number;
+  baseDuration: number;
+}
+
+const WanderingCore = memo(
+  ({
+    coreSize,
+    color,
+    maxWaveSize,
+    waveCount,
+    baseDuration,
+  }: GlidingEmitterProps) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+    const stagger = baseDuration / waveCount;
+
+    // 120fps UI-Thread Logic for ultra-smooth gliding
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    // Moves the core in a sleek infinity loop
+    const animatedPosition = useAnimatedStyle(() => {
+      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
+      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
+
+      return {
+        transform: [
+          { translateX: width / 2 + xOffset },
+          { translateY: height / 2 + yOffset },
+        ],
+      };
+    });
+
+    const corePulse = useSharedValue(0.4);
+    useEffect(() => {
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
+        -1,
+        true,
+      );
+    }, []);
+
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [{ scale: interpolate(corePulse.value, [0.4, 1], [0.5, 1]) }],
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          animatedPosition,
+        ]}
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <SingleRipple
+            key={`ripple-${index}`}
+            color={color}
+            delay={index * stagger}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+
+        <Animated.View
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              shadowColor: color,
+              shadowRadius: 15,
+              shadowOpacity: 1,
+              shadowOffset: { width: 0, height: 0 },
+              ...(IS_WEB ? ({ boxShadow: `0 0 20px ${color}` } as any) : {}),
+            },
+          ]}
+        />
+      </Animated.View>
+    );
+  },
+);
+WanderingCore.displayName = 'WanderingCore';
+
+// ─── PART C: THE DEEP NEBULA (From Settings) ───
+const OrganicOrb = memo(
+  ({
+    color,
+    size,
+    initialX,
+    initialY,
+    speedX,
+    speedY,
+    phaseOffsetX,
+    phaseOffsetY,
+    opacityBase,
+  }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 1000;
+    });
+
+    const animatedStyle = useAnimatedStyle(() => {
+      const xOffset =
+        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
+      const yOffset =
+        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
+      const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
+
+      return {
+        transform: [
+          { translateX: initialX + xOffset },
+          { translateY: initialY + yOffset },
+          { scale: breathe },
+        ],
+        opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
+      };
+    });
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: -size / 2,
+            left: -size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+            ...(IS_WEB ? ({ filter: 'blur(60px)' } as any) : {}),
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+OrganicOrb.displayName = 'OrganicOrb';
+
+// ─── MASTER AMBIENT CONTROLLER ───
+const AmbientArchitecture = memo(() => {
+  const { width, height } = Dimensions.get('window');
+  const isDesktop = width >= 1024;
+  const massiveWaveRadius = isDesktop ? width * 0.4 : height * 1.0;
+
+  return (
+    // CRITICAL: pointerEvents="none" guarantees zero touch overlap
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* LAYER 1: Deep Nebula Background (From Settings - Soft and elegant) */}
+      <OrganicOrb
+        color={THEME.pink}
+        size={width * 0.6}
+        initialX={width * 0.8}
+        initialY={height * 0.6}
+        speedX={0.15}
+        speedY={0.2}
+        phaseOffsetX={Math.PI}
+        phaseOffsetY={0}
+        opacityBase={0.06}
+      />
+      <OrganicOrb
+        color={THEME.cyan}
+        size={width * 0.4}
+        initialX={width * 0.5}
+        initialY={height * 0.8}
+        speedX={0.25}
+        speedY={0.1}
+        phaseOffsetX={Math.PI / 4}
+        phaseOffsetY={Math.PI}
+        opacityBase={0.04}
+      />
+
+      {/* LAYER 2: The Wandering Core with Solid Glowing Waves */}
+      <WanderingCore
+        coreSize={14}
+        color="#02AABC" // Cyan Core
+        maxWaveSize={massiveWaveRadius}
+        waveCount={4} // 4 simultaneous pulses fading as they grow
+        baseDuration={12000} // 12 seconds for a wave to fully expand
+      />
+    </View>
+  );
+});
+AmbientArchitecture.displayName = 'AmbientArchitecture';
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 2: DATABASE TYPES & INTERFACES
+// ══════════════════════════════════════════════════════════════════════════════
 type Profile = DBTypes['public']['Tables']['profiles']['Row'];
 type Video = DBTypes['public']['Tables']['videos']['Row'];
 type UsageLog = DBTypes['public']['Tables']['usage_logs']['Row'];
@@ -174,6 +391,9 @@ interface TelemetrySnapshot {
   keys: { count: number; totalBurn: number };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 3: MASTER DASHBOARD CONTROLLER
+// ══════════════════════════════════════════════════════════════════════════════
 export default function AdminCommandCenter() {
   const router = useRouter();
   const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -334,7 +554,6 @@ export default function AdminCommandCenter() {
     };
   }, [synchronizeTelemetry]);
 
-  // ─── ADVANCED SAAS FORECASTER ───
   const saasFinancials = useMemo(() => {
     const mau = parseFloat(inputs.mau) || 0;
     const price = parseFloat(inputs.subPrice) || 0;
@@ -370,646 +589,688 @@ export default function AdminCommandCenter() {
   });
 
   return (
-    <SafeAreaView className="flex-1 bg-[#000012]">
-      <AmbientOrb
-        color={THEME.cyan}
-        size={400}
-        top={-100}
-        left={-150}
-        opacity={0.03}
-        delay={0}
-      />
-      <AmbientOrb
-        color={THEME.purple}
-        size={300}
-        top={300}
-        right={-100}
-        opacity={0.04}
-        delay={2000}
-      />
-      <AmbientOrb
-        color={THEME.success}
-        size={250}
-        bottom={-50}
-        left={-50}
-        opacity={0.02}
-        delay={4000}
-      />
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="flex-1"
+    <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
+      {/* ── STRICT TOUCH ISOLATION (Ambient Background) ── */}
+      <View
+        style={[StyleSheet.absoluteFill, { zIndex: -1, elevation: -1 }]}
+        pointerEvents="none"
       >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            paddingHorizontal: isMobile ? 16 : 40,
-            paddingTop: 24,
-            paddingBottom: 150,
-            flexGrow: 1,
-            maxWidth: 1280,
-            alignSelf: 'center',
-            width: '100%',
-          }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                synchronizeTelemetry();
-              }}
-              tintColor={THEME.cyan}
-            />
-          }
+        <AmbientArchitecture />
+      </View>
+
+      <SafeAreaView
+        style={{ flex: 1 }}
+        edges={['top', 'bottom', 'left', 'right']}
+        pointerEvents="box-none"
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          className="flex-1"
         >
-          {/* ════════ 1. COMMAND HEADER ════════ */}
-          <FadeIn delay={100} className="z-50 flex-col mb-12">
-            <TouchableOpacity
-              onPress={() => router.replace('/')}
-              className="flex-row items-center self-start mb-6 gap-x-3"
-              activeOpacity={0.7}
-            >
-              <ArrowBigLeftDash size={22} color={THEME.cyan} />
-              <Text className="text-[11px] font-black tracking-[4px] text-[#00F0FF] uppercase"></Text>
-            </TouchableOpacity>
-
-            <View className="flex-row items-start justify-between w-full">
-              <View>
-                <Text className="text-3xl font-black tracking-tighter text-white uppercase md:text-4xl"></Text>
-                <View className="flex-row items-center gap-2 mt-2">
-                  <RefreshCcw size={16} color={THEME.cyan} />
-                  <Text className="text-[9px] md:text-[10px] font-black tracking-[4px] text-white/50 uppercase"></Text>
-                </View>
-              </View>
-
-              <View
-                style={{
-                  alignSelf: 'flex-start',
-                  boxShadow:
-                    healthStatus === 'OPERATIONAL'
-                      ? THEME.success
-                      : THEME.warning,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.4,
-                  shadowRadius: 10,
-                  elevation: 8,
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            overScrollMode="never" // Prevents Android overscroll touch hijacking
+            keyboardShouldPersistTaps="always" // CRITICAL FIX: Forces instant touch registration for all children
+            contentContainerStyle={{
+              paddingHorizontal: isMobile ? 16 : 40,
+              paddingTop: 24,
+              paddingBottom: 150,
+              flexGrow: 1,
+              maxWidth: 1280,
+              alignSelf: 'center',
+              width: '100%',
+            }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  synchronizeTelemetry();
                 }}
-                className={cn(
-                  'flex-row items-center px-4 py-2.5 border rounded-full',
-                  healthStatus === 'OPERATIONAL'
-                    ? 'bg-[#32FF00]/10 border-[#32FF00]/40'
-                    : 'bg-[#F59E0B]/10 border-[#F59E0B]/40',
-                )}
+                tintColor={THEME.cyan}
+              />
+            }
+          >
+            {/* ════════ 1. COMMAND HEADER ════════ */}
+            <FadeIn delay={100} className="z-50 flex-col mb-12">
+              <TouchableOpacity
+                onPress={() => router.replace('/')}
+                delayPressIn={0} // Instantly register tap
+                className="flex-row items-center self-start mb-6 gap-x-3"
+                activeOpacity={0.7}
               >
-                <Activity
-                  size={12}
-                  color={
-                    healthStatus === 'OPERATIONAL'
-                      ? THEME.success
-                      : THEME.warning
-                  }
-                />
-                <Text
+                <ArrowBigLeftDash size={22} color={THEME.cyan} />
+              </TouchableOpacity>
+
+              <View className="flex-row items-start justify-between w-full">
+                <View>
+                  <Text className="text-3xl font-black tracking-tighter text-white uppercase md:text-4xl">
+                    Admin Core
+                  </Text>
+                  <View className="flex-row items-center gap-2 mt-2">
+                    <RefreshCcw size={16} color={THEME.cyan} />
+                    <Text className="text-[9px] md:text-[10px] font-black tracking-[4px] text-white/50 uppercase">
+                      Live Telemetry
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={{
+                    alignSelf: 'flex-start',
+                    shadowColor:
+                      healthStatus === 'OPERATIONAL'
+                        ? THEME.success
+                        : THEME.warning,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 10,
+                    elevation: 8,
+                    ...(IS_WEB
+                      ? ({
+                          boxShadow: `0 4px 10px ${healthStatus === 'OPERATIONAL' ? THEME.success : THEME.warning}60`,
+                        } as any)
+                      : {}),
+                  }}
                   className={cn(
-                    'ml-2 text-[10px] md:text-[11px] font-black uppercase tracking-widest',
+                    'flex-row items-center px-4 py-2.5 border rounded-full',
                     healthStatus === 'OPERATIONAL'
-                      ? 'text-[#32FF00]'
-                      : 'text-[#F59E0B]',
+                      ? 'bg-[#32FF00]/10 border-[#32FF00]/40'
+                      : 'bg-[#01111f]/10 border-[#F59E0B]/40',
                   )}
                 >
-                  {healthStatus}
-                </Text>
-              </View>
-            </View>
-          </FadeIn>
-
-          {/* ════════ 2. DIAGNOSTICS BAR ════════ */}
-          <FadeIn delay={200}>
-            <GlassCard className="flex-col gap-4 p-5 mb-10 border md:p-6 md:flex-row md:items-center md:justify-between bg-white/[0.015] border-white/5 rounded-3xl md:rounded-[32px]">
-              <View className="flex-row items-center gap-4">
-                <View className="items-center justify-center w-10 h-10 border rounded-xl bg-blue-500/10 border-blue-500/20">
-                  <Server size={18} color="#3B82F6" />
-                </View>
-                <View>
-                  <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
-                    Ping Latency
-                  </Text>
-                  <Text className="text-base font-bold text-white/90">
-                    {telemetry.infra.latencyMs}
-                  </Text>
-                </View>
-              </View>
-              <View className="flex-row items-center gap-4">
-                <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#32FF00]/10 border-[#32FF00]/20">
-                  <Lock size={18} color={THEME.success} />
-                </View>
-                <View>
-                  <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
-                    Security
-                  </Text>
-                  <Text className="text-base font-bold text-[#32FF00]">
-                    Strict-v3 SSL
-                  </Text>
-                </View>
-              </View>
-              <View className="flex-row items-center gap-4">
-                <View className="items-center justify-center w-10 h-10 border rounded-xl bg-amber-500/10 border-amber-500/20">
-                  <ShieldCheck size={18} color={THEME.warning} />
-                </View>
-                <View>
-                  <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
-                    Health
-                  </Text>
-                  <Text className="text-base font-bold text-[#F59E0B]">
+                  <Activity
+                    size={12}
+                    color={
+                      healthStatus === 'OPERATIONAL'
+                        ? THEME.success
+                        : THEME.warning
+                    }
+                  />
+                  <Text
+                    className={cn(
+                      'ml-2 text-[10px] md:text-[11px] font-black uppercase tracking-widest',
+                      healthStatus === 'OPERATIONAL'
+                        ? 'text-[#32FF00]'
+                        : 'text-[#F59E0B]',
+                    )}
+                  >
                     {healthStatus}
                   </Text>
                 </View>
               </View>
-            </GlassCard>
-          </FadeIn>
+            </FadeIn>
 
-          {/* ════════ 3. SYSTEM SNAPSHOT ════════ */}
-          <View className="flex-row items-center gap-3 mb-6">
-            <Layers size={14} color="#fff" />
-            <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
-              Manager Panel
-            </Text>
-          </View>
-
-          <View className="flex-col gap-4 mb-12 lg:flex-row">
-            <View className="w-full lg:flex-1">
-              <GlassCard className="p-0 border overflow-hidden bg-white/[0.015] border-white/5 rounded-3xl h-36">
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/admin/users')}
-                  className="flex-col justify-between flex-1 p-6 hover:bg-white/[0.03] transition-colors"
-                >
-                  <View className="flex-row items-center justify-between">
-                    <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#00F0FF]/10 border-[#00F0FF]/20">
-                      <Users size={18} color={THEME.cyan} />
-                    </View>
-                    <ArrowUpRight size={18} color={THEME.cyan} opacity={0.5} />
+            {/* ════════ 2. DIAGNOSTICS BAR ════════ */}
+            <FadeIn delay={200}>
+              <GlassCard className="flex-col gap-4 p-5 mb-10 border md:p-6 md:flex-row md:items-center md:justify-between bg-white/[0.015] border-white/5 rounded-3xl md:rounded-[32px]">
+                <View className="flex-row items-center gap-4">
+                  <View className="items-center justify-center w-10 h-10 border rounded-xl bg-blue-500/10 border-blue-500/20">
+                    <Server size={18} color="#3B82F6" />
                   </View>
                   <View>
-                    <Text className="text-4xl font-black text-white">
-                      {telemetry.users.total}
+                    <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
+                      Ping Latency
                     </Text>
-                    <Text className="mt-1 text-[9px] font-black tracking-widest text-white/40 uppercase">
-                      Total Accounts
+                    <Text className="text-base font-bold text-white/90">
+                      {telemetry.infra.latencyMs}
                     </Text>
                   </View>
-                </TouchableOpacity>
-              </GlassCard>
-            </View>
-
-            <View className="w-full lg:flex-1">
-              <GlassCard className="flex-col justify-between p-6 bg-white/[0.015] border-white/5 rounded-3xl h-36">
-                <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#8A2BE2]/10 border-[#8A2BE2]/20">
-                  <TrendingUp size={18} color={THEME.purple} />
                 </View>
-                <View>
-                  <Text className="text-4xl font-black text-[#8A2BE2]">
-                    {telemetry.users.premium}
-                  </Text>
-                  <Text className="mt-1 text-[9px] font-black tracking-widest text-white/40 uppercase">
-                    Premium Subs
-                  </Text>
-                </View>
-              </GlassCard>
-            </View>
-
-            <View className="w-full lg:flex-1">
-              <GlassCard className="flex-col p-6 bg-white/[0.015] border-white/5 rounded-3xl min-h-[144px]">
-                <View className="flex-row items-center justify-between mb-2">
-                  <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#FF007F]/10 border-[#FF007F]/20">
-                    <AlertTriangle
-                      size={18}
-                      color={
-                        telemetry.infra.failedJobs > 0
-                          ? THEME.danger
-                          : '#64748b'
-                      }
-                    />
+                <View className="flex-row items-center gap-4">
+                  <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#32FF00]/10 border-[#32FF00]/20">
+                    <Lock size={18} color={THEME.success} />
                   </View>
-                  {telemetry.infra.failedJobs > 0 && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        LayoutAnimation.configureNext(
-                          LayoutAnimation.Presets.easeInEaseOut,
-                        );
-                        setExpandedAlerts(!expandedAlerts);
-                      }}
-                      className="px-3 py-1.5 border rounded-full bg-white/5 border-white/10 active:scale-95"
-                    >
-                      <Text className="text-[9px] font-black text-white uppercase tracking-widest">
-                        {expandedAlerts ? 'HIDE' : 'LOGS'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  <View>
+                    <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
+                      Security
+                    </Text>
+                    <Text className="text-base font-bold text-[#32FF00]">
+                      Strict-v3 SSL
+                    </Text>
+                  </View>
                 </View>
-                {expandedAlerts ? (
-                  <ScrollView
-                    nestedScrollEnabled
-                    showsVerticalScrollIndicator={false}
-                    className="max-h-[80px] mt-2"
+                <View className="flex-row items-center gap-4">
+                  <View className="items-center justify-center w-10 h-10 border rounded-xl bg-amber-500/10 border-amber-500/20">
+                    <ShieldCheck size={18} color={THEME.warning} />
+                  </View>
+                  <View>
+                    <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest">
+                      Health
+                    </Text>
+                    <Text className="text-base font-bold text-[#F59E0B]">
+                      {healthStatus}
+                    </Text>
+                  </View>
+                </View>
+              </GlassCard>
+            </FadeIn>
+
+            {/* ════════ 3. SYSTEM SNAPSHOT ════════ */}
+            <View className="flex-row items-center gap-3 mb-6">
+              <Layers size={14} color="#fff" />
+              <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
+                Manager Panel
+              </Text>
+            </View>
+
+            <View className="flex-col gap-4 mb-12 lg:flex-row">
+              <View className="w-full lg:flex-1">
+                <GlassCard className="p-0 border overflow-hidden bg-white/[0.015] border-white/5 rounded-3xl h-36">
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    delayPressIn={0}
+                    onPress={() => router.push('/admin/users')}
+                    className="flex-col justify-between flex-1 p-6 hover:bg-white/[0.03] transition-colors"
                   >
-                    {failures.map((v) => (
-                      <View key={v.id} className="py-2 border-b border-white/5">
-                        <Text
-                          className="text-[10px] font-bold text-[#FF007F]"
-                          numberOfLines={1}
-                        >
-                          {v.title || 'Unknown Asset'}
-                        </Text>
-                        <Text className="text-[8px] text-white/40 mt-1">
-                          {v.error_message || 'Pipeline Error'}
-                        </Text>
+                    <View className="flex-row items-center justify-between">
+                      <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#00F0FF]/10 border-[#00F0FF]/20">
+                        <Users size={18} color={THEME.cyan} />
                       </View>
-                    ))}
-                  </ScrollView>
-                ) : (
-                  <View className="mt-auto">
-                    <Text
-                      className={cn(
-                        'text-4xl font-black',
-                        telemetry.infra.failedJobs > 0
-                          ? 'text-[#FF007F]'
-                          : 'text-white/80',
-                      )}
-                    >
-                      {telemetry.infra.failedJobs}
+                      <ArrowUpRight
+                        size={18}
+                        color={THEME.cyan}
+                        opacity={0.5}
+                      />
+                    </View>
+                    <View>
+                      <Text className="text-4xl font-black text-white">
+                        {telemetry.users.total}
+                      </Text>
+                      <Text className="mt-1 text-[9px] font-black tracking-widest text-white/40 uppercase">
+                        Total Accounts
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </GlassCard>
+              </View>
+
+              <View className="w-full lg:flex-1">
+                <GlassCard className="flex-col justify-between p-6 bg-white/[0.015] border-white/5 rounded-3xl h-36">
+                  <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#8A2BE2]/10 border-[#8A2BE2]/20">
+                    <TrendingUp size={18} color={THEME.purple} />
+                  </View>
+                  <View>
+                    <Text className="text-4xl font-black text-[#8A2BE2]">
+                      {telemetry.users.premium}
                     </Text>
                     <Text className="mt-1 text-[9px] font-black tracking-widest text-white/40 uppercase">
-                      System Failures
+                      Premium Subs
                     </Text>
                   </View>
-                )}
-              </GlassCard>
-            </View>
-          </View>
-
-          {/* ════════ 4. SYSTEM API VAULT (ROUTER) ════════ */}
-          <View className="flex-row items-center gap-3 mb-6">
-            <KeyRound size={14} color="#fff" />
-            <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
-              API Gateway Configuration
-            </Text>
-          </View>
-
-          <GlassCard className="flex-col items-center justify-between p-6 mb-12 border gap-y-6 md:gap-y-0 md:flex-row md:p-8 bg-white/[0.015] border-white/5 rounded-3xl">
-            <View>
-              <Text className="mb-2 text-xl font-black tracking-widest text-white uppercase">
-                Secure Key Vault
-              </Text>
-              <Text className="text-xs text-white/40 max-w-[300px] leading-relaxed">
-                Manage cascading API fallbacks, view dedicated token burn
-                charts, and monitor system integrations.
-              </Text>
-              <View className="flex-row items-center gap-4 mt-4">
-                <View>
-                  <Text className="text-[9px] uppercase tracking-widest text-white/30">
-                    Active Nodes
-                  </Text>
-                  <Text className="text-sm font-black text-[#00F0FF]">
-                    {telemetry.keys.count}
-                  </Text>
-                </View>
-                <View className="w-[1px] h-6 bg-white/10" />
-                <View>
-                  <Text className="text-[9px] uppercase tracking-widest text-white/30">
-                    Vault Tokens Burned
-                  </Text>
-                  <Text className="text-sm font-black text-[#00F0FF]">
-                    {telemetry.keys.totalBurn.toLocaleString()}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => router.push('/admin/keys')}
-              className="w-full md:w-auto flex-row items-center justify-center px-8 py-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-2xl active:scale-95 transition-transform"
-            >
-              <Text className="text-xs font-black text-[#00F0FF] uppercase tracking-widest mr-3">
-                Enter Vault
-              </Text>
-              <ExternalLink size={16} color={THEME.cyan} />
-            </TouchableOpacity>
-          </GlassCard>
-
-          {/* ════════ 5. SAAS FORECASTER 2.0 ════════ */}
-          <View className="flex-row items-center gap-3 mb-6">
-            <Coins size={14} color="#facc15" />
-            <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
-              Economic Engine & Real-Time Forecaster
-            </Text>
-          </View>
-
-          <GlassCard className="p-6 md:p-8 bg-white/[0.015] border-white/5 rounded-3xl mb-12">
-            <View className="flex-col lg:flex-row">
-              {/* ─── INPUTS (Mobile Fixed) ─── */}
-              <View className="flex-1 pb-8 mb-8 border-b lg:border-b-0 lg:mb-0 lg:border-r border-white/5 lg:pr-8 lg:pb-0">
-                {/* Top Row: MAU & Price */}
-                <View className="flex-col mb-4 md:flex-row md:gap-4">
-                  <View className="w-full mb-4 md:flex-1 md:mb-0">
-                    <Text className="mb-2 text-[9px] font-black text-white/50 uppercase tracking-widest">
-                      Active Users (MAU)
-                    </Text>
-                    <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
-                      <TextInput
-                        keyboardType="numeric"
-                        value={inputs.mau}
-                        onChangeText={(v) =>
-                          setInputs((p) => ({ ...p, mau: v }))
-                        }
-                        style={strictInputStyle}
-                      />
-                    </View>
-                  </View>
-                  <View className="w-full md:flex-1">
-                    <Text className="mb-2 text-[9px] font-black text-white/50 uppercase tracking-widest">
-                      Sub Price ($)
-                    </Text>
-                    <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
-                      <TextInput
-                        keyboardType="numeric"
-                        value={inputs.subPrice}
-                        onChangeText={(v) =>
-                          setInputs((p) => ({ ...p, subPrice: v }))
-                        }
-                        style={strictInputStyle}
-                      />
-                    </View>
-                  </View>
-                </View>
-
-                {/* Bottom Row: Mins, Store %, Tax % */}
-                <View className="flex-col md:flex-row md:gap-4">
-                  <View className="w-full mb-4 md:flex-1 md:mb-0">
-                    <View className="flex-row items-center gap-1.5 mb-2">
-                      <Clock size={12} color={THEME.warning} />
-                      <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
-                        Est. Mins/User
-                      </Text>
-                    </View>
-                    <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
-                      <TextInput
-                        keyboardType="numeric"
-                        value={inputs.avgMins}
-                        onChangeText={(v) =>
-                          setInputs((p) => ({ ...p, avgMins: v }))
-                        }
-                        style={strictInputStyle}
-                      />
-                    </View>
-                  </View>
-
-                  <View className="w-full mb-4 md:flex-1 md:mb-0">
-                    <View className="flex-row items-center gap-1.5 mb-2">
-                      <Landmark size={12} color={THEME.danger} />
-                      <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
-                        Store %
-                      </Text>
-                    </View>
-                    <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
-                      <TextInput
-                        keyboardType="numeric"
-                        value={inputs.storeFee}
-                        onChangeText={(v) =>
-                          setInputs((p) => ({ ...p, storeFee: v }))
-                        }
-                        style={strictInputStyle}
-                      />
-                    </View>
-                  </View>
-
-                  <View className="w-full md:flex-1">
-                    <View className="flex-row items-center gap-1.5 mb-2">
-                      <Receipt size={12} color={THEME.danger} />
-                      <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
-                        VAT / Tax %
-                      </Text>
-                    </View>
-                    <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
-                      <TextInput
-                        keyboardType="numeric"
-                        value={inputs.taxRate}
-                        onChangeText={(v) =>
-                          setInputs((p) => ({ ...p, taxRate: v }))
-                        }
-                        style={strictInputStyle}
-                      />
-                    </View>
-                  </View>
-                </View>
+                </GlassCard>
               </View>
 
-              {/* ─── OUTPUTS (Calculations) ─── */}
-              <View className="justify-center flex-1 lg:pl-4">
-                <View className="flex-row items-end justify-between pb-6 mb-6 border-b border-white/5">
-                  <View>
-                    <Text className="mb-1 text-[10px] font-black tracking-widest text-white/40 uppercase">
-                      Gross MRR
-                    </Text>
-                    <Text className="text-4xl font-black tracking-tighter text-white">
-                      {formatter.format(saasFinancials.gross)}
-                    </Text>
+              <View className="w-full lg:flex-1">
+                <GlassCard className="flex-col p-6 bg-white/[0.015] border-white/5 rounded-3xl min-h-[144px]">
+                  <View className="flex-row items-center justify-between mb-2">
+                    <View className="items-center justify-center w-10 h-10 border rounded-xl bg-[#FF007F]/10 border-[#FF007F]/20">
+                      <AlertTriangle
+                        size={18}
+                        color={
+                          telemetry.infra.failedJobs > 0
+                            ? THEME.danger
+                            : '#64748b'
+                        }
+                      />
+                    </View>
+                    {telemetry.infra.failedJobs > 0 && (
+                      <TouchableOpacity
+                        delayPressIn={0}
+                        onPress={() => {
+                          LayoutAnimation.configureNext(
+                            LayoutAnimation.Presets.easeInEaseOut,
+                          );
+                          setExpandedAlerts(!expandedAlerts);
+                        }}
+                        className="px-3 py-1.5 border rounded-full bg-white/5 border-white/10 active:scale-95"
+                      >
+                        <Text className="text-[9px] font-black text-white uppercase tracking-widest">
+                          {expandedAlerts ? 'HIDE' : 'LOGS'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                  <View className="items-end gap-1">
-                    <Text className="text-[9px] font-mono text-[#FF007F]">
-                      - {formatter.format(saasFinancials.storeCut)} (Store)
-                    </Text>
-                    <Text className="text-[9px] font-mono text-[#FF007F]">
-                      - {formatter.format(saasFinancials.taxCut)} (Tax)
-                    </Text>
-                    <Text className="text-[9px] font-mono text-[#8A2BE2]">
-                      - {formatter.format(saasFinancials.apiCost)} (API)
-                    </Text>
-                  </View>
-                </View>
-
-                <View className="flex-row items-end justify-between">
-                  <View>
-                    <Text className="mb-1 text-[10px] font-black text-[#32FF00] uppercase tracking-widest">
-                      Net Profit Forecast
-                    </Text>
-                    <Text className="text-3xl font-black tracking-tighter text-[#32FF00]">
-                      {formatter.format(saasFinancials.net)}
-                    </Text>
-                  </View>
-                  <View className="items-end">
-                    <Text className="mb-1 text-[9px] font-black text-white/40 uppercase tracking-widest">
-                      Margin
-                    </Text>
-                    <Text className="text-xl font-black text-white">
-                      {saasFinancials.margin.toFixed(1)}%
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-          </GlassCard>
-
-          {/* ════════ 6. IDENTITY REGISTRY ════════ */}
-          <View className="flex-row items-center gap-3 mb-6">
-            <Users size={14} color="#fff" />
-            <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
-              USERS PREVIEW
-            </Text>
-          </View>
-
-          <GlassCard className="p-0 border bg-white/[0.015] border-white/5 rounded-3xl mb-12 overflow-hidden">
-            <View className="flex-row items-center justify-between px-6 py-4 bg-white/[0.02] border-b border-white/5">
-              <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/3">
-                Profile
-              </Text>
-              <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/4">
-                Role
-              </Text>
-              <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/4">
-                API Config
-              </Text>
-              <View className="w-8" />
-            </View>
-
-            {registryPreview.length === 0 ? (
-              <ActivityIndicator color={THEME.cyan} className="py-12" />
-            ) : (
-              registryPreview.map((profile, idx) => (
-                <TouchableOpacity
-                  key={profile.id}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/admin/users')}
-                  className={cn(
-                    'flex-row items-center px-6 py-5 hover:bg-white/[0.02] transition-colors',
-                    idx !== registryPreview.length - 1 &&
-                      'border-b border-white/5',
-                  )}
-                >
-                  <View className="w-1/3 pr-4">
-                    <Text
-                      className="text-xs font-bold text-white/90"
-                      numberOfLines={1}
+                  {expandedAlerts ? (
+                    <ScrollView
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                      className="max-h-[80px] mt-2"
                     >
-                      {profile.full_name || 'Anonymous'}
-                    </Text>
-                    <Text
-                      className="text-[9px] text-white/40 font-mono mt-0.5"
-                      numberOfLines={1}
-                    >
-                      {profile.email}
-                    </Text>
-                  </View>
-                  <View className="w-1/4">
-                    <View
-                      className={cn(
-                        'px-2 py-1 rounded border self-start',
-                        profile.role === 'admin'
-                          ? 'bg-[#8A2BE2]/10 border-[#8A2BE2]/30'
-                          : profile.role === 'premium'
-                            ? 'bg-[#F59E0B]/10 border-[#F59E0B]/30'
-                            : 'bg-white/5 border-white/10',
-                      )}
-                    >
+                      {failures.map((v) => (
+                        <View
+                          key={v.id}
+                          className="py-2 border-b border-white/5"
+                        >
+                          <Text
+                            className="text-[10px] font-bold text-[#FF007F]"
+                            numberOfLines={1}
+                          >
+                            {v.title || 'Unknown Asset'}
+                          </Text>
+                          <Text className="text-[8px] text-white/40 mt-1">
+                            {v.error_message || 'Pipeline Error'}
+                          </Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  ) : (
+                    <View className="mt-auto">
                       <Text
                         className={cn(
-                          'text-[8px] font-black uppercase tracking-widest',
-                          profile.role === 'admin'
-                            ? 'text-[#8A2BE2]'
-                            : profile.role === 'premium'
-                              ? 'text-[#F59E0B]'
-                              : 'text-white/50',
+                          'text-4xl font-black',
+                          telemetry.infra.failedJobs > 0
+                            ? 'text-[#FF007F]'
+                            : 'text-white/80',
                         )}
                       >
-                        {profile.role || 'MEMBER'}
+                        {telemetry.infra.failedJobs}
+                      </Text>
+                      <Text className="mt-1 text-[9px] font-black tracking-widest text-white/40 uppercase">
+                        System Failures
                       </Text>
                     </View>
-                  </View>
-                  <View className="flex-row items-center w-1/4 gap-2">
-                    <KeyRound
-                      size={10}
-                      color={
-                        profile.custom_api_key ? THEME.success : THEME.cyan
-                      }
-                      opacity={0.6}
-                    />
-                    <Text
-                      className={cn(
-                        'font-mono text-[9px] font-bold',
-                        profile.custom_api_key
-                          ? 'text-[#32FF00]'
-                          : 'text-[#00F0FF]',
-                      )}
-                    >
-                      {profile.custom_api_key ? '[BYO-KEY]' : '[SYSTEM]'}
-                    </Text>
-                  </View>
-                  <View className="items-end w-8">
-                    <ChevronRight size={14} color="#ffffff30" />
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
-          </GlassCard>
-
-          {/* ════════ 7. REAL-TIME EVENT STREAM ════════ */}
-          <View className="flex-row items-center gap-3 mb-6">
-            <History size={14} color="#fff" />
-            <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
-              Real-Time Engine Stream
-            </Text>
-          </View>
-
-          <GlassCard className="p-0 border bg-white/[0.015] border-white/5 rounded-3xl overflow-hidden">
-            {liveStream.map((log, idx) => (
-              <Animated.View
-                key={log.id}
-                entering={FadeInDown.delay(idx * 50)}
-                className={cn(
-                  'flex-row items-start p-6',
-                  idx !== liveStream.length - 1 && 'border-b border-white/5',
-                )}
-              >
-                <View className="items-center justify-center w-10 h-10 mr-5 border rounded-xl bg-white/[0.03] border-white/10">
-                  {log.action.includes('ai') ? (
-                    <Cpu size={16} color={THEME.purple} />
-                  ) : (
-                    <Zap size={16} color={THEME.cyan} />
                   )}
-                </View>
-                <View className="flex-1">
-                  <View className="flex-row items-center justify-between">
-                    <Text className="text-sm font-black tracking-wide capitalize text-white/90">
-                      {log.action.replace(/_/g, ' ')}
+                </GlassCard>
+              </View>
+            </View>
+
+            {/* ════════ 4. SYSTEM API VAULT (ROUTER) ════════ */}
+            <View className="flex-row items-center gap-3 mb-6">
+              <KeyRound size={14} color="#fff" />
+              <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
+                API Gateway Configuration
+              </Text>
+            </View>
+
+            <GlassCard className="flex-col items-center justify-between p-6 mb-12 border gap-y-6 md:gap-y-0 md:flex-row md:p-8 bg-white/[0.015] border-white/5 rounded-3xl">
+              <View>
+                <Text className="mb-2 text-xl font-black tracking-widest text-white uppercase">
+                  Secure Key Vault
+                </Text>
+                <Text className="text-xs text-white/40 max-w-[300px] leading-relaxed">
+                  Manage cascading API fallbacks, view dedicated token burn
+                  charts, and monitor system integrations.
+                </Text>
+                <View className="flex-row items-center gap-4 mt-4">
+                  <View>
+                    <Text className="text-[9px] uppercase tracking-widest text-white/30">
+                      Active Nodes
                     </Text>
-                    <Text className="text-[9px] font-mono text-white/30">
-                      {new Date(log.created_at).toLocaleTimeString()}
+                    <Text className="text-sm font-black text-[#00F0FF]">
+                      {telemetry.keys.count}
                     </Text>
                   </View>
-                  <View className="flex-row flex-wrap items-center gap-3 mt-3">
-                    <View className="px-2 py-1 border rounded bg-[#00F0FF]/10 border-[#00F0FF]/20">
-                      <Text className="text-[9px] font-mono font-bold text-[#00F0FF]">
-                        {log.actual_tokens_burned} TOKENS
+                  <View className="w-[1px] h-6 bg-white/10" />
+                  <View>
+                    <Text className="text-[9px] uppercase tracking-widest text-white/30">
+                      Vault Tokens Burned
+                    </Text>
+                    <Text className="text-sm font-black text-[#00F0FF]">
+                      {telemetry.keys.totalBurn.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => router.push('/admin/keys')}
+                delayPressIn={0}
+                className="w-full md:w-auto flex-row items-center justify-center px-8 py-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-2xl active:scale-95 transition-transform"
+              >
+                <Text className="text-xs font-black text-[#00F0FF] uppercase tracking-widest mr-3">
+                  Enter Vault
+                </Text>
+                <ExternalLink size={16} color={THEME.cyan} />
+              </TouchableOpacity>
+            </GlassCard>
+
+            {/* ════════ 5. SAAS FORECASTER 2.0 ════════ */}
+            <View className="flex-row items-center gap-3 mb-6">
+              <Coins size={14} color="#facc15" />
+              <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
+                Economic Engine & Real-Time Forecaster
+              </Text>
+            </View>
+
+            <GlassCard className="p-6 md:p-8 bg-white/[0.015] border-white/5 rounded-3xl mb-12">
+              <View className="flex-col lg:flex-row">
+                {/* ─── INPUTS ─── */}
+                <View className="flex-1 pb-8 mb-8 border-b lg:border-b-0 lg:mb-0 lg:border-r border-white/5 lg:pr-8 lg:pb-0">
+                  <View className="flex-col mb-4 md:flex-row md:gap-4">
+                    <View className="w-full mb-4 md:flex-1 md:mb-0">
+                      <Text className="mb-2 text-[9px] font-black text-white/50 uppercase tracking-widest">
+                        Active Users (MAU)
                       </Text>
+                      <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
+                        <TextInput
+                          keyboardType="numeric"
+                          value={inputs.mau}
+                          onChangeText={(v) =>
+                            setInputs((p) => ({ ...p, mau: v }))
+                          }
+                          style={strictInputStyle}
+                        />
+                      </View>
                     </View>
-                    {log.ai_model_name && (
-                      <View className="px-2 py-1 border rounded bg-[#8A2BE2]/10 border-[#8A2BE2]/20">
-                        <Text className="text-[8px] font-black text-[#8A2BE2] uppercase tracking-wider">
-                          {log.ai_model_name}
+                    <View className="w-full md:flex-1">
+                      <Text className="mb-2 text-[9px] font-black text-white/50 uppercase tracking-widest">
+                        Sub Price ($)
+                      </Text>
+                      <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
+                        <TextInput
+                          keyboardType="numeric"
+                          value={inputs.subPrice}
+                          onChangeText={(v) =>
+                            setInputs((p) => ({ ...p, subPrice: v }))
+                          }
+                          style={strictInputStyle}
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  <View className="flex-col md:flex-row md:gap-4">
+                    <View className="w-full mb-4 md:flex-1 md:mb-0">
+                      <View className="flex-row items-center gap-1.5 mb-2">
+                        <Clock size={12} color={THEME.warning} />
+                        <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
+                          Est. Mins/User
                         </Text>
                       </View>
-                    )}
-                    <Text className="text-[9px] font-black text-white/30 uppercase tracking-widest">
-                      USR: {log.user_id.slice(0, 8)}
-                    </Text>
+                      <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
+                        <TextInput
+                          keyboardType="numeric"
+                          value={inputs.avgMins}
+                          onChangeText={(v) =>
+                            setInputs((p) => ({ ...p, avgMins: v }))
+                          }
+                          style={strictInputStyle}
+                        />
+                      </View>
+                    </View>
+                    <View className="w-full mb-4 md:flex-1 md:mb-0">
+                      <View className="flex-row items-center gap-1.5 mb-2">
+                        <Landmark size={12} color={THEME.danger} />
+                        <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
+                          Store %
+                        </Text>
+                      </View>
+                      <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
+                        <TextInput
+                          keyboardType="numeric"
+                          value={inputs.storeFee}
+                          onChangeText={(v) =>
+                            setInputs((p) => ({ ...p, storeFee: v }))
+                          }
+                          style={strictInputStyle}
+                        />
+                      </View>
+                    </View>
+                    <View className="w-full md:flex-1">
+                      <View className="flex-row items-center gap-1.5 mb-2">
+                        <Receipt size={12} color={THEME.danger} />
+                        <Text className="text-[9px] font-black text-white/80 uppercase tracking-widest">
+                          VAT / Tax %
+                        </Text>
+                      </View>
+                      <View className="justify-center h-12 px-4 border bg-black/40 border-white/10 rounded-xl">
+                        <TextInput
+                          keyboardType="numeric"
+                          value={inputs.taxRate}
+                          onChangeText={(v) =>
+                            setInputs((p) => ({ ...p, taxRate: v }))
+                          }
+                          style={strictInputStyle}
+                        />
+                      </View>
+                    </View>
                   </View>
                 </View>
-              </Animated.View>
-            ))}
-          </GlassCard>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+                {/* ─── OUTPUTS ─── */}
+                <View className="justify-center flex-1 lg:pl-4">
+                  <View className="flex-row items-end justify-between pb-6 mb-6 border-b border-white/5">
+                    <View>
+                      <Text className="mb-1 text-[10px] font-black tracking-widest text-white/40 uppercase">
+                        Gross MRR
+                      </Text>
+                      <Text className="text-4xl font-black tracking-tighter text-white">
+                        {formatter.format(saasFinancials.gross)}
+                      </Text>
+                    </View>
+                    <View className="items-end gap-1">
+                      <Text className="text-[9px] font-mono text-[#FF007F]">
+                        - {formatter.format(saasFinancials.storeCut)} (Store)
+                      </Text>
+                      <Text className="text-[9px] font-mono text-[#FF007F]">
+                        - {formatter.format(saasFinancials.taxCut)} (Tax)
+                      </Text>
+                      <Text className="text-[9px] font-mono text-[#8A2BE2]">
+                        - {formatter.format(saasFinancials.apiCost)} (API)
+                      </Text>
+                    </View>
+                  </View>
+                  <View className="flex-row items-end justify-between">
+                    <View>
+                      <Text className="mb-1 text-[10px] font-black text-[#32FF00] uppercase tracking-widest">
+                        Net Profit Forecast
+                      </Text>
+                      <Text className="text-3xl font-black tracking-tighter text-[#32FF00]">
+                        {formatter.format(saasFinancials.net)}
+                      </Text>
+                    </View>
+                    <View className="items-end">
+                      <Text className="mb-1 text-[9px] font-black text-white/40 uppercase tracking-widest">
+                        Margin
+                      </Text>
+                      <Text className="text-xl font-black text-white">
+                        {saasFinancials.margin.toFixed(1)}%
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </GlassCard>
+
+            {/* ════════ 6. IDENTITY REGISTRY ════════ */}
+            <View className="flex-row items-center gap-3 mb-6">
+              <Users size={14} color="#fff" />
+              <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
+                USERS PREVIEW
+              </Text>
+            </View>
+
+            <GlassCard className="p-0 border bg-white/[0.015] border-white/5 rounded-3xl mb-12 overflow-hidden">
+              <View className="hidden md:flex flex-row items-center justify-between px-6 py-4 bg-white/[0.02] border-b border-white/5">
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/3 pr-4">
+                  Profile
+                </Text>
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/4">
+                  Role
+                </Text>
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/4">
+                  API Config
+                </Text>
+                <View className="w-8" />
+              </View>
+
+              {registryPreview.length === 0 ? (
+                <ActivityIndicator color={THEME.cyan} className="py-12" />
+              ) : (
+                registryPreview.map((profile, idx) => (
+                  <TouchableOpacity
+                    key={profile.id}
+                    activeOpacity={0.7}
+                    delayPressIn={0} // CRITICAL FIX: Instant tap registration
+                    onPress={() => router.push('/admin/users')}
+                    className={cn(
+                      'flex-col md:flex-row md:items-center px-6 py-5 hover:bg-white/[0.02] transition-colors',
+                      idx !== registryPreview.length - 1 &&
+                        'border-b border-white/5',
+                    )}
+                  >
+                    <View className="w-full mb-3 md:w-1/3 md:pr-4 md:mb-0">
+                      <Text
+                        className="text-sm font-bold md:text-xs text-white/90"
+                        numberOfLines={1}
+                      >
+                        {profile.full_name || 'Anonymous'}
+                      </Text>
+                      <Text
+                        className="text-[10px] md:text-[9px] text-white/40 font-mono mt-1 md:mt-0.5"
+                        numberOfLines={1}
+                      >
+                        {profile.email}
+                      </Text>
+                    </View>
+                    <View className="flex-row w-full mb-3 md:w-1/4 md:mb-0">
+                      <View
+                        className={cn(
+                          'px-2 py-1 rounded border',
+                          profile.role === 'admin'
+                            ? 'bg-[#8A2BE2]/10 border-[#8A2BE2]/30'
+                            : profile.role === 'premium'
+                              ? 'bg-[#F59E0B]/10 border-[#F59E0B]/30'
+                              : 'bg-white/5 border-white/10',
+                        )}
+                      >
+                        <Text
+                          className={cn(
+                            'text-[8px] font-black uppercase tracking-widest',
+                            profile.role === 'admin'
+                              ? 'text-[#8A2BE2]'
+                              : profile.role === 'premium'
+                                ? 'text-[#F59E0B]'
+                                : 'text-white/50',
+                          )}
+                        >
+                          {profile.role || 'MEMBER'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="flex-row items-center w-full gap-2 mb-2 md:w-1/4 md:mb-0">
+                      {/* FIX: Strict JS Ternary for size prop */}
+                      <KeyRound
+                        size={isMobile ? 12 : 10}
+                        color={
+                          profile.custom_api_key ? THEME.success : THEME.cyan
+                        }
+                        opacity={0.6}
+                      />
+                      <Text
+                        className={cn(
+                          'font-mono text-[10px] md:text-[9px] font-bold',
+                          profile.custom_api_key
+                            ? 'text-[#32FF00]'
+                            : 'text-[#00F0FF]',
+                        )}
+                      >
+                        {profile.custom_api_key ? '[BYO-KEY]' : '[SYSTEM]'}
+                      </Text>
+                    </View>
+                    <View className="items-end hidden w-8 md:flex">
+                      <ChevronRight size={14} color="#ffffff30" />
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </GlassCard>
+
+            {/* ════════ 7. REAL-TIME ENGINE STREAM (PERFECTED RESPONSIVE TABLE) ════════ */}
+            <View className="flex-row items-center gap-3 mb-6">
+              <History size={14} color="#fff" />
+              <Text className="text-[10px] md:text-[11px] font-black text-white tracking-[3px] uppercase">
+                Real-Time Engine Stream
+              </Text>
+            </View>
+
+            <GlassCard className="p-0 border bg-white/[0.015] border-white/5 rounded-3xl overflow-hidden">
+              {/* Desktop Header Row (Strict Grid Match) */}
+              <View className="hidden md:flex flex-row items-center px-6 py-4 bg-white/[0.02] border-b border-white/5">
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-1/3 pr-4">
+                  Event Type
+                </Text>
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest flex-1">
+                  Metadata
+                </Text>
+                <Text className="text-[9px] font-black text-white/40 uppercase tracking-widest w-24 text-right">
+                  Timestamp
+                </Text>
+              </View>
+
+              {liveStream.length === 0 ? (
+                <ActivityIndicator color={THEME.cyan} className="py-12" />
+              ) : (
+                liveStream.map((log, idx) => (
+                  <Animated.View
+                    key={log.id}
+                    entering={FadeInDown.delay(idx * 50)}
+                    className={cn(
+                      'flex-col md:flex-row md:items-center px-6 py-5 hover:bg-white/[0.03] transition-colors',
+                      idx !== liveStream.length - 1 &&
+                        'border-b border-white/5',
+                    )}
+                  >
+                    {/* Event Type (Desktop: w-1/3, Mobile: Full width header) */}
+                    <View className="flex-row items-center justify-between w-full pr-0 mb-3 md:w-1/3 md:pr-4 md:mb-0">
+                      <View className="flex-row items-center flex-1 pr-2">
+                        <View className="items-center justify-center w-8 h-8 mr-3 border rounded-lg bg-white/[0.03] border-white/10 shrink-0">
+                          {log.action.includes('ai') ? (
+                            <Cpu size={14} color={THEME.purple} />
+                          ) : (
+                            <Zap size={14} color={THEME.cyan} />
+                          )}
+                        </View>
+                        <Text
+                          className="text-xs font-bold tracking-wide capitalize md:text-sm text-white/90 shrink"
+                          numberOfLines={1}
+                        >
+                          {log.action.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      {/* Mobile Timestamp */}
+                      <Text className="md:hidden text-[9px] font-mono text-white/40 shrink-0 ml-2">
+                        {new Date(log.created_at).toLocaleTimeString()}
+                      </Text>
+                    </View>
+
+                    {/* Metadata Tags (Desktop: flex-1, Mobile: Full width wrap) */}
+                    <View className="flex-row flex-wrap items-center w-full gap-2 md:flex-1">
+                      <View className="px-2 py-1 border rounded bg-[#00F0FF]/10 border-[#00F0FF]/20">
+                        <Text className="text-[8px] md:text-[9px] font-mono font-bold text-[#00F0FF]">
+                          {log.actual_tokens_burned || 0} TOKENS
+                        </Text>
+                      </View>
+                      {log.ai_model_name && (
+                        <View className="px-2 py-1 border rounded bg-[#8A2BE2]/10 border-[#8A2BE2]/20">
+                          <Text className="text-[8px] font-black text-[#8A2BE2] uppercase tracking-wider">
+                            {log.ai_model_name}
+                          </Text>
+                        </View>
+                      )}
+                      <Text className="text-[8px] md:text-[9px] font-black text-white/30 uppercase tracking-widest mt-1 md:mt-0">
+                        USR: {log.user_id.slice(0, 8)}
+                      </Text>
+                    </View>
+
+                    {/* Desktop Timestamp (Desktop: w-24) */}
+                    <View className="items-end justify-end hidden w-24 pl-4 md:flex">
+                      <Text className="text-[10px] font-mono text-white/40 text-right">
+                        {new Date(log.created_at).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </Text>
+                    </View>
+                  </Animated.View>
+                ))
+              )}
+            </GlassCard>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }

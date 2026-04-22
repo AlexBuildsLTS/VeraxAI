@@ -1,35 +1,60 @@
 /**
  * components/ui/ProfileDropdown.tsx
- * VeraxAI — Enterprise User Context Menu
+ * VeraxAI — User Profile Menu (dropdown)
  * ══════════════════════════════════════════════════════════════════════════════
- * MODULE OVERVIEW:
- * - AVATAR TRIGGER: Dynamic initials fallback with platform-safe shadow glow.
- * - DROPDOWN MENU: WebkitBackdropFilter blur applied for Web, strict elevation for APK.
- * - NAVIGATION: Reordered to Settings -> Support -> Admin -> Sign Out.
- * - ICONOGRAPHY: Lucide icons placed strictly BEFORE text for optimal UX scanning.
+ * ARCHITECTURE 
+ * REANIMATED PHYSICS: Menu enters with a fluid, spring-physics drop-down animation
+ * Native scrollbar hiding for Web, maintaining fluid wheel/touch scroll
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Platform, Image } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Platform,
+  Image,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useAuthStore } from '../../store/useAuthStore';
 import {
   DatabaseZap,
-  ShieldPlus,
-  Component,
-  ShieldAlert,
   ShieldCheck,
-  ScanEye,
+  Component,
   LogOut,
+  LucideIcon,
+  ShieldPlus,
+  Database,
+  DatabaseBackup,
+  Wrench,
+  Info,
+  Spline,
+  Shield,
 } from 'lucide-react-native';
+
+// ─── STRICT THEME CONSTANTS ──────────────────────────────────────────────────
+const THEME = {
+  obsidian: '#050B14',
+  admin: '#8A2BE2', // Neon Purple
+  support: '#00F0FF', // Cyan
+  premium: '#F59E0B', // Amber
+  member: '#3B82F6', // Electric Neon Blue
+  danger: '#FF3366', // Rose/Pink
+};
+
+const IS_WEB = Platform.OS === 'web';
 
 // ─── UTILITIES ───────────────────────────────────────────────────────────────
 
-/** Extracts up to 2 initials from a display name. */
-const getInitials = (name?: string): string => {
+/** Extracts 2 intials from username */
+const getInitials = (name?: string | null): string => {
   if (!name) return 'U';
   return name
+    .trim()
     .split(' ')
     .map((n) => n[0])
     .join('')
@@ -37,310 +62,311 @@ const getInitials = (name?: string): string => {
     .toUpperCase();
 };
 
-/** Returns Liquid Neon color tokens for each user role. */
-const getRoleConfig = (role?: string) => {
+/** Returns Liquid Neon color tokens strictly mapped to User Roles. */
+const getRoleConfig = (role?: string | null) => {
   switch (role?.toLowerCase()) {
     case 'admin':
       return {
+        color: THEME.admin,
+        bg: 'rgba(138,43,226,0.15)',
         label: 'ADMIN',
-        bg: 'rgba(255,51,102,0.15)',
-        text: '#fefefe', // Inherited brand color for Admin text
-        border: 'rgba(133, 4, 36,0.3)',
-        shadow: '#30010d',
       };
     case 'support':
       return {
+        color: THEME.support,
+        bg: 'rgba(0,240,255,0.15)',
         label: 'SUPPORT',
-        bg: 'rgba(59, 21, 140,0.35)',
-        text: '#01754d',
-        border: 'rgba(59, 21, 140,0.33)',
-        shadow: '#260026',
       };
     case 'premium':
       return {
+        color: THEME.premium,
+        bg: 'rgba(245,158,11,0.15)',
         label: 'PREMIUM',
-        bg: 'rgba(255,170,0,0.15)',
-        text: '#FFD700',
-        border: 'rgba(255,170,0,0.3)',
-        shadow: '#FFD700',
       };
+    case 'member':
     default:
       return {
+        color: THEME.member,
+        bg: 'rgba(59,130,246,0.15)',
         label: 'MEMBER',
-        bg: 'rgba(0,240,255,0.15)',
-        text: '#00F0FF',
-        border: 'rgba(0,240,255,0.3)',
-        shadow: '#00F0FF',
       };
   }
 };
 
-// ─── COMPONENT ───────────────────────────────────────────────────────────────
+// ─── REUSABLE SUB-COMPONENTS ─────────────────────────────────────────────────
+
+interface DropdownItemProps {
+  icon: LucideIcon;
+  label: string;
+  color?: string;
+  bgColor?: string;
+  onPress: () => void;
+  isDanger?: boolean;
+}
+
+/**
+ * Ensures consistent padding, typography, and touch physics across all options.
+ */
+const DropdownItem = React.memo(
+  ({
+    icon: Icon,
+    label,
+    color = '#00F0FF',
+    bgColor,
+    onPress,
+    isDanger,
+  }: DropdownItemProps) => (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      delayPressIn={0} // CRITICAL: 0ms latency for Android APK
+      className="flex-row items-center p-3.5 mb-1 rounded-xl transition-colors hover:bg-white/5"
+      style={bgColor ? { backgroundColor: bgColor } : {}}
+    >
+      <Icon
+        size={16}
+        color={isDanger ? THEME.danger : color}
+        style={{ marginRight: 14 }}
+      />
+      <Text
+        style={{
+          color: isDanger ? THEME.danger : '#fefefe',
+          fontSize: 11,
+          fontWeight: '900',
+          letterSpacing: 1.5,
+        }}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  ),
+);
+DropdownItem.displayName = 'DropdownItem';
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
 export const ProfileDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const { profile, signOut } = useAuthStore();
   const router = useRouter();
-  const { user, profile, signOut } = useAuthStore();
 
-  const fullName =
-    user?.user_metadata?.full_name || profile?.full_name || 'Operator';
-  const email = user?.email || '';
-  const avatarUrl =
-    user?.user_metadata?.avatar_url || profile?.avatar_url || null;
-  const userRole = profile?.role || 'member';
-  const roleConfig = getRoleConfig(userRole);
-
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     setIsOpen(false);
     await signOut();
     router.replace('/(auth)/sign-in');
-  };
+  }, [signOut, router]);
 
-  const handleNavigate = (path: string) => {
-    setIsOpen(false);
-    // Cast to never to strictly bypass dynamic route linting without using 'any'
-    router.push(path as never);
-  };
+  const handleNavigation = useCallback(
+    (path: any) => {
+      setIsOpen(false);
+      router.push(path);
+    },
+    [router],
+  );
+
+  const roleConfig = getRoleConfig(profile?.role);
+  const initials = getInitials(profile?.full_name || profile?.email);
 
   return (
-    <View
-      style={{ position: 'relative', alignItems: 'flex-end', zIndex: 9999 }}
-    >
+    <View style={{ zIndex: 1000 }}>
       {/* ── AVATAR TRIGGER BUTTON ── */}
       <TouchableOpacity
         onPress={() => setIsOpen(!isOpen)}
         activeOpacity={0.8}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        className="w-10 h-10 rounded-full bg-[#010127e1] border border-white/60 items-center justify-center"
+        delayPressIn={0}
         style={{
-          // Safely apply web-only cursor
-          ...(Platform.OS === 'web' ? { cursor: 'pointer' as never } : {}),
-          shadowColor: roleConfig.shadow,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.08,
-          shadowRadius: 10,
-          elevation: 5,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: THEME.obsidian,
+          borderWidth: 2,
+          borderColor: roleConfig.color,
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          ...(IS_WEB
+            ? ({ boxShadow: `0 0 15px ${roleConfig.color}60` } as any)
+            : {
+                shadowColor: roleConfig.color,
+                shadowOpacity: 0.6,
+                shadowRadius: 12,
+              }),
         }}
       >
-        {avatarUrl ? (
+        {profile?.avatar_url ? (
           <Image
-            source={{ uri: avatarUrl }}
-            style={{ width: '100%', height: '100%', borderRadius: 45 }}
-            resizeMode="cover"
+            source={{ uri: profile.avatar_url }}
+            style={{ width: '100%', height: '100%' }}
           />
         ) : (
           <Text
-            style={{
-              color: roleConfig.text,
-              fontFamily: Platform.OS === 'web' ? 'monospace' : 'Menlo',
-              fontSize: 16,
-              fontWeight: '900',
-            }}
+            style={{ color: roleConfig.color, fontSize: 16, fontWeight: '900' }}
           >
-            {getInitials(fullName)}
+            {initials}
           </Text>
         )}
       </TouchableOpacity>
 
-      {/* ── FLOATING DROPDOWN MENU ── */}
+      {/* ── DROPDOWN MENU (Animated) ── */}
       {isOpen && (
         <>
-          {/* Invisible backdrop to catch outside taps and close menu */}
+          {/* Invisible Overlay: Closes dropdown when tapping outside */}
           <TouchableOpacity
-            style={{ position: 'fixed' as never, inset: 0, zIndex: 9998 }}
+            style={StyleSheet.absoluteFill}
+            className="fixed inset-0 z-[999]"
             onPress={() => setIsOpen(false)}
             activeOpacity={1}
+            delayPressIn={0}
           />
 
-          <View
-            className="absolute top-14 right-0 w-60 rounded-2xl bg-[#0A0D14]/80 border border-blue/20 overflow-hidden"
+          <Animated.View
+            entering={FadeInDown.duration(400).springify()}
             style={{
-              zIndex: 9999,
-              ...(Platform.OS === 'web'
-                ? { WebkitBackdropFilter: 'blur(20px) saturate(180%)' as never }
-                : {}),
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: 1,
-              shadowRadius: 20,
-              elevation: 25,
+              position: 'absolute',
+              top: 56,
+              right: 0,
+              width: 260,
+              backgroundColor: 'rgba(5, 11, 20, 0.95)',
+              borderRadius: 24,
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.08)',
+              zIndex: 1000,
+              padding: 16,
+              ...(IS_WEB
+                ? ({
+                    boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
+                  } as any)
+                : {
+                    shadowColor: '#000',
+                    shadowOpacity: 0.8,
+                    shadowRadius: 20,
+                    elevation: 15,
+                  }),
             }}
           >
-            {/* 1. USER IDENTITY HEADER */}
-            <View
-              style={{
-                padding: 12,
-                borderBottomWidth: 1,
-                borderBottomColor: 'rgba(255,255,255,0.02)',
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    color: '#fff',
-                    fontWeight: '900',
-                    fontSize: 12,
-                    flex: 1,
-                  }}
-                  numberOfLines={1}
-                >
-                  {fullName}
-                </Text>
-                {/* Dynamic Role Badge */}
-                <View
-                  style={{
-                    backgroundColor: roleConfig.bg,
-                    borderColor: roleConfig.border,
-                    borderWidth: 1,
-                    paddingHorizontal: 6,
-                    paddingVertical: 3,
-                    borderRadius: 6,
-                    marginLeft: 8,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: roleConfig.text,
-                      fontSize: 10,
-                      fontWeight: '900',
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {roleConfig.label}
-                  </Text>
-                </View>
-              </View>
+            {/* Header: User Info & Explicit Badge */}
+            <View style={{ marginBottom: 16, paddingHorizontal: 4 }}>
               <Text
-                style={{ color: 'rgba(117, 180, 250,0.9)', fontSize: 13 }}
+                style={{
+                  color: '#ffffff',
+                  fontSize: 16,
+                  fontWeight: '900',
+                  marginBottom: 4,
+                }}
                 numberOfLines={1}
               >
-                {email}
+                {profile?.full_name || 'Anonymous User'}
               </Text>
-            </View>
-
-            {/* 2. NAVIGATION ACTIONS LIST */}
-            <View style={{ padding: 10, gap: 4 }}>
-              {/* Settings Action */}
-              <TouchableOpacity
-                onPress={() => handleNavigate('/settings')}
-                activeOpacity={0.7}
-                className="flex-row items-center p-3 transition-colors rounded-xl"
-                style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
+              <Text
+                style={{
+                  color: 'rgba(255,255,255,0.4)',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  marginBottom: 10,
+                }}
+                numberOfLines={1}
               >
-                <ScanEye
-                  size={16}
-                  color="rgba(2, 207, 128,0.8)"
-                  style={{ marginRight: 12 }}
-                />
-                <Text
-                  style={{
-                    color: 'rgba(254, 254, 254,0.8)',
-                    fontSize: 12,
-                    fontWeight: '700',
-                    letterSpacing: 1,
-                  }}
-                >
-                  SETTINGS
-                </Text>
-              </TouchableOpacity>
-
-              {/* Support Action */}
-              <TouchableOpacity
-                onPress={() => handleNavigate('/settings/support')}
-                activeOpacity={0.7}
-                className="flex-row items-center p-3 transition-colors rounded-xl"
-                style={{ backgroundColor: 'transparent' }}
-              >
-                <ShieldPlus
-                  size={16}
-                  color="rgba(2, 146, 207,0.8)"
-                  style={{ marginRight: 12 }}
-                />
-                <Text
-                  style={{
-                    color: 'rgba(254, 254, 254,0.8)',
-                    fontSize: 12,
-                    fontWeight: '700',
-                    letterSpacing: 1,
-                  }}
-                >
-                  SUPPORT
-                </Text>
-              </TouchableOpacity>
+                {profile?.email}
+              </Text>
 
               <View
                 style={{
-                  height: 1,
-                  backgroundColor: 'rgba(255,255,255,0.05)',
-                  marginVertical: 4,
+                  alignSelf: 'flex-start',
+                  backgroundColor: roleConfig.bg,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: roleConfig.color + '50',
                 }}
+              >
+                <Text
+                  style={{
+                    color: roleConfig.color,
+                    fontSize: 9,
+                    fontWeight: '900',
+                    letterSpacing: 1.5,
+                  }}
+                >
+                  {roleConfig.label}
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={{
+                height: 1,
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                marginBottom: 12,
+              }}
+            />
+
+            {/* Scrollable Actions */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={styles.hiddenScrollbar}
+              keyboardShouldPersistTaps="always"
+            >
+              <DropdownItem
+                icon={DatabaseBackup}
+                label="SETTINGS"
+                onPress={() => handleNavigation('/settings')}
               />
 
-              {/* Admin Action (Conditional) */}
-              {userRole === 'admin' && (
+              <DropdownItem
+                icon={ShieldPlus}
+                label="SUPPORT"
+                onPress={() => handleNavigation('/settings/support')}
+              />
+
+              {profile?.role === 'admin' && (
                 <>
-                  <TouchableOpacity
-                    onPress={() => handleNavigate('/admin')}
-                    activeOpacity={0.8}
-                    className="flex-row items-center p-3 rounded-xl"
-                    style={{ backgroundColor: 'rgba(31, 49, 87,0.15)' }}
-                  >
-                    <DatabaseZap
-                      size={16}
-                      color="#cf023f"
-                      style={{ marginRight: 12 }}
-                    />
-                    <Text
-                      style={{
-                        color: '#fefefe',
-                        fontSize: 12,
-                        fontWeight: '900',
-                        letterSpacing: 1,
-                      }}
-                    >
-                      ADMIN
-                    </Text>
-                  </TouchableOpacity>
                   <View
                     style={{
                       height: 1,
-                      backgroundColor: 'rgba(255,255,255,0.08)',
-                      marginVertical: 4,
+                      backgroundColor: 'rgba(255,255,255,0.06)',
+                      marginVertical: 6,
                     }}
+                  />
+                  <DropdownItem
+                    icon={DatabaseZap}
+                    label="ADMIN CORE"
+                    color="#cf023f"
+                    onPress={() => handleNavigation('/admin')}
                   />
                 </>
               )}
 
-              {/* Sign Out Action */}
-              <TouchableOpacity
+              <View
+                style={{
+                  height: 1,
+                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  marginVertical: 6,
+                }}
+              />
+
+              <DropdownItem
+                icon={LogOut}
+                label="SIGN OUT"
+                isDanger={true}
+                bgColor="rgba(255,51,102,0.05)"
                 onPress={handleSignOut}
-                activeOpacity={0.7}
-                className="flex-row items-center p-3 rounded-xl"
-                style={{ backgroundColor: 'rgba(255,51,102,0.05)' }}
-              >
-                <LogOut size={16} color="#FF3366" style={{ marginRight: 12 }} />
-                <Text
-                  style={{
-                    color: '#FF3366',
-                    fontSize: 12,
-                    fontWeight: '800',
-                    letterSpacing: 2,
-                  }}
-                >
-                  SIGN OUT
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+              />
+            </ScrollView>
+          </Animated.View>
         </>
       )}
     </View>
   );
 };
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  hiddenScrollbar: {
+    ...(IS_WEB
+      ? ({ scrollbarWidth: 'none', msOverflowStyle: 'none' } as any)
+      : {}),
+  },
+});

@@ -1,12 +1,11 @@
 /**
  * app/(dashboard)/admin/keys.tsx
- * VeraxAI — Enterprise API Key Vault & Telemetry Analytics
+ * VeraxAI — API Key Vault ( FALLBACK APIS)  & Telemetry Analytics
  * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL:
- * 1. NEBULA AMBIENT ENGINE: Parity with settings/index. 120fps UI-thread physics.
- * 2. CRASH-PROOF CHARTS: SVG handles static rendering; Reanimated handles HTML overlays.
- * 3. ADAPTIVE SCALING: Mobile-optimized LED bars and Bezier splines.
- * 4. HIGH-FIDELITY SVG: Animated API core replaces generic text headers.
+ * Architect:
+ * CRASH-PROOF CHARTS: SVG handles static rendering; Reanimated handles HTML overlays.
+ * ADAPTIVE SCALING: Mobile-optimized LED bars and Bezier splines.
+ * HIGH-FIDELITY SVG: Animated API core replaces generic text headers.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 

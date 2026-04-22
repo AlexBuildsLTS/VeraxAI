@@ -1,14 +1,12 @@
 /**
  * app/(dashboard)/admin/users.tsx
- * VeraxAI - Identity Registry & Access Control
- * ----------------------------------------------------------------------------
- * MODULE OVERVIEW:
- * 1. AMBIENT ENGINE: Liquid Neon Orbs; 100% APK Touch-Safe (`pointerEvents: 'none'`).
- * 2. REAL-TIME SYNC: Listens to the 'profiles' table for instant registry updates.
- * 3. TIER-LESS ARCHITECTURE: Purged 'tier' dependency; relies strictly on 'role'.
- * 4. BAN MANAGEMENT: Custom ban durations + instant unban restores. Banned users stay visible.
- * 5. TOUCH FIXES: Strict input styling & keyboard tap persistence enabled.
- * ----------------------------------------------------------------------------
+ * VeraxAI - User Panel
+ * ══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE 
+ *  ZERO-DROP TOUCH: keyboardShouldPersistTaps="always" + delayPressIn={0}.
+ *  DATABASE SAFETY: Relies on the corrected 'Admin Power User' SQL policy.
+ *  Native Web CSS overrides guarantee clean glassmorphism.
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -28,6 +26,7 @@ import {
   Alert,
   Dimensions,
   KeyboardAvoidingView,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -38,7 +37,6 @@ import {
   Calendar,
   ShieldAlert,
   Mail,
-  AlertTriangle,
   RefreshCcw,
   Coins,
   XCircle,
@@ -49,8 +47,10 @@ import {
   CheckCircle2,
   Clock,
   ArrowBigLeftDash,
+  AlertTriangle,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import Svg, { Rect, Circle, Line } from 'react-native-svg';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -59,6 +59,8 @@ import Animated, {
   withTiming,
   interpolate,
   Easing,
+  useFrameCallback,
+  withSequence,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
@@ -76,18 +78,23 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// ─── STRICT THEME ENFORCEMENT ───
+// ─── STRICT THEME ENFORCEMENT (Liquid Neon) ───
 const THEME = {
   obsidian: '#000012',
+  cyan: '#00F0FF',
   danger: '#FF007F',
   success: '#32FF00',
   warning: '#F59E0B',
-  cyan: '#00F0FF',
   purple: '#8A2BE2',
+  member: '#3B82F6',
   slate: '#94a3b8',
+  pink: '#FF007F',
+  green: '#32FF00',
+  red: '#FF3333',
 };
 
-// ─── STRICT INPUT FIX (Android Hover Bypass) ───
+const IS_WEB = Platform.OS === 'web';
+
 const strictInputStyle = {
   flex: 1,
   height: '100%',
@@ -95,7 +102,7 @@ const strictInputStyle = {
   paddingVertical: 0,
   margin: 0,
   textAlignVertical: 'center',
-  ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
+  ...(IS_WEB ? { outlineStyle: 'none' } : {}),
 } as any;
 
 type UserRole = Database['public']['Enums']['user_role'];
@@ -113,61 +120,249 @@ interface UserProfile {
   custom_api_key: string | null;
 }
 
-// ─── AMBIENT ORB ENGINE ───
-const AmbientOrb = ({
-  color,
-  size,
-  top,
-  left,
-  right,
-  bottom,
-  opacity = 0.05,
-  delay = 0,
-}: any) => {
-  const { width, height } = Dimensions.get('window');
-  const drift = useSharedValue(0);
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
+// ══════════════════════════════════════════════════════════════════════════════
 
+const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
+  const progress = useSharedValue(0);
   useEffect(() => {
-    drift.value = withDelay(
+    progress.value = withDelay(
       delay,
       withRepeat(
-        withTiming(1, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
+        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
         -1,
-        true,
+        false,
       ),
     );
-  }, [delay, drift]);
+  }, [delay, duration, progress]);
 
-  const anim = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: interpolate(drift.value, [0, 1], [0, width * 0.1]) },
-      { translateY: interpolate(drift.value, [0, 1], [0, height * 0.05]) },
-      { scale: interpolate(drift.value, [0, 1], [0.9, 1.2]) },
-    ],
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, maxSize]),
+    height: interpolate(progress.value, [0, 1], [0, maxSize]),
+    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
+    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
   }));
-
   return (
     <Animated.View
       style={[
         {
           position: 'absolute',
-          width: size,
-          height: size,
-          borderRadius: size,
-          backgroundColor: color,
-          opacity,
-          top,
-          left,
-          right,
-          bottom,
-          pointerEvents: 'none',
+          borderColor: color,
+          backgroundColor: 'transparent',
         },
-        anim,
+        animatedStyle,
       ]}
     />
   );
-};
+});
 
+const WanderingCore = React.memo(
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
+
+    const corePulse = useSharedValue(0.4);
+    useEffect(() => {
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
+        -1,
+        true,
+      );
+    }, [corePulse]);
+
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          animatedPosition,
+        ]}
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <SingleRipple
+            key={index}
+            color={color}
+            delay={index * (baseDuration / waveCount)}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+        <Animated.View
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              shadowColor: color,
+              shadowRadius: 15,
+              shadowOpacity: 1,
+              shadowOffset: { width: 0, height: 0 },
+              ...(IS_WEB ? ({ boxShadow: `0 0 20px ${color}` } as any) : {}),
+            },
+          ]}
+        />
+      </Animated.View>
+    );
+  },
+);
+
+const AmbientArchitecture = React.memo(() => {
+  const { width, height } = Dimensions.get('window');
+  return (
+    // STRICT TOUCH SAFETY: zIndex -1 and elevation -1 prevent UI blocking on Android
+    <View
+      style={[StyleSheet.absoluteFill, { zIndex: -1, elevation: -1 }]}
+      pointerEvents="none"
+    >
+      <WanderingCore
+        coreSize={14}
+        color={THEME.cyan}
+        maxWaveSize={width >= 1024 ? width * 0.8 : height * 1.0}
+        waveCount={4}
+        baseDuration={12000}
+      />
+    </View>
+  );
+});
+
+const AnimatedBrowserIcon = React.memo(() => {
+  const floatY = useSharedValue(0);
+  const scanY = useSharedValue(0);
+
+  useEffect(() => {
+    floatY.value = withRepeat(
+      withSequence(
+        withTiming(-4, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+    scanY.value = withRepeat(
+      withTiming(45, { duration: 3000, easing: Easing.linear }),
+      -1,
+      false,
+    );
+  }, []);
+
+  const floatStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: floatY.value }],
+  }));
+  const scanStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: scanY.value }],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        { width: 100, height: 80, alignSelf: 'center', marginBottom: 12 },
+        floatStyle,
+      ]}
+    >
+      <Svg width="100%" height="100%" viewBox="0 0 100 80">
+        <Rect
+          x="5"
+          y="5"
+          width="90"
+          height="70"
+          rx="8"
+          fill="rgba(0, 240, 255, 0.05)"
+          stroke={THEME.cyan}
+          strokeWidth="2"
+        />
+        <Line
+          x1="5"
+          y1="20"
+          x2="95"
+          y2="20"
+          stroke={THEME.cyan}
+          strokeWidth="2"
+        />
+        <Circle cx="15" cy="12.5" r="2.5" fill={THEME.danger} />
+        <Circle cx="25" cy="12.5" r="2.5" fill={THEME.warning} />
+        <Circle cx="35" cy="12.5" r="2.5" fill={THEME.success} />
+        <Rect
+          x="15"
+          y="32"
+          width="40"
+          height="6"
+          rx="3"
+          fill={THEME.purple}
+          opacity="0.5"
+        />
+        <Rect
+          x="15"
+          y="46"
+          width="70"
+          height="6"
+          rx="3"
+          fill={THEME.cyan}
+          opacity="0.3"
+        />
+        <Rect
+          x="15"
+          y="60"
+          width="50"
+          height="6"
+          rx="3"
+          fill={THEME.cyan}
+          opacity="0.3"
+        />
+      </Svg>
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 20,
+            left: 10,
+            width: 80,
+            height: 2,
+            backgroundColor: THEME.cyan,
+            shadowColor: THEME.cyan,
+            shadowOpacity: 1,
+            shadowRadius: 5,
+          },
+          scanStyle,
+        ]}
+      />
+    </Animated.View>
+  );
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 2: MASTER CONTROLLER & MUTATORS
+// ══════════════════════════════════════════════════════════════════════════════
 export default function AdminUsersScreen() {
   const router = useRouter();
   const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -178,7 +373,6 @@ export default function AdminUsersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Modals
   const [roleModalVisible, setRoleModalVisible] = useState(false);
   const [banModalVisible, setBanModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -192,7 +386,6 @@ export default function AdminUsersScreen() {
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
-
       if (error) throw error;
       setUsers(data as UserProfile[]);
     } catch (e: any) {
@@ -223,7 +416,7 @@ export default function AdminUsersScreen() {
   }, [loadUsers]);
 
   const triggerHaptic = (type: 'selection' | 'success' | 'warning') => {
-    if (Platform.OS !== 'web') {
+    if (!IS_WEB) {
       if (type === 'selection') Haptics.selectionAsync();
       if (type === 'success')
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -235,23 +428,31 @@ export default function AdminUsersScreen() {
   const handleRoleUpdate = async (newValue: string) => {
     if (!selectedUser) return;
     triggerHaptic('selection');
+
+    const cleanRole = newValue.trim().toLowerCase();
+
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: newValue as UserRole })
-        .eq('id', selectedUser.id);
+      const { error } = await supabase.rpc('admin_update_role' as any, {
+        target_user_id: selectedUser.id,
+        new_role: cleanRole,
+      });
+
       if (error) throw error;
+
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setSelectedUser((prev) =>
-        prev ? { ...prev, role: newValue as UserRole } : null,
+        prev ? { ...prev, role: cleanRole as UserRole } : null,
       );
-      setUsers(
-        users.map((u) =>
-          u.id === selectedUser.id ? { ...u, role: newValue as UserRole } : u,
+      setUsers((prevUsers) =>
+        prevUsers.map((u) =>
+          u.id === selectedUser.id ? { ...u, role: cleanRole as UserRole } : u,
         ),
       );
+
+      setRoleModalVisible(false);
       triggerHaptic('success');
     } catch (e: any) {
+      console.error('Role Update Error: ', e);
       Alert.alert('Update Failed', e.message);
     }
   };
@@ -270,8 +471,8 @@ export default function AdminUsersScreen() {
         .eq('id', userId);
       if (error) throw error;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setUsers(
-        users.map((u) =>
+      setUsers((prevUsers) =>
+        prevUsers.map((u) =>
           u.id === userId ? { ...u, tokens_balance: newBalance } : u,
         ),
       );
@@ -300,8 +501,8 @@ export default function AdminUsersScreen() {
         .eq('id', selectedUser.id);
       if (error) throw error;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setUsers(
-        users.map((u) =>
+      setUsers((prevUsers) =>
+        prevUsers.map((u) =>
           u.id === selectedUser.id
             ? { ...u, status: 'banned', banned_until: bannedUntil }
             : u,
@@ -322,8 +523,8 @@ export default function AdminUsersScreen() {
         .eq('id', userId);
       if (error) throw error;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setUsers(
-        users.map((u) =>
+      setUsers((prevUsers) =>
+        prevUsers.map((u) =>
           u.id === userId ? { ...u, status: 'active', banned_until: null } : u,
         ),
       );
@@ -342,13 +543,18 @@ export default function AdminUsersScreen() {
         .eq('id', selectedUser.id);
       if (error) throw error;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setUsers(users.filter((u) => u.id !== selectedUser.id));
+      setUsers((prevUsers) =>
+        prevUsers.filter((u) => u.id !== selectedUser.id),
+      );
       triggerHaptic('success');
     } catch (e: any) {
       Alert.alert('Purge Failed', e.message);
     }
   };
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // MODULE 3: PREMIUM CARD RENDERER
+  // ══════════════════════════════════════════════════════════════════════════════
   const renderUserCard = ({
     item,
     index,
@@ -426,7 +632,9 @@ export default function AdminUsersScreen() {
                         ? 'bg-[#8A2BE2]/20 border-[#8A2BE2]/50'
                         : item.role === 'premium'
                           ? 'bg-[#F59E0B]/10 border-[#F59E0B]/30'
-                          : 'bg-white/5 border-white/10',
+                          : item.role === 'support'
+                            ? 'bg-[#00F0FF]/10 border-[#00F0FF]/30'
+                            : 'bg-[#3B82F6]/10 border-[#3B82F6]/30', // Electric Blue Member Tier
                     )}
                   >
                     <Text
@@ -436,7 +644,9 @@ export default function AdminUsersScreen() {
                           ? 'text-[#8A2BE2]'
                           : item.role === 'premium'
                             ? 'text-[#F59E0B]'
-                            : 'text-white/50',
+                            : item.role === 'support'
+                              ? 'text-[#00F0FF]'
+                              : 'text-[#3B82F6]',
                       )}
                     >
                       {item.role || 'MEMBER'}
@@ -484,14 +694,15 @@ export default function AdminUsersScreen() {
             </View>
           </View>
 
-          {/* Action Buttons */}
           <View className="flex-row flex-wrap items-center gap-2 pt-4 mt-4 border-t md:gap-3 border-white/5">
             <TouchableOpacity
               onPress={() => {
                 setSelectedUser(item);
                 setRoleModalVisible(true);
               }}
-              className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-2.5 px-2 border border-white/5 bg-white/[0.03] rounded-xl hover:bg-white/10 active:scale-95"
+              delayPressIn={0}
+              activeOpacity={0.7}
+              className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-3 px-2 border border-white/5 bg-white/[0.02] rounded-xl hover:bg-white/[0.06]"
             >
               <UserCog size={14} color={THEME.cyan} />
               <Text className="text-[9px] md:text-[10px] font-black text-white/80 uppercase tracking-widest">
@@ -503,7 +714,9 @@ export default function AdminUsersScreen() {
               onPress={() =>
                 handleAddTokens(1000, item.id, item.tokens_balance)
               }
-              className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-2.5 px-2 border border-[#00F0FF]/20 bg-[#00F0FF]/10 rounded-xl hover:bg-[#00F0FF]/20 active:scale-95"
+              delayPressIn={0}
+              activeOpacity={0.7}
+              className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-3 px-2 border border-[#00F0FF]/20 bg-[#00F0FF]/10 rounded-xl hover:bg-[#00F0FF]/20"
             >
               <PlusCircle size={14} color={THEME.cyan} />
               <Text className="text-[9px] md:text-[10px] font-black text-[#00F0FF] uppercase tracking-widest">
@@ -514,10 +727,12 @@ export default function AdminUsersScreen() {
             {isBanned ? (
               <TouchableOpacity
                 onPress={() => executeUnban(item.id)}
-                className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-2.5 px-2 border border-[#32FF00]/20 bg-[#32FF00]/10 rounded-xl hover:bg-[#32FF00]/20 active:scale-95"
+                delayPressIn={0}
+                activeOpacity={0.7}
+                className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-3 px-2 border border-[#F59E0B]/30 bg-[#F59E0B]/10 rounded-xl hover:bg-[#F59E0B]/20"
               >
-                <Unlock size={14} color={THEME.success} />
-                <Text className="text-[9px] md:text-[10px] font-black text-[#32FF00] uppercase tracking-widest">
+                <Unlock size={14} color={THEME.warning} />
+                <Text className="text-[9px] md:text-[10px] font-black text-[#F59E0B] uppercase tracking-widest">
                   Restore
                 </Text>
               </TouchableOpacity>
@@ -527,7 +742,9 @@ export default function AdminUsersScreen() {
                   setSelectedUser(item);
                   setBanModalVisible(true);
                 }}
-                className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-2.5 px-2 border border-white/5 bg-white/[0.03] rounded-xl hover:bg-white/10 active:scale-95"
+                delayPressIn={0}
+                activeOpacity={0.7}
+                className="flex-row items-center justify-center flex-1 min-w-[80px] md:min-w-[100px] gap-2 py-3 px-2 border border-[#F59E0B]/20 bg-amber-500/5 rounded-xl hover:bg-amber-500/10"
               >
                 <Ban size={14} color={THEME.warning} />
                 <Text className="text-[9px] md:text-[10px] font-black text-[#F59E0B] uppercase tracking-widest">
@@ -543,7 +760,9 @@ export default function AdminUsersScreen() {
                 setSelectedUser(item);
                 setDeleteModalVisible(true);
               }}
-              className="flex-row items-center justify-center w-12 md:flex-1 md:min-w-[100px] md:max-w-[140px] gap-2 py-2.5 px-2 border rounded-xl border-[#FF007F]/10 bg-[#FF007F]/5 hover:bg-[#FF007F]/10 ml-auto active:scale-95"
+              delayPressIn={0}
+              activeOpacity={0.7}
+              className="flex-row items-center justify-center w-full md:flex-1 md:min-w-[100px] md:max-w-[140px] gap-2 py-3 px-2 border rounded-xl border-[#FF007F]/20 bg-[#FF007F]/5 hover:bg-[#FF007F]/10 ml-auto"
             >
               <Trash2 size={14} color={THEME.danger} opacity={0.8} />
               {!isMobile && (
@@ -558,61 +777,49 @@ export default function AdminUsersScreen() {
     );
   };
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // MODULE 4: MASTER RENDER
+  // ══════════════════════════════════════════════════════════════════════════════
   return (
     <SafeAreaView className="flex-1 bg-[#000012]">
-      <AmbientOrb
-        color={THEME.cyan}
-        size={400}
-        top={-100}
-        left={-150}
-        opacity={0.04}
-        delay={0}
-      />
-      <AmbientOrb
-        color={THEME.purple}
-        size={300}
-        top={300}
-        right={-100}
-        opacity={0.05}
-        delay={2000}
-      />
+      {/* BACKGROUND ISOLATION */}
+      <AmbientArchitecture />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         className="flex-1 w-full max-w-5xl mx-auto"
       >
-        <View className="flex-col px-6 pt-6 pb-4 border-b border-white/5">
+        {/* ── CENTRALIZED SVG HEADER ── */}
+        <View className="relative flex-col items-center px-6 pt-6 pb-6 border-b md:px-8 border-white/5">
           <TouchableOpacity
             onPress={() => router.replace('/admin')}
-            className="flex-row items-center mb-6 gap-x-3"
+            delayPressIn={0}
             activeOpacity={0.7}
-            style={{ zIndex: 200, alignSelf: 'flex-start' }}
+            className="absolute z-50 p-2 transition-opacity left-6 top-8 hover:opacity-70"
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
           >
-            <ArrowBigLeftDash size={20} color={THEME.cyan} />
-            <Text className="text-[11px] font-black tracking-[4px] text-[#00F0FF] uppercase">
-              RETURN
-            </Text>
+            <ArrowBigLeftDash size={24} color={THEME.cyan} />
           </TouchableOpacity>
 
-          <View className="flex-row items-center justify-between">
-            <View>
-              <Text className="text-3xl font-black tracking-tighter text-white uppercase"></Text>
-              <Text className="text-[9px] md:text-[10px] font-bold text-white/40 uppercase tracking-[2px] mt-1">
-                {users.length} Active PID Logs
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => loadUsers(false)}
-              className="items-center justify-center w-10 h-10 border rounded-2xl bg-[#00F0FF]/10 border-[#00F0FF]/20 active:scale-95"
-            >
-              <RefreshCcw size={16} color={THEME.cyan} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => loadUsers(false)}
+            delayPressIn={0}
+            activeOpacity={0.7}
+            className="absolute z-50 items-center justify-center w-10 h-10 border right-6 top-8 rounded-2xl bg-[#00F0FF]/10 border-[#00F0FF]/20 hover:bg-[#00F0FF]/20"
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+          >
+            <RefreshCcw size={16} color={THEME.cyan} />
+          </TouchableOpacity>
+
+          <AnimatedBrowserIcon />
+
+          <Text className="mt-4 text-[10px] md:text-[11px] font-bold text-white/40 uppercase tracking-[3px] text-center">
+            {users.length} Active User Profiles
+          </Text>
         </View>
 
-        {/* SEARCH INTERFACE FIX */}
         <View className="w-full max-w-4xl px-4 mx-auto mt-6 mb-6 md:px-6">
-          <GlassCard className="flex-row items-center gap-3 px-5 border shadow-lg h-14 rounded-[20px] bg-white/[0.02] border-white/5 shadow-black/20">
+          <GlassCard className="flex-row items-center gap-3 px-5 border shadow-lg h-14 rounded-[20px] bg-[#050A15] border-white/10 shadow-black/20">
             <Search size={18} color={THEME.slate} opacity={0.5} />
             <View className="justify-center flex-1 h-full">
               <TextInput
@@ -625,16 +832,21 @@ export default function AdminUsersScreen() {
               />
             </View>
             {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
+              <TouchableOpacity onPress={() => setSearch('')} delayPressIn={0}>
                 <XCircle size={18} color={THEME.slate} opacity={0.5} />
               </TouchableOpacity>
             )}
           </GlassCard>
         </View>
 
-        {/* CRITICAL FIX: keyboardShouldPersistTaps="handled" */}
         <FlatList
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
+          style={
+            IS_WEB
+              ? ({ scrollbarWidth: 'none', msOverflowStyle: 'none' } as any)
+              : {}
+          }
+          showsVerticalScrollIndicator={false}
           data={users.filter(
             (u) =>
               u.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -643,10 +855,9 @@ export default function AdminUsersScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderUserCard}
           contentContainerStyle={{
-            paddingHorizontal: isMobile ? 16 : 24,
+            paddingHorizontal: isMobile ? 16 : 32,
             paddingBottom: 150,
           }}
-          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -685,36 +896,40 @@ export default function AdminUsersScreen() {
               System Role
             </Text>
             <View className="flex-row flex-wrap justify-center gap-3 mb-8">
-              {['member', 'premium', 'support', 'admin'].map((role) => (
-                <TouchableOpacity
-                  key={`role-${role}`}
-                  onPress={() => handleRoleUpdate(role)}
-                  className={cn(
-                    'px-4 py-3 border rounded-xl flex-row items-center gap-2 transition-all',
-                    selectedUser?.role === role
-                      ? 'bg-[#00F0FF]/10 border-[#00F0FF]/40'
-                      : 'bg-white/[0.02] border-white/10 hover:bg-white/10',
-                  )}
-                >
-                  <Text
+              {(['member', 'premium', 'support', 'admin'] as UserRole[]).map(
+                (role) => (
+                  <TouchableOpacity
+                    key={`role-${role}`}
+                    onPress={() => handleRoleUpdate(role)}
+                    delayPressIn={0}
                     className={cn(
-                      'text-[10px] font-black tracking-widest uppercase',
+                      'px-4 py-3 border rounded-xl flex-row items-center gap-2 transition-all',
                       selectedUser?.role === role
-                        ? 'text-[#00F0FF]'
-                        : 'text-white/60',
+                        ? 'bg-[#00F0FF]/10 border-[#00F0FF]/40'
+                        : 'bg-white/[0.02] border-white/10 hover:bg-white/10',
                     )}
                   >
-                    {role}
-                  </Text>
-                  {selectedUser?.role === role && (
-                    <CheckCircle2 size={12} color={THEME.cyan} />
-                  )}
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      className={cn(
+                        'text-[10px] font-black tracking-widest uppercase',
+                        selectedUser?.role === role
+                          ? 'text-[#00F0FF]'
+                          : 'text-white/60',
+                      )}
+                    >
+                      {role}
+                    </Text>
+                    {selectedUser?.role === role && (
+                      <CheckCircle2 size={12} color={THEME.cyan} />
+                    )}
+                  </TouchableOpacity>
+                ),
+              )}
             </View>
             <TouchableOpacity
               onPress={() => setRoleModalVisible(false)}
-              className="py-4 mt-2"
+              delayPressIn={0}
+              className="py-4 mt-2 active:opacity-50"
             >
               <Text className="text-center font-black text-white/30 uppercase tracking-[4px] text-[10px]">
                 Close Panel
@@ -736,7 +951,8 @@ export default function AdminUsersScreen() {
 
             <TouchableOpacity
               onPress={() => executeBan(1)}
-              className="flex-row items-center gap-4 p-5 mb-3 border bg-white/[0.02] border-white/10 rounded-2xl hover:bg-white/10"
+              delayPressIn={0}
+              className="flex-row items-center gap-4 p-5 mb-3 border bg-white/[0.02] border-white/10 rounded-2xl hover:bg-white/10 active:scale-95"
             >
               <Clock size={18} color="#94a3b8" opacity={0.5} />
               <Text className="text-[10px] md:text-xs font-bold tracking-widest text-white/80 uppercase">
@@ -746,7 +962,8 @@ export default function AdminUsersScreen() {
 
             <TouchableOpacity
               onPress={() => executeBan(7)}
-              className="flex-row items-center gap-4 p-5 mb-3 border bg-white/[0.02] border-white/10 rounded-2xl hover:bg-white/10"
+              delayPressIn={0}
+              className="flex-row items-center gap-4 p-5 mb-3 border bg-white/[0.02] border-white/10 rounded-2xl hover:bg-white/10 active:scale-95"
             >
               <Calendar size={18} color="#94a3b8" opacity={0.5} />
               <Text className="text-[10px] md:text-xs font-bold tracking-widest text-white/80 uppercase">
@@ -767,7 +984,8 @@ export default function AdminUsersScreen() {
               </View>
               <TouchableOpacity
                 onPress={() => executeBan(parseInt(customBanDays) || 30)}
-                className="items-center justify-center px-4 border h-14 bg-amber-500/10 border-amber-500/30 rounded-2xl"
+                delayPressIn={0}
+                className="items-center justify-center px-4 border h-14 bg-amber-500/10 border-amber-500/30 rounded-2xl active:scale-95"
               >
                 <Text className="text-[10px] font-black text-[#F59E0B] uppercase tracking-widest">
                   APPLY
@@ -777,7 +995,8 @@ export default function AdminUsersScreen() {
 
             <TouchableOpacity
               onPress={() => executeBan(null)}
-              className="flex-row items-center gap-4 p-5 mt-2 border bg-[#FF007F]/10 border-[#FF007F]/20 rounded-2xl hover:bg-[#FF007F]/20"
+              delayPressIn={0}
+              className="flex-row items-center gap-4 p-5 mt-2 border bg-[#FF007F]/10 border-[#FF007F]/20 rounded-2xl hover:bg-[#FF007F]/20 active:scale-95"
             >
               <Ban size={18} color={THEME.danger} opacity={0.8} />
               <Text className="text-[10px] md:text-xs font-bold tracking-widest uppercase text-[#FF007F]">
@@ -787,7 +1006,8 @@ export default function AdminUsersScreen() {
 
             <TouchableOpacity
               onPress={() => setBanModalVisible(false)}
-              className="py-4 mt-6"
+              delayPressIn={0}
+              className="py-4 mt-6 active:opacity-50"
             >
               <Text className="text-center font-black text-white/30 uppercase tracking-[4px] text-[10px]">
                 Abort
@@ -815,6 +1035,7 @@ export default function AdminUsersScreen() {
             </View>
             <TouchableOpacity
               onPress={executeDelete}
+              delayPressIn={0}
               className="py-5 mb-4 border bg-[#FF007F]/10 border-[#FF007F]/30 rounded-3xl hover:bg-[#FF007F]/20 active:scale-95"
             >
               <Text className="text-[10px] md:text-xs font-black tracking-widest text-center uppercase text-[#FF007F]">
@@ -823,7 +1044,8 @@ export default function AdminUsersScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setDeleteModalVisible(false)}
-              className="py-4"
+              delayPressIn={0}
+              className="py-4 active:opacity-50"
             >
               <Text className="text-center font-black text-white/30 uppercase tracking-[4px] text-[10px]">
                 Cancel Transaction
