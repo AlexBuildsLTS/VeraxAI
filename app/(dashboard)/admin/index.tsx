@@ -663,9 +663,9 @@ export default function AdminCommandCenter() {
                         ? THEME.success
                         : THEME.warning,
                     shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.4,
-                    shadowRadius: 10,
-                    elevation: 8,
+                    shadowOpacity: 0.05,
+                    shadowRadius: 12,
+                    elevation: 4,
                     ...(IS_WEB
                       ? ({
                           boxShadow: `0 4px 10px ${healthStatus === 'OPERATIONAL' ? THEME.success : THEME.warning}60`,
@@ -675,7 +675,7 @@ export default function AdminCommandCenter() {
                   className={cn(
                     'flex-row items-center px-4 py-2.5 border rounded-full',
                     healthStatus === 'OPERATIONAL'
-                      ? 'bg-[#32FF00]/10 border-[#32FF00]/40'
+                      ? 'bg-[#32FF00]/10 border-[#17fcb8]/40'
                       : 'bg-[#01111f]/10 border-[#F59E0B]/40',
                   )}
                 >
@@ -691,7 +691,7 @@ export default function AdminCommandCenter() {
                     className={cn(
                       'ml-2 text-[10px] md:text-[11px] font-black uppercase tracking-widest',
                       healthStatus === 'OPERATIONAL'
-                        ? 'text-[#32FF00]'
+                        ? 'text-[#00ffd5]'
                         : 'text-[#F59E0B]',
                     )}
                   >

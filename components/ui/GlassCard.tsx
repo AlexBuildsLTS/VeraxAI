@@ -9,7 +9,7 @@ import React from 'react';
 import { View, ViewProps } from 'react-native';
 import { cn } from '../../lib/utils';
 
-interface GlassCardProps extends ViewProps {
+export interface GlassCardProps extends ViewProps {
   children: React.ReactNode;
   className?: string;
   glowColor?: 'cyan' | 'purple' | 'pink' | 'lime' | 'red' | 'green';

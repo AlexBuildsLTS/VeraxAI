@@ -1,9 +1,10 @@
 /**
  * @file app/(dashboard)/settings/support.tsx
- * @description VeraxAI Support & Secure Messaging Hub
+ * @description VeraxAI Support & Messaging Hub.
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE
  * bounding boxes and allowing the Liquid Neon background
+ * Strict flexShrink: 0 on all horizontal scrolling elements
  * prevents tab squashing on Mobile Web and APK
  * Pure TouchableOpacity for flawless gesture parity
  * ══════════════════════════════════════════════════════════════════════════════
@@ -25,7 +26,6 @@ import {
   TextInput,
   FlatList,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   Dimensions,
   ActivityIndicator,
@@ -88,7 +88,6 @@ const IS_WEB = Platform.OS === 'web';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ─── STRICT LOCAL COLORS ─────────────────────────────────────────────────────
-// CRITICAL: Fully transparent background to eliminate the "box" effect
 const C_APP_BG = '#000012';
 const C_CYAN = '#00F0FF';
 const C_PURPLE = '#8A2BE2';
@@ -129,7 +128,7 @@ const FAQ_DATA = [
     id: '1',
     icon: Zap,
     color: C_CYAN,
-    question: '⚡ How fast is the transcription pipeline?',
+    question: 'How fast is the transcription pipeline?',
     answer:
       'Powered by Deepgram Nova-2, standard processing typically completes in under 30 seconds for a 30-minute media asset.',
   },
@@ -137,7 +136,7 @@ const FAQ_DATA = [
     id: '2',
     icon: Trophy,
     color: C_GREEN,
-    question: '🎯 How accurate are the AI Synthesized Insights?',
+    question: 'How accurate are the AI Synthesized Insights?',
     answer:
       'We utilize Gemini 3.1 Flash-Lite, strictly prompted and tuned for deterministic contextual understanding and SEO extraction.',
   },
@@ -145,7 +144,7 @@ const FAQ_DATA = [
     id: '3',
     icon: Code,
     color: C_PURPLE,
-    question: '🔑 Can I inject my own Sovereign API Keys?',
+    question: 'Can I inject my own Sovereign API Keys?',
     answer:
       'Yes. Premium members can navigate to Settings > Security to inject custom fallback keys to bypass system rate limits.',
   },
@@ -153,7 +152,7 @@ const FAQ_DATA = [
     id: '4',
     icon: Lock,
     color: C_PINK,
-    question: '🛡️ Is my data securely isolated?',
+    question: 'Is my data securely isolated?',
     answer:
       'Absolutely. We employ strict PostgreSQL Row Level Security (RLS). No internal or external entity can query your vault.',
   },
@@ -258,7 +257,7 @@ const FilterChip = ({
       borderRadius: 24,
       marginRight: 10,
       borderWidth: 1,
-      flexShrink: 0, // CRITICAL: Forces scroll instead of squashing text on Mobile/Web
+      flexShrink: 0,
       minWidth: 90,
       borderColor: active ? C_CYAN + '60' : 'rgba(255,255,255,0.1)',
       backgroundColor: active ? C_CYAN + '15' : 'rgba(255,255,255,0.03)',
@@ -410,7 +409,7 @@ const WanderingCore = React.memo(
         {
           translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
         },
-      ],
+      ] as any,
     }));
 
     const corePulse = useSharedValue(0.4);
@@ -426,7 +425,7 @@ const WanderingCore = React.memo(
       opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
       transform: [
         { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
-      ],
+      ] as any,
     }));
 
     return (
@@ -511,7 +510,7 @@ const AnimatedSupportIcon = () => {
     );
   }, []);
   const floatStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: floatY.value }],
+    transform: [{ translateY: floatY.value }] as any,
   }));
 
   return (
@@ -567,11 +566,6 @@ const AnimatedSupportIcon = () => {
 
 // ─── MASTER PAGE CONTROLLER (SUPPORT SCREEN) ─────────────────────────────────
 
-/**
- * @function SupportScreen
- * @description Main structural component for routing, state handling, and layout composition.
- * Dynamically switches between List, Detail (Chat), and Create views with zero-latency updates.
- */
 export default function SupportScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -580,6 +574,45 @@ export default function SupportScreen() {
   const insets = useSafeAreaInsets();
 
   const isMobile = SCREEN_WIDTH < 768;
+
+  // ─── KEYBOARD & PADDING MANAGEMENT ───
+  // We completely abandon KeyboardAvoidingView.
+  // We use your exact manual listener logic to calculate the exact height to push the container up by.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardVisible(true);
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const bottomChatPadding = isMobile
+    ? isKeyboardVisible
+      ? 12
+      : Math.max(insets.bottom + 120, 130)
+    : 24;
 
   // ─── ROLE LOGIC ───
   const realRole = (profile?.role || 'member').toLowerCase() as UserRole;
@@ -667,10 +700,6 @@ export default function SupportScreen() {
   }, [viewMode, selectedTicket?.id, user?.id]);
 
   // ─── DATA FETCHING ───
-  /**
-   * @function loadData
-   * @description Fetches tickets matching RLS constraints and current filters.
-   */
   const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -736,10 +765,6 @@ export default function SupportScreen() {
   }, [search, tickets]);
 
   // ─── ACTIONS ───
-  /**
-   * @function loadTicketDetails
-   * @description Hydrates the chat view with message history for the selected ticket.
-   */
   const loadTicketDetails = async (ticket: TicketUI) => {
     setSelectedTicket(ticket);
     setViewMode('detail');
@@ -770,10 +795,6 @@ export default function SupportScreen() {
     }
   };
 
-  /**
-   * @function handleSendMessage
-   * @description Submits a new chat bubble payload and optimistic UI update.
-   */
   const handleSendMessage = async (isInternal: boolean = false) => {
     const content = isInternal ? internalNote : newMessage;
     if (!content.trim() || !selectedTicket || !user) return;
@@ -823,10 +844,6 @@ export default function SupportScreen() {
     }
   };
 
-  /**
-   * @function handleCreateTicket
-   * @description Bootstraps a new parent ticket and attaches its initial description.
-   */
   const handleCreateTicket = async () => {
     if (!newTitle.trim() || !newInitialMsg.trim() || !user)
       return Alert.alert(
@@ -913,10 +930,6 @@ export default function SupportScreen() {
 
   // ─── LOCAL RENDER FUNCTIONS ──────────────────────────────────────────────────
 
-  /**
-   * @function renderTicketCard
-   * @description Standard list layout item representing a ticket summary.
-   */
   const renderTicketCard = ({
     item,
     index,
@@ -1051,10 +1064,6 @@ export default function SupportScreen() {
     );
   };
 
-  /**
-   * @function renderChatMessage
-   * @description Maximizes bubble width using 95% threshold. Eliminates fake placeholders.
-   */
   const renderChatMessage = ({
     item,
     index,
@@ -1107,7 +1116,6 @@ export default function SupportScreen() {
           width: '100%',
         }}
       >
-        {/* Opponent Avatar */}
         {!isMe && (
           <View style={{ alignItems: 'center' }}>
             {authorAvatar ? (
@@ -1149,7 +1157,6 @@ export default function SupportScreen() {
           </View>
         )}
 
-        {/* Dynamic Bubble Content - Utilizes 95% space max to hug edges smoothly */}
         <View
           style={{
             flexShrink: 1,
@@ -1157,7 +1164,6 @@ export default function SupportScreen() {
             alignItems: isMe ? 'flex-end' : 'flex-start',
           }}
         >
-          {/* Strict Metadata Row: Name -> Role Badge */}
           <View
             style={{
               flexDirection: 'row',
@@ -1229,7 +1235,6 @@ export default function SupportScreen() {
           </View>
         </View>
 
-        {/* Sender Avatar */}
         {isMe && (
           <View style={{ alignItems: 'center' }}>
             {authorAvatar ? (
@@ -1286,268 +1291,252 @@ export default function SupportScreen() {
       <SafeAreaView style={{ flex: 1, zIndex: 1 }} edges={['top']}>
         {/* ─── VIEW 1: DETAIL CHAT ─── */}
         {viewMode === 'detail' && selectedTicket && (
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            style={{ flex: 1 }}
+          <View
+            style={{
+              flex: 1,
+              width: '100%',
+              maxWidth: 672,
+              alignSelf: 'center',
+              // THE EXACT FIX: The entire chat container gets physically pushed up
+              // away from the bottom of the screen by the absolute exact pixel height of the keyboard.
+              paddingBottom: keyboardHeight,
+            }}
           >
+            {/* Header */}
             <View
               style={{
-                flex: 1,
-                width: '100%',
-                maxWidth: 672,
-                alignSelf: 'center',
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 12,
+                paddingVertical: 12,
+                minHeight: 70,
               }}
             >
-              {/* * HEADER FIX: Strict Flexbox Layout.
-               * Left side takes flex: 1, naturally pushing the status pill to the right.
-               * Fixed 45px spacer on the far right protects the global avatar.
-               */}
               <View
                 style={{
+                  flex: 1,
                   flexDirection: 'row',
                   alignItems: 'center',
-                  paddingHorizontal: 12,
-                  paddingVertical: 12,
-                  minHeight: 70,
                 }}
               >
-                {/* Header: Left Side */}
+                <TouchableOpacity
+                  onPress={() => setViewMode('list')}
+                  style={{ padding: 8, marginLeft: -4, marginRight: 8 }}
+                >
+                  <ArrowBigLeftDash size={24} color={C_CYAN} />
+                </TouchableOpacity>
+
                 <View
                   style={{
-                    flex: 1,
-                    flexDirection: 'row',
-                    alignItems: 'center',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    flexShrink: 1,
                   }}
                 >
-                  <TouchableOpacity
-                    onPress={() => setViewMode('list')}
-                    style={{ padding: 8, marginLeft: -4, marginRight: 8 }}
-                  >
-                    <ArrowBigLeftDash size={24} color={C_CYAN} />
-                  </TouchableOpacity>
-
-                  <View
+                  <Text
                     style={{
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      flexShrink: 1,
+                      color: 'white',
+                      fontWeight: '900',
+                      fontSize: 15,
+                      marginBottom: 2,
                     }}
+                    numberOfLines={1}
                   >
-                    <Text
-                      style={{
-                        color: 'white',
-                        fontWeight: '900',
-                        fontSize: 15,
-                        marginBottom: 2,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {selectedTicket.subject}
-                    </Text>
-                    <Text
-                      style={{
-                        color: 'rgba(255,255,255,0.6)',
-                        fontSize: 11,
-                        fontWeight: '600',
-                      }}
-                      numberOfLines={1}
-                    >
-                      By:{' '}
-                      {selectedTicket.user?.full_name ||
-                        selectedTicket.user?.email ||
-                        'Unknown User'}
-                    </Text>
-                  </View>
+                    {selectedTicket.subject}
+                  </Text>
+                  <Text
+                    style={{
+                      color: 'rgba(255,255,255,0.6)',
+                      fontSize: 11,
+                      fontWeight: '600',
+                    }}
+                    numberOfLines={1}
+                  >
+                    By:{' '}
+                    {selectedTicket.user?.full_name ||
+                      selectedTicket.user?.email ||
+                      'Unknown User'}
+                  </Text>
                 </View>
-
-                {/* Header: Status Pill pushed right, ensuring NO text wrapping via standard row rules */}
-                {isStaff && (
-                  <View style={{ flexShrink: 0, paddingRight: 8 }}>
-                    <TouchableOpacity
-                      onPress={() => setStatusModalVisible(true)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: getStatusColor(selectedTicket.status),
-                        backgroundColor:
-                          getStatusColor(selectedTicket.status) + '15',
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontWeight: '600',
-                          color: getStatusColor(selectedTicket.status),
-                          letterSpacing: 0.5,
-                        }}
-                      >
-                        {selectedTicket.status.toUpperCase().replace('_', ' ')}
-                      </Text>
-                      <ChevronDown
-                        size={14}
-                        color={getStatusColor(selectedTicket.status)}
-                        style={{ marginLeft: 6 }}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Header: Reserved Space */}
-                <View style={{ width: 45 }} />
               </View>
 
-              {/* * CHAT BUBBLES LIST
-               * Horizontal padding stripped to 4 to maximize side-to-side stretch.
-               */}
-              <FlatList
-                ref={flatListRef}
-                data={selectedTicket.messages}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{
-                  paddingHorizontal: 4,
-                  paddingTop: 16,
-                  paddingBottom: 40,
-                }}
-                showsVerticalScrollIndicator={false}
-                renderItem={renderChatMessage}
-                onContentSizeChange={() =>
-                  flatListRef.current?.scrollToEnd({ animated: true })
-                }
-                keyboardShouldPersistTaps="handled"
-              />
-
-              {/* ─── SLEEK MODERN INPUT CONTAINER ─── */}
-              <View
-                style={{
-                  paddingHorizontal: 12,
-                  paddingTop: 12,
-                  // Safely delegates to KeyboardAvoidingView on iOS and adjustResize on Android
-                  paddingBottom: IS_WEB ? 24 : Math.max(insets.bottom, 12) + 10,
-                  backgroundColor: 'transparent',
-                  width: '100%',
-                  maxWidth: 600,
-                  alignSelf: 'center',
-                  zIndex: 10,
-                }}
-              >
-                {isStaff && (
-                  <View style={{ marginBottom: 8 }}>
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                      <TextInput
-                        style={{
-                          flex: 1,
-                          backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                          color: '#facc15',
-                          borderRadius: 20,
-                          paddingHorizontal: 16,
-                          height: 40,
-                          borderWidth: 1,
-                          borderColor: 'rgba(245, 158, 11, 0.3)',
-                          ...(Platform.OS === 'web'
-                            ? ({ outlineStyle: 'none' } as any)
-                            : {}),
-                        }}
-                        placeholder="Add a hidden internal note for staff..."
-                        placeholderTextColor="rgba(245, 158, 11, 0.4)"
-                        value={internalNote}
-                        onChangeText={setInternalNote}
-                      />
-                      <TouchableOpacity
-                        onPress={() => handleSendMessage(true)}
-                        disabled={!internalNote.trim() || isSubmitting}
-                        style={{
-                          width: 40,
-                          height: 40,
-                          backgroundColor: 'rgba(245, 158, 11, 0.05)',
-                          borderRadius: 20,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderWidth: 1,
-                          borderColor: 'rgba(245, 158, 11, 0.8)',
-                        }}
-                      >
-                        {isSubmitting ? (
-                          <ActivityIndicator color={C_AMBER} size="small" />
-                        ) : (
-                          <Lock size={16} color={C_AMBER} />
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )}
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'flex-end',
-                    gap: 12,
-                  }}
-                >
-                  <View
+              {isStaff && (
+                <View style={{ flexShrink: 0, paddingRight: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => setStatusModalVisible(true)}
                     style={{
-                      flex: 1,
-                      backgroundColor: 'rgba(255,255,255,0.05)',
-                      borderRadius: 24,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      borderRadius: 12,
                       borderWidth: 1,
-                      borderColor: 'rgba(255, 255, 255, 0.1)',
-                      minHeight: 48,
-                      maxHeight: 120,
-                      justifyContent: 'center',
+                      borderColor: getStatusColor(selectedTicket.status),
+                      backgroundColor:
+                        getStatusColor(selectedTicket.status) + '15',
                     }}
                   >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: '600',
+                        color: getStatusColor(selectedTicket.status),
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      {selectedTicket.status.toUpperCase().replace('_', ' ')}
+                    </Text>
+                    <ChevronDown
+                      size={14}
+                      color={getStatusColor(selectedTicket.status)}
+                      style={{ marginLeft: 6 }}
+                    />
+                  </TouchableOpacity>
+                </View>
+              )}
+              <View style={{ width: 45 }} />
+            </View>
+
+            {/* Chat List */}
+            <FlatList
+              ref={flatListRef}
+              data={selectedTicket.messages}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{
+                paddingHorizontal: 4,
+                paddingTop: 16,
+                paddingBottom: 40,
+              }}
+              showsVerticalScrollIndicator={false}
+              renderItem={renderChatMessage}
+              onContentSizeChange={() =>
+                flatListRef.current?.scrollToEnd({ animated: true })
+              }
+              keyboardShouldPersistTaps="handled"
+            />
+
+            {/* Input Container */}
+            <View
+              style={{
+                paddingHorizontal: 12,
+                paddingTop: 12,
+                paddingBottom: bottomChatPadding,
+                backgroundColor: 'transparent',
+                width: '100%',
+              }}
+            >
+              {isStaff && (
+                <View style={{ marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
                     <TextInput
                       style={{
-                        color: 'white',
+                        flex: 1,
+                        backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                        color: '#facc15',
+                        borderRadius: 20,
                         paddingHorizontal: 16,
-                        paddingTop: Platform.OS === 'ios' ? 14 : 10,
-                        paddingBottom: Platform.OS === 'ios' ? 14 : 10,
-                        fontSize: 15,
+                        height: 48,
+                        borderWidth: 1,
+                        borderColor: 'rgba(245, 158, 11, 0.3)',
                         ...(Platform.OS === 'web'
                           ? ({ outlineStyle: 'none' } as any)
                           : {}),
                       }}
-                      placeholder="Type a secure message..."
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      value={newMessage}
-                      onChangeText={setNewMessage}
-                      multiline
+                      placeholder="Add a hidden internal note for staff..."
+                      placeholderTextColor="rgba(245, 158, 11, 0.4)"
+                      value={internalNote}
+                      onChangeText={setInternalNote}
                     />
+                    <TouchableOpacity
+                      onPress={() => handleSendMessage(true)}
+                      disabled={!internalNote.trim() || isSubmitting}
+                      style={{
+                        width: 48,
+                        height: 48,
+                        backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                        borderRadius: 24,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: 'rgba(245, 158, 11, 0.8)',
+                      }}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator color={C_AMBER} size="small" />
+                      ) : (
+                        <Lock size={16} color={C_AMBER} />
+                      )}
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity
-                    disabled={!newMessage.trim() || isSubmitting}
-                    onPress={() => handleSendMessage(false)}
-                    style={{
-                      width: 48,
-                      height: 48,
-                      backgroundColor: newMessage.trim()
-                        ? C_CYAN
-                        : 'rgba(255,255,255,0.08)',
-                      borderRadius: 24,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      marginBottom: 0,
-                    }}
-                  >
-                    {isSubmitting ? (
-                      <ActivityIndicator color={C_NAVY} size="small" />
-                    ) : (
-                      <Send
-                        size={20}
-                        color={
-                          newMessage.trim() ? C_NAVY : 'rgba(255,255,255,0.5)'
-                        }
-                        style={{ marginLeft: newMessage.trim() ? -2 : 0 }}
-                      />
-                    )}
-                  </TouchableOpacity>
                 </View>
+              )}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-end',
+                  gap: 12,
+                }}
+              >
+                <View
+                  style={{
+                    flex: 1,
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    borderRadius: 24,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    minHeight: 48,
+                    maxHeight: 120,
+                    justifyContent: 'center',
+                  }}
+                >
+                  <TextInput
+                    style={{
+                      color: 'white',
+                      paddingHorizontal: 16,
+                      paddingTop: Platform.OS === 'ios' ? 14 : 10,
+                      paddingBottom: Platform.OS === 'ios' ? 14 : 10,
+                      fontSize: 15,
+                      ...(Platform.OS === 'web'
+                        ? ({ outlineStyle: 'none' } as any)
+                        : {}),
+                    }}
+                    placeholder="Type a secure message..."
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={newMessage}
+                    onChangeText={setNewMessage}
+                    multiline
+                  />
+                </View>
+                <TouchableOpacity
+                  disabled={!newMessage.trim() || isSubmitting}
+                  onPress={() => handleSendMessage(false)}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    backgroundColor: newMessage.trim()
+                      ? C_CYAN
+                      : 'rgba(255,255,255,0.08)',
+                    borderRadius: 24,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 0,
+                  }}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator color={C_NAVY} size="small" />
+                  ) : (
+                    <Send
+                      size={20}
+                      color={
+                        newMessage.trim() ? C_NAVY : 'rgba(255,255,255,0.5)'
+                      }
+                      style={{ marginLeft: newMessage.trim() ? -2 : 0 }}
+                    />
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         )}
 
         {/* ─── VIEW 2: CREATE TICKET ─── */}
@@ -1827,7 +1816,6 @@ export default function SupportScreen() {
                     paddingTop: 80,
                   }}
                 >
-                  <Text style={{ fontSize: 48, marginBottom: 20 }}>📭</Text>
                   <Text
                     style={{
                       color: 'rgba(255,255,255,0.4)',
