@@ -8,7 +8,7 @@
  * 1. NEBULA AMBIENT ENGINE: Parity with settings/index. 120fps UI-thread physics.
  * 2. BIOMETRIC SVG MATRIX: High-fidelity, multi-layered rotating SVG identity core.
  * 3. TOUCH SAFETY: pointerEvents="none" strictly enforced on all ambient layers.
- * 4. ATOMIC STATE: Upload handlers and DB logic strictly preserved.
+ * 4. DOM SAFETY: Strict ternary logic (?:) used to prevent empty string text node crashes.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -53,7 +53,7 @@ import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
 
 // ─── ANIMATION ENGINE & SVG ──────────────────────────────────────────────────
-import Svg, { Rect, Path, Circle } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -79,6 +79,7 @@ const THEME = {
 const IS_WEB = Platform.OS === 'web';
 
 // ─── MODULE: ROLE DECODER ────────────────────────────────────────────────────
+// Translates Supabase RBAC string into Liquid Neon styling parameters
 const getRoleConfig = (role?: string) => {
   switch (role?.toLowerCase()) {
     case 'admin':
@@ -106,7 +107,7 @@ const getRoleConfig = (role?: string) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: NEBULA AMBIENT ENGINE (Parity with Settings/Index)
+// MODULE 1: NEBULA AMBIENT ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CorePulse = React.memo(
@@ -131,6 +132,7 @@ const CorePulse = React.memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           animatedStyle,
           {
@@ -150,18 +152,6 @@ const CorePulse = React.memo(
 );
 CorePulse.displayName = 'CorePulse';
 
-interface OrganicOrbProps {
-  color: string;
-  size: number;
-  initialX: number;
-  initialY: number;
-  speedX: number;
-  speedY: number;
-  phaseOffsetX: number;
-  phaseOffsetY: number;
-  opacityBase: number;
-}
-
 const OrganicOrb = React.memo(
   ({
     color,
@@ -173,7 +163,7 @@ const OrganicOrb = React.memo(
     phaseOffsetX,
     phaseOffsetY,
     opacityBase,
-  }: OrganicOrbProps) => {
+  }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
 
@@ -293,7 +283,6 @@ AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 2: BIOMETRIC IDENTITY MATRIX (Animated SVG)
-// High-performance layered SVG animation. Rings rotate in opposite directions.
 // ══════════════════════════════════════════════════════════════════════════════
 const AnimatedProfileMatrix = () => {
   const floatY = useSharedValue(0);
@@ -302,7 +291,6 @@ const AnimatedProfileMatrix = () => {
   const innerRot = useSharedValue(360);
 
   useEffect(() => {
-    // 1. Core Floating
     floatY.value = withRepeat(
       withSequence(
         withTiming(-8, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
@@ -312,7 +300,6 @@ const AnimatedProfileMatrix = () => {
       true,
     );
 
-    // 2. Core Breathing
     pulseScale.value = withRepeat(
       withSequence(
         withTiming(1.05, { duration: 2000, easing: Easing.inOut(Easing.sin) }),
@@ -322,14 +309,12 @@ const AnimatedProfileMatrix = () => {
       true,
     );
 
-    // 3. Outer Ring Rotation (Clockwise)
     outerRot.value = withRepeat(
       withTiming(360, { duration: 18000, easing: Easing.linear }),
       -1,
       false,
     );
 
-    // 4. Inner Ring Rotation (Counter-Clockwise)
     innerRot.value = withRepeat(
       withTiming(0, { duration: 12000, easing: Easing.linear }),
       -1,
@@ -362,7 +347,7 @@ const AnimatedProfileMatrix = () => {
         floatStyle,
       ]}
     >
-      {/* LAYER 1: Slow Clockwise Outer Tech Ring */}
+      {/* LAYER 1: Clockwise Outer Tech Ring */}
       <Animated.View
         style={[{ position: 'absolute', width: 140, height: 140 }, outerStyle]}
       >
@@ -382,7 +367,7 @@ const AnimatedProfileMatrix = () => {
         </Svg>
       </Animated.View>
 
-      {/* LAYER 2: Medium Counter-Clockwise Inner Data Ring */}
+      {/* LAYER 2: Counter-Clockwise Inner Data Ring */}
       <Animated.View
         style={[{ position: 'absolute', width: 140, height: 140 }, innerStyle]}
       >
@@ -402,7 +387,7 @@ const AnimatedProfileMatrix = () => {
         </Svg>
       </Animated.View>
 
-      {/* LAYER 3: Pulsing Central Identity Core */}
+      {/* LAYER 3: Pulsing Central Core */}
       <Animated.View
         style={[
           {
@@ -425,7 +410,6 @@ const AnimatedProfileMatrix = () => {
             strokeWidth="1"
             opacity="0.5"
           />
-          {/* User Silhouette */}
           <Circle cx="30" cy="22" r="10" fill={THEME.cyan} opacity="0.9" />
           <Path
             d="M 10 50 C 10 38, 50 38, 50 50 Z"
@@ -440,17 +424,7 @@ const AnimatedProfileMatrix = () => {
 
 // ─── MODULE: STAT PILL ───────────────────────────────────────────────────────
 const StatPill = memo(
-  ({
-    icon: Icon,
-    label,
-    value,
-    color = '#00F0FF',
-  }: {
-    icon: any;
-    label: string;
-    value: string;
-    color?: string;
-  }) => (
+  ({ icon: Icon, label, value, color = '#00F0FF' }: any) => (
     <View
       className="items-center flex-1 p-4 border rounded-2xl border-white/10"
       style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
@@ -470,7 +444,9 @@ const StatPill = memo(
 );
 StatPill.displayName = 'StatPill';
 
-// ─── MODULE: PRIMARY SCREEN ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 3: PRIMARY SCREEN ORCHESTRATOR
+// ══════════════════════════════════════════════════════════════════════════════
 export default function ProfileSettingsScreen() {
   const router = useRouter();
   const { user, profile } = useAuthStore();
@@ -486,7 +462,6 @@ export default function ProfileSettingsScreen() {
   const userRole = profile?.role || 'member';
   const roleConfig = getRoleConfig(userRole);
 
-  // ─── AVATAR RING PHYSICS ──────────────────────────────────────────────────
   const ringScale = useSharedValue(1);
   const ringOpacity = useSharedValue(0.3);
 
@@ -503,7 +478,6 @@ export default function ProfileSettingsScreen() {
     opacity: ringOpacity.value,
   }));
 
-  // ─── IDENTITY SYNC ────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadProfile() {
       if (!user) return;
@@ -535,7 +509,6 @@ export default function ProfileSettingsScreen() {
     loadProfile();
   }, [user]);
 
-  // ─── MEDIA LIBRARY BRIDGE ─────────────────────────────────────────────────
   const handlePickImage = useCallback(async () => {
     if (Platform.OS !== 'web') {
       const { status } =
@@ -554,7 +527,6 @@ export default function ProfileSettingsScreen() {
     performAvatarSync(result.assets[0]);
   }, [user]);
 
-  // ─── STORAGE BUCKET UPLOAD ENGINE ────────────────────────────────────────
   const performAvatarSync = async (asset: ImagePicker.ImagePickerAsset) => {
     setIsUploading(true);
     pulseRing();
@@ -567,7 +539,6 @@ export default function ProfileSettingsScreen() {
       if (Platform.OS === 'web') {
         const response = await fetch(asset.uri);
         const blob = await response.blob();
-
         const { error } = await supabase.storage
           .from('avatars')
           .upload(fileName, blob, {
@@ -582,7 +553,6 @@ export default function ProfileSettingsScreen() {
           name: fileName,
           type: `image/${ext}`,
         } as any);
-
         const { error } = await supabase.storage
           .from('avatars')
           .upload(fileName, formData, { upsert: true });
@@ -594,7 +564,6 @@ export default function ProfileSettingsScreen() {
       const { data: urlData } = supabase.storage
         .from('avatars')
         .getPublicUrl(fileName);
-
       setAvatarUrl(urlData.publicUrl);
 
       await supabase
@@ -620,7 +589,6 @@ export default function ProfileSettingsScreen() {
     }
   };
 
-  // ─── DATABASE IDENTITY COMMIT ─────────────────────────────────────────────
   const handleSaveProfile = useCallback(async () => {
     if (!user || !fullName.trim()) {
       Alert.alert('Input Required', 'Username designation cannot be blank.');
@@ -647,21 +615,8 @@ export default function ProfileSettingsScreen() {
     }
   }, [user, fullName]);
 
-  const handleReturn = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/settings');
-  };
-
-  if (isLoading) {
-    return (
-      <View className="flex-1 bg-[#000012] items-center justify-center">
-        <ActivityIndicator color={THEME.cyan} size="large" />
-      </View>
-    );
-  }
-
   return (
-    <SafeAreaView className="flex-1 bg-[#000012]">
+    <SafeAreaView className="flex-1 bg-[#000016]">
       {/* ── NEBULA AMBIENT BACKGROUND ── */}
       <AmbientArchitecture />
 
@@ -675,46 +630,58 @@ export default function ProfileSettingsScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View className="w-full max-w-2xl px-6 pt-12 mx-auto">
-            {/* ─── RETURN BUTTON ───────────────────────────────────────────── */}
-            <TouchableOpacity
-              onPress={handleReturn}
-              className="flex-row items-center mb-12 gap-x-3"
-              activeOpacity={0.7}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            {/* ─── CENTRALLY ALIGNED RETURN NAVIGATION & SVG HEADER ──────────── */}
+            <FadeIn
+              delay={100}
+              className="relative z-50 items-center justify-center w-full mb-12"
             >
-              <ArrowBigLeftDash size={24} color={THEME.cyan} />
-              <Text className="text-[11px] font-black tracking-[4px] text-[#00F0FF] uppercase"></Text>
-            </TouchableOpacity>
+              {/* Isolated Touch Node (CRITICAL FIX: Removed rogue text node) */}
+              <TouchableOpacity
+                onPress={() =>
+                  router.canGoBack()
+                    ? router.back()
+                    : router.replace('/settings')
+                }
+                className="absolute left-0 z-50 flex-row items-center gap-x-2 active:scale-95"
+                activeOpacity={0.7}
+                hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              >
+                <ArrowBigLeftDash size={20} color={THEME.cyan} />
+                <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase hidden md:flex">
+                  RETURN
+                </Text>
+              </TouchableOpacity>
 
-            {/* ─── PAGE HEADER (ANIMATED BIOMETRIC MATRIX) ─────────────────── */}
-            <FadeIn>
-              <View className="flex-row items-center justify-between mb-12">
-                <View className="items-center justify-center">
-                  <AnimatedProfileMatrix />
-                  <View className="h-[2px] w-20 bg-[#00F0FF] mt-2 rounded-full shadow-[0_0_15px_#00F0FF]" />
-                </View>
+              {/* Centered Profile Matrix */}
+              <View className="items-center">
+                <AnimatedProfileMatrix />
+                <View className="h-[2px] w-20 bg-[#00F0FF] mt-4 rounded-full shadow-[0_0_15px_#00F0FF]" />
+              </View>
 
-                <View
+              {/* RBAC Role Tag */}
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 20,
+                  backgroundColor: roleConfig.bg,
+                  borderColor: roleConfig.border,
+                  borderWidth: 1,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 8,
+                }}
+              >
+                <Text
                   style={{
-                    backgroundColor: roleConfig.bg,
-                    borderColor: roleConfig.border,
-                    borderWidth: 1,
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 8,
+                    color: roleConfig.text,
+                    fontSize: 10,
+                    fontWeight: '900',
+                    letterSpacing: 2,
                   }}
                 >
-                  <Text
-                    style={{
-                      color: roleConfig.text,
-                      fontSize: 10,
-                      fontWeight: '900',
-                      letterSpacing: 2,
-                    }}
-                  >
-                    {roleConfig.label}
-                  </Text>
-                </View>
+                  {roleConfig.label}
+                </Text>
               </View>
             </FadeIn>
 
@@ -796,20 +763,24 @@ export default function ProfileSettingsScreen() {
                         </View>
                       )}
                     </TouchableOpacity>
-                    {avatarUrl && !isUploading && (
-                      <View
-                        style={{ flexDirection: 'row', alignItems: 'center' }}
-                      >
-                        <View style={styles.actionDivider} />
-                        <TouchableOpacity
-                          onPress={() => setAvatarUrl('')}
-                          style={styles.actionButton}
-                          activeOpacity={0.7}
+
+                    {/* CRITICAL DOM FIX: Strict ternary prevents empty string ("") node crash in React Native */}
+                    {avatarUrl ? (
+                      !isUploading ? (
+                        <View
+                          style={{ flexDirection: 'row', alignItems: 'center' }}
                         >
-                          <RotateCcw size={20} color={THEME.pink} />
-                        </TouchableOpacity>
-                      </View>
-                    )}
+                          <View style={styles.actionDivider} />
+                          <TouchableOpacity
+                            onPress={() => setAvatarUrl('')}
+                            style={styles.actionButton}
+                            activeOpacity={0.7}
+                          >
+                            <RotateCcw size={20} color={THEME.pink} />
+                          </TouchableOpacity>
+                        </View>
+                      ) : null
+                    ) : null}
                   </View>
                 </View>
               </GlassCard>
@@ -819,7 +790,6 @@ export default function ProfileSettingsScreen() {
             <FadeIn delay={200}>
               <GlassCard className="p-8 mb-8 border-white/5">
                 <View className="gap-y-10">
-                  {/* Full name input */}
                   <View>
                     <View className="flex-row items-center mb-4 ml-1">
                       <User size={14} color={THEME.cyan} />
@@ -853,7 +823,6 @@ export default function ProfileSettingsScreen() {
                     </View>
                   </View>
 
-                  {/* Email — read only */}
                   <View>
                     <View className="flex-row items-center mb-4 ml-1">
                       <Mail size={14} color="rgba(255,255,255,0.3)" />
@@ -863,7 +832,7 @@ export default function ProfileSettingsScreen() {
                     </View>
                     <View className="flex-row items-center justify-between h-16 px-6 border opacity-50 bg-white/5 border-white/5 rounded-2xl">
                       <Text className="font-mono text-sm tracking-tight text-white/40">
-                        {user?.email}
+                        {user?.email || 'N/A'}
                       </Text>
                       <Shield size={14} color="rgba(255,255,255,0.1)" />
                     </View>
@@ -898,7 +867,7 @@ export default function ProfileSettingsScreen() {
                 <StatPill
                   icon={Sparkles}
                   label="CREATED"
-                  value={memberSince}
+                  value={memberSince || 'Just now'}
                   color={THEME.pink}
                 />
               </View>

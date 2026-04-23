@@ -1,9 +1,22 @@
 /**
  * babel.config.cjs
- * Corrected structure for NativeWind v4.
+ * VeraxAI Core: NativeWind v4 & Production Hardening
  */
 module.exports = function (api) {
-  api.cache(true);
+  // Cache the configuration based on the environment (development vs production)
+  api.cache.using(() => process.env.NODE_ENV);
+
+  const isProd = api.env('production');
+
+  // Base plugins required for VeraxAI architecture
+  const plugins = ['react-native-reanimated/plugin'];
+
+  // STRATEGIC INJECTION: Strip all console logs ONLY in production.
+  // We preserve 'error' and 'warn' for catastrophic crash reporting via Sentry/Crashlytics if added later.
+  if (isProd) {
+    plugins.push(['transform-remove-console', { exclude: ['error', 'warn'] }]);
+  }
+
   return {
     presets: [
       [
@@ -15,6 +28,6 @@ module.exports = function (api) {
       ],
       'nativewind/babel',
     ],
-    plugins: ['react-native-reanimated/plugin'],
+    plugins: plugins,
   };
 };

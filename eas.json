@@ -1,4 +1,8 @@
 {
+  "cli": {
+    "version": ">= 7.0.0",
+    "appVersionSource": "remote"
+  },
   "build": {
     "preview": {
       "distribution": "internal",
@@ -17,10 +21,28 @@
     },
     "production": {
       "channel": "production",
-      "environment": "production"
+      "environment": "production",
+      "node": "20.x",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jhcgkqzjabsitfilajuh.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoY2drcXpqYWJzaXRmaWxhanVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NTUxOTIsImV4cCI6MjA4OTQzMTE5Mn0.5tTsWTYNzDOyf6Evf2EXiJ2dhvpuRfixuGiMt1evHgA"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "autoIncrement": true
+      },
+      "ios": {
+        "autoIncrement": true
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "track": "production",
+        "releaseStatus": "completed"
+      }
+    }
   }
 }

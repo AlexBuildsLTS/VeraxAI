@@ -3,11 +3,11 @@
  * VeraxAI Dashboard — Master Orchestration UI
  * ══════════════════════════════════════════════════════════════════════════════
  * PROTOCOL:
- * THE WANDERING CORE: A single, smooth-gliding cyan emitter
- * SOLID WAVES: The waves are now SOLID, glowing pulses (no hollow rings)
- * DEEP NEBULA ENGINE: Soft, massive background blurs for depth
- * tOUCH SAFETY: 110% APK touch-safe using pointerEvents="none" and zIndex:-1
- * NATIVE SVG: Bypasses Metro bundler crashes using react-native-svg
+ * 1. THE WANDERING CORE: A single, smooth-gliding emitter with solid glowing waves.
+ * 2. DEEP NEBULA ENGINE: Soft, massive background blurs for depth.
+ * 3. TOUCH SAFETY: 110% APK touch-safe using pointerEvents="none" and zIndex:-1.
+ * 4. NATIVE SVG: Bypasses Metro bundler crashes using react-native-svg.
+ * 5. EXECUTION NODE: Custom #00C6A2 Liquid Neon execution button mapped to pipeline.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -22,24 +22,24 @@ import {
   KeyboardAvoidingView,
   LayoutAnimation,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// State & API
+// ─── STATE & DATA ORCHESTRATION ──────────────────────────────────────────────
 import { useVideoStore } from '../../store/useVideoStore';
 import { useProcessVideo } from '../../hooks/mutations/useProcessVideo';
 import { useVideoData } from '../../hooks/queries/useVideoData';
-import { Button } from '../../components/ui/Button';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { Input } from '../../components/ui/Input';
 
-// Animations
+// ─── ANIMATIONS & UTILS ──────────────────────────────────────────────────────
 import { FadeIn } from '../../components/animations/FadeIn';
 import { ProcessingLoader } from '../../components/ui/ProcessingLoader';
 import { cn } from '../../lib/utils';
 
-// Native SVG & Animation
+// ─── NATIVE SVG & REANIMATED PIPELINE ────────────────────────────────────────
 import Svg, { Rect, Path, Polygon } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -59,12 +59,16 @@ const THEME = {
   purple: '#8A2BE2',
   pink: '#800347',
   green: '#008f66',
+  transcriber: '#00C6A2', // Primary Execution Color
   obsidian: '#020205',
 };
 
 const IS_WEB = Platform.OS === 'web';
 
-// ─── SMALL BADGE ICON ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 1: STATIC SVG ASSETS
+// ══════════════════════════════════════════════════════════════════════════════
+
 const SmallBadgeIcon = ({ width = 20, height = 20, color = THEME.cyan }) => (
   <Svg
     width={width}
@@ -80,8 +84,7 @@ const SmallBadgeIcon = ({ width = 20, height = 20, color = THEME.cyan }) => (
   </Svg>
 );
 
-// ─── ANIMATED HERO SVG (The Video Processor Icon) ────────────────────────────
-const AnimatedConverter = () => {
+const AnimatedConverter = memo(() => {
   const rotation = useSharedValue(0);
   const floatY = useSharedValue(0);
 
@@ -99,12 +102,11 @@ const AnimatedConverter = () => {
       -1,
       true,
     );
-  }, [rotation, floatY]);
+  }, []);
 
   const floatStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatY.value }],
   }));
-
   const spinStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
@@ -157,86 +159,80 @@ const AnimatedConverter = () => {
       </View>
     </Animated.View>
   );
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: AMBIENT ENGINE (Wandering Core + Nebula)
-// ══════════════════════════════════════════════════════════════════════════════
-
-const SingleRipple = React.memo(({ color, delay, duration, maxSize }: any) => {
-  const progress = useSharedValue(0);
-  useEffect(() => {
-    progress.value = withDelay(
-      delay,
-      withRepeat(
-        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
-        -1,
-        false,
-      ),
-    );
-  }, []);
-  const animatedStyle = useAnimatedStyle(() => ({
-    width: interpolate(progress.value, [0, 1], [0, maxSize]),
-    height: interpolate(progress.value, [0, 1], [0, maxSize]),
-    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
-    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
-  }));
-  return (
-    <Animated.View
-      style={[
-        {
-          position: 'absolute',
-          borderColor: color,
-          backgroundColor: 'transparent',
-        },
-        animatedStyle,
-      ]}
-    />
-  );
 });
+AnimatedConverter.displayName = 'AnimatedConverter';
 
-// ─── PART B: THE GLIDING CORE ───
-interface GlidingEmitterProps {
-  coreSize: number;
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 2: HARDWARE-ACCELERATED AMBIENT ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface RippleProps {
   color: string;
-  maxWaveSize: number;
-  waveCount: number;
-  baseDuration: number;
+  delay: number;
+  duration: number;
+  maxSize: number;
 }
 
+const SingleRipple = memo(
+  ({ color, delay, duration, maxSize }: RippleProps) => {
+    const progress = useSharedValue(0);
+
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, []);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(progress.value, [0, 0.1, 0.6, 1], [0, 0.4, 0.05, 0]),
+      borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+SingleRipple.displayName = 'SingleRipple';
+
 const WanderingCore = memo(
-  ({
-    coreSize,
-    color,
-    maxWaveSize,
-    waveCount,
-    baseDuration,
-  }: GlidingEmitterProps) => {
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
     const stagger = baseDuration / waveCount;
 
-    // 120fps UI-Thread Logic for ultra-smooth gliding
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
 
-    // Moves the core in a sleek infinity loop
-    const animatedPosition = useAnimatedStyle(() => {
-      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
-      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
 
-      return {
-        transform: [
-          { translateX: width / 2 + xOffset },
-          { translateY: height / 2 + yOffset },
-        ],
-      };
-    });
-
-    const corePulse = useSharedValue(0.4);
+    const corePulse = useSharedValue(0.6);
     useEffect(() => {
       corePulse.value = withRepeat(
         withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
@@ -247,7 +243,9 @@ const WanderingCore = memo(
 
     const coreStyle = useAnimatedStyle(() => ({
       opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
-      transform: [{ scale: interpolate(corePulse.value, [0.4, 1], [0.5, 1]) }],
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
     }));
 
     return (
@@ -274,7 +272,6 @@ const WanderingCore = memo(
             maxSize={maxWaveSize}
           />
         ))}
-
         <Animated.View
           style={[
             coreStyle,
@@ -297,7 +294,6 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
-// ─── PART C: THE DEEP NEBULA (From Settings) ───
 const OrganicOrb = memo(
   ({
     color,
@@ -324,7 +320,6 @@ const OrganicOrb = memo(
       const yOffset =
         Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
       const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
-
       return {
         transform: [
           { translateX: initialX + xOffset },
@@ -357,16 +352,13 @@ const OrganicOrb = memo(
 );
 OrganicOrb.displayName = 'OrganicOrb';
 
-// ─── MASTER AMBIENT CONTROLLER ───
 const AmbientArchitecture = memo(() => {
   const { width, height } = Dimensions.get('window');
   const isDesktop = width >= 1024;
   const massiveWaveRadius = isDesktop ? width * 0.4 : height * 1.0;
 
   return (
-    // CRITICAL: pointerEvents="none" guarantees zero touch overlap
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* LAYER 1: Deep Nebula Background (From Settings - Soft and elegant) */}
       <OrganicOrb
         color={THEME.green}
         size={width * 0.6}
@@ -389,14 +381,12 @@ const AmbientArchitecture = memo(() => {
         phaseOffsetY={Math.PI}
         opacityBase={0.04}
       />
-
-      {/* LAYER 2: The Wandering Core with Solid Glowing Waves */}
       <WanderingCore
         coreSize={14}
-        color="#02AABC" // Cyan Core
+        color={THEME.transcriber}
         maxWaveSize={massiveWaveRadius}
-        waveCount={4} // 4 simultaneous pulses fading as they grow
-        baseDuration={12000} // 12 seconds for a wave to fully expand
+        waveCount={4}
+        baseDuration={12000}
       />
     </View>
   );
@@ -404,7 +394,7 @@ const AmbientArchitecture = memo(() => {
 AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: DASHBOARD UI & INPUT ROUTING
+// MODULE 3: DASHBOARD UI & INPUT ROUTING
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface PipelineStatus {
@@ -487,9 +477,8 @@ export default function DashboardScreen() {
         level,
       };
       setLogs((prev) => [newLog, ...prev].slice(0, 8));
-      if (Platform.OS !== 'web') {
+      if (Platform.OS !== 'web')
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      }
     },
     [],
   );
@@ -504,14 +493,12 @@ export default function DashboardScreen() {
         completed: 'Processing complete. Results ready.',
         failed: 'Processing pipeline encountered a critical error.',
       };
-
       const level =
         videoData.status === 'completed'
           ? 'success'
           : videoData.status === 'failed'
             ? 'error'
             : 'info';
-
       addLog(
         statusFormats[videoData.status] ||
           `Status updated: ${videoData.status}`,
@@ -526,9 +513,7 @@ export default function DashboardScreen() {
       addLog('Validation Error: No URL provided.', 'warn');
       return;
     }
-
     const urlRegex = /^https?:\/\/.+/;
-
     if (!videoUrl.trim() || !urlRegex.test(videoUrl)) {
       setIsUrlValid(false);
       addLog('Validation Error: Invalid URL format provided.', 'warn');
@@ -544,7 +529,6 @@ export default function DashboardScreen() {
         videoUrl: videoUrl,
         language: selectedLanguage,
       });
-
       if (result.success) {
         addLog('Pipeline successfully initiated.', 'success');
       } else {
@@ -568,7 +552,6 @@ export default function DashboardScreen() {
         glow: 'shadow-[0_0_15px_rgba(0,240,255,0.4)]',
       };
     }
-
     if (!videoData?.status) return null;
 
     const maps: Record<string, PipelineStatus> = {
@@ -611,13 +594,10 @@ export default function DashboardScreen() {
         text: 'FAILED',
         progress: 'w-full',
         color: 'bg-rose-500',
-        description:
-          videoData.error_message ||
-          'An unexpected error occurred during processing.',
+        description: videoData.error_message || 'An unexpected error occurred.',
         glow: 'shadow-[0_0_15px_rgba(244,63,94,0.4)]',
       },
     };
-
     return maps[videoData.status] || null;
   }, [videoData, isPending]);
 
@@ -627,14 +607,11 @@ export default function DashboardScreen() {
       videoData.status !== 'completed' &&
       videoData.status !== 'failed'),
   );
-
   const displayError =
     (mutationError as Error)?.message || videoData?.error_message;
 
   return (
     <SafeAreaView className="flex-1 bg-[#010114]">
-      {/* ── THE ISOLATED AMBIENT KERNEL ── */}
-      {/* 110% Touch Safe. zIndex: -1 forces it behind everything, pointerEvents="none" turns off touches */}
       <View
         style={[
           StyleSheet.absoluteFill,
@@ -668,7 +645,6 @@ export default function DashboardScreen() {
                     VeraxAI Engine 1.0
                   </Text>
                 </View>
-
                 <View className="items-center justify-center mb-8">
                   {effectivelyLoading ? (
                     <ProcessingLoader
@@ -681,7 +657,6 @@ export default function DashboardScreen() {
                     </FadeIn>
                   )}
                 </View>
-
                 <View className="h-[2px] w-16 md:w-24 bg-[#00F0FF] mt-6 md:mt-8 rounded-full shadow-[0_0_20px_rgba(0,240,255,0.5)]" />
               </View>
             </FadeIn>
@@ -732,11 +707,7 @@ export default function DashboardScreen() {
                                 left: 5,
                                 right: 5,
                               }}
-                              className={`px-5 py-2.5 rounded-xl border transition-colors ${
-                                active
-                                  ? 'bg-[#00F0FF]/20 border-[#00F0FF]/50'
-                                  : 'bg-white/[0.03] border-white/10'
-                              }`}
+                              className={`px-5 py-2.5 rounded-xl border transition-colors ${active ? 'bg-[#00F0FF]/20 border-[#00F0FF]/50' : 'bg-white/[0.03] border-white/10'}`}
                             >
                               <Text
                                 className={`text-xs font-semibold tracking-wide ${active ? 'text-[#00F0FF]' : 'text-white/80'}`}
@@ -804,17 +775,34 @@ export default function DashboardScreen() {
                     )}
                   </View>
 
-                  <Button
-                    title={
-                      effectivelyLoading
-                        ? 'TRANSMITTING REQUEST...'
-                        : 'START TRANSCRIBER'
-                    }
+                  {/* ─── TRANSCRIBER EXECUTION BUTTON ──────────────────────────────── */}
+                  <TouchableOpacity
                     onPress={handleProcessVideo}
-                    isLoading={effectivelyLoading}
-                    variant="primary"
-                    className="py-5 mt-8 bg-[#1E3A8A] shadow-[0_0_15px_rgba(30,58,138,0.5)] md:py-6 rounded-xl"
-                  />
+                    disabled={effectivelyLoading}
+                    className={cn(
+                      'items-center justify-center w-full py-5 mt-8 border rounded-xl md:py-6 active:scale-95 transition-transform',
+                      effectivelyLoading
+                        ? 'bg-white/5 border-white/10'
+                        : 'bg-[#00C6A2]/10 border-[#00C6A2]/30 shadow-[0_0_20px_rgba(0,198,162,0.15)]',
+                    )}
+                  >
+                    {effectivelyLoading ? (
+                      <View className="flex-row items-center gap-x-3">
+                        <ActivityIndicator
+                          color={THEME.transcriber}
+                          size="small"
+                        />
+                        <Text className="text-[#00C6A2]/70 text-xs font-black tracking-[4px] uppercase">
+                          Transmitting Request...
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text className="text-[#00C6A2] text-sm font-black tracking-[4px] uppercase">
+                        START TRANSCRIBER
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  {/* ───────────────────────────────────────────────────────────────── */}
 
                   {displayError && (
                     <View className="p-5 mt-6 border bg-rose-500/40 border-rose-500/20 rounded-2xl">
@@ -868,7 +856,6 @@ export default function DashboardScreen() {
                             )}
                           />
                         </View>
-
                         <Text
                           className={cn(
                             'text-xs font-medium',

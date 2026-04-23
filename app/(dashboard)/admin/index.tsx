@@ -260,7 +260,7 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
-// ─── PART C: THE DEEP NEBULA (From Settings) ───
+// ─── PART C: THE DEEP NEBULA ───
 const OrganicOrb = memo(
   ({
     color,

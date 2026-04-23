@@ -4,8 +4,7 @@
  * ----------------------------------------------------------------------------
  * ARCHITECTURE & PROTOCOLS:
  * 1. STRICT SCHEMA ENFORCEMENT: Guarantees 100% valid JSON payload parsing.
- * 2. CASCADING HYBRID ROTATION: Prioritizes the Master Env Key, then dynamically 
- * queries the 'system_api_keys' database table for UI-injected fallback keys.
+ * 2. CASCADING HYBRID ROTATION: Prioritizes BYOK (User Key) -> Master Env Key -> DB Fallback Keys.
  * 3. RLS BYPASS: Uses Service Role Key to securely access the invisible API Vault.
  * 4. SANITIZATION: Aggressively trims API keys to prevent UI whitespace crashes.
  * 5. ADVANCED TELEMETRY: Tracks and returns the exact 'used_key_alias' for UI Charts.
@@ -72,7 +71,7 @@ export type InsightsResult = {
     description: string;
   };
   tokens_used: number;
-  used_key_alias: string; // <-- New telemetry hook for UI charts
+  used_key_alias: string;
 };
 
 // ─── UTILITY ENGINES ─────────────────────────────────────────────────────────
@@ -111,26 +110,30 @@ function getContentCategory(transcript: string): 'short' | 'medium' | 'long' {
 
 // ─── HYBRID KEY FETCHING ENGINE ─────────────────────────────────────────────
 
-async function getCascadingKeys(): Promise<{ id: string | null, key: string, alias: string }[]> {
+async function getCascadingKeys(userCustomKey?: string): Promise<{ id: string | null, key: string, alias: string }[]> {
   const keys: { id: string | null, key: string, alias: string }[] = [];
 
-  // 1. Master Environment Key (Fastest, zero DB latency)
+  // 0. User's Custom Key (BYOK) - Absolute Highest Priority
+  if (userCustomKey && userCustomKey.trim().length > 0) {
+    keys.push({ id: null, key: userCustomKey.trim(), alias: 'USER_BYOK' });
+  }
+
+  // 1. Master Environment Key
   const primary = Deno.env.get('GEMINI_API_KEY');
   if (primary && primary.trim().length > 0) {
     keys.push({ id: null, key: primary.trim(), alias: 'ENV_MASTER' });
   }
 
-  // 2. Fetch UI Fallback Keys (Wrapped in try/catch to survive DB timeouts)
+  // 2. Fetch UI Fallback Keys from DB
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-    // Utilize Service Role to aggressively bypass RLS shielding on the API Vault
     if (supabaseUrl && serviceKey) {
       const supabaseAdmin = createClient(supabaseUrl, serviceKey);
       const { data: dbKeys, error } = await supabaseAdmin
         .from('system_api_keys')
-        .select('id, name, encrypted_key') // Fetching name for chart coloring
+        .select('id, name, encrypted_key')
         .eq('status', 'active')
         .order('created_at', { ascending: true });
 
@@ -138,7 +141,6 @@ async function getCascadingKeys(): Promise<{ id: string | null, key: string, ali
 
       if (dbKeys && dbKeys.length > 0) {
         for (const k of dbKeys) {
-          // Aggressive trim to prevent copy-paste whitespace errors from the UI
           if (k.encrypted_key && k.encrypted_key.trim().length > 0) {
             keys.push({ id: k.id, key: k.encrypted_key.trim(), alias: k.name });
           }
@@ -158,9 +160,10 @@ export async function generateInsights(
   transcript: string,
   language: string,
   difficulty: string,
+  userCustomKey?: string // Inject BYOK parameter
 ): Promise<InsightsResult> {
 
-  const apiKeys = await getCascadingKeys();
+  const apiKeys = await getCascadingKeys(userCustomKey);
 
   if (apiKeys.length === 0) {
     throw new Error('GEMINI_CONFIG_ERROR: No API keys configured in Environment or Database.');
@@ -169,9 +172,8 @@ export async function generateInsights(
   const category = getContentCategory(transcript);
   const targetModel = 'gemini-3.1-flash-lite-preview';
 
-  console.log(`[Insights] Model: ${targetModel} | Target Language: ${language} | Keys Loaded: ${apiKeys.length}`);
+  console.log(`[Insights] Model: ${targetModel} | Keys Loaded: ${apiKeys.length} | Priority 1: ${apiKeys[0].alias}`);
 
-  // Cap at 800k chars to stay safely within Flash-Lite's 1M context window limit
   const safeTranscript = transcript.length > 800000
     ? transcript.substring(0, 800000)
     : transcript;
@@ -209,8 +211,7 @@ export async function generateInsights(
 
       console.log(`[Insights] ✓ Success! Generated in ${elapsed}ms using ${currentKeyObj.alias} | Tokens: ${tokens}`);
 
-      // ─── VAULT TOTALS SYNC ───
-      // We still update the raw lifetime total if it's a database key
+      // Sync telemetry ONLY for system keys, user BYOK keys don't count towards system burn
       if (currentKeyObj.id) {
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -235,7 +236,7 @@ export async function generateInsights(
         key_takeaways: Array.isArray(parsed.key_takeaways) ? parsed.key_takeaways : [],
         seo_metadata: parsed.seo_metadata ?? { tags: [], suggested_titles: [], description: '' },
         tokens_used: tokens,
-        used_key_alias: currentKeyObj.alias, // Passed down to index.ts for the chart diary
+        used_key_alias: currentKeyObj.alias,
       };
 
     } catch (err: unknown) {

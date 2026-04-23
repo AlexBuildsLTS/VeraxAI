@@ -6,7 +6,7 @@
  * 1. Client-provided transcript (fast path)
  * 2. Server-side native caption scraper (Forced execution on YouTube URLs)
  * 3. Audio Resolver -> Deepgram transcription
- * 4. AI insights (Gemini 3.1 Flash-Lite)
+ * 4. AI insights (Gemini 3.1 Flash-Lite with BYOK Support)
  * 5. Finalization & JSON Metadata Telemetry (Chart tracking per key)
  */
 
@@ -29,6 +29,7 @@ serve(async (req: Request) => {
   const pipelineStartTime = Date.now();
   let persistentJobId: string | null = null;
   let activePhase = 'handshake';
+  let invokingUserId: string | null = null;
 
   const broadcastStatus = async (status: VideoStatus, telemetry?: { error?: string }) => {
     if (!persistentJobId) return;
@@ -57,6 +58,29 @@ serve(async (req: Request) => {
 
     console.log(`[Pipeline] Starting job ${persistentJobId}`);
     await broadcastStatus('downloading');
+
+    // ── TIER 0: FETCH INVOKING USER & BYOK CREDENTIALS ───────────────────────
+    activePhase = 'identity_resolution';
+    let customGeminiKey: string | undefined = undefined;
+
+    const { data: videoData } = await supabase.from('videos').select('user_id').eq('id', persistentJobId).single();
+    if (videoData?.user_id) {
+      invokingUserId = videoData.user_id;
+      const { data: profile } = await supabase.from('profiles').select('role, custom_api_key').eq('id', invokingUserId).single();
+
+      // Strict RBAC: Only parse keys if user is Premium or Admin
+      if (profile && (profile.role === 'premium' || profile.role === 'admin') && profile.custom_api_key) {
+        try {
+          const parsedKeys = JSON.parse(profile.custom_api_key);
+          if (parsedKeys.gemini) {
+            customGeminiKey = parsedKeys.gemini;
+            console.log(`[Pipeline] Premium BYOK Gemini key detected for user ${invokingUserId}`);
+          }
+        } catch (e) {
+          console.warn('[Pipeline] Failed to parse custom API keys JSON.', e);
+        }
+      }
+    }
 
     let finalTranscript = (body.transcript_text as string) ?? '';
     let rawMetadata: Record<string, unknown> = {};
@@ -127,7 +151,8 @@ serve(async (req: Request) => {
     activePhase = 'intelligence_engine';
     await broadcastStatus('ai_processing');
 
-    const insights = await generateInsights(finalTranscript, language, difficulty);
+    // Passes the extracted custom key directly to the insights generation engine
+    const insights = await generateInsights(finalTranscript, language, difficulty, customGeminiKey);
 
     const { error: insightError } = await supabase.from('ai_insights').upsert({
       video_id: persistentJobId,
@@ -146,11 +171,9 @@ serve(async (req: Request) => {
 
     // ── TIER 5: UI CHART TELEMETRY ────────────────────────────────────────────
     activePhase = 'chart_telemetry';
-    const { data: videoData } = await supabase.from('videos').select('user_id').eq('id', persistentJobId).single();
-
-    if (videoData?.user_id) {
+    if (invokingUserId) {
       await supabase.from('usage_logs').insert({
-        user_id: videoData.user_id,
+        user_id: invokingUserId,
         video_id: persistentJobId,
         action: 'ai_insights_generated',
         ai_model: insights.model,

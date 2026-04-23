@@ -617,7 +617,7 @@ const UnifiedReportBox = React.memo(
                 ) : (
                   <Copy size={14} color={THEME.cyan} opacity={0.8} />
                 )}
-                <Text className="ml-2 text-[10px] font-black uppercase text-white/60 tracking-widest hidden md:flex">
+                <Text className="ml-2 text-[10px] font-black uppercase text-white/70 tracking-widest hidden md:flex">
                   Copy Payload
                 </Text>
               </TouchableOpacity>
@@ -725,7 +725,7 @@ const UnifiedReportBox = React.memo(
                   >
                     <View className="flex-row items-center mb-8">
                       <Milestone size={18} color={THEME.purple} />
-                      <Text className="text-white/50 text-[10px] md:text-[11px] font-black uppercase tracking-[4px] ml-3">
+                      <Text className="text-white/70 text-[10px] md:text-[11px] font-black uppercase tracking-[4px] ml-3">
                         Timeline Mapping
                       </Text>
                     </View>
@@ -742,8 +742,8 @@ const UnifiedReportBox = React.memo(
                   <View className="flex-row items-center justify-between mb-8">
                     <View className="flex-row items-center">
                       <Zap size={18} color={THEME.green} />
-                      <Text className="text-white/50 text-[10px] md:text-[11px] font-black uppercase tracking-[4px] ml-3">
-                        Verbatim Data Stream
+                      <Text className="text-white/80 text-[10px] md:text-[11px] font-black uppercase tracking-[4px] ml-3">
+                        Raw Data Stream
                       </Text>
                     </View>
                   </View>
@@ -776,7 +776,7 @@ const UnifiedReportBox = React.memo(
                       {/* ── ALIGNMENT FIX: Strictly flex-row wrappers, NO SVGs inside Text ── */}
                       <View className="flex-row items-center justify-between px-6 py-5 border-t md:px-8 bg-white/[0.02] border-white/5">
                         <View>
-                          <Text className="text-white/30 text-[8px] font-black uppercase tracking-[3px]">
+                          <Text className="text-white/80 text-[8px] font-black uppercase tracking-[3px]">
                             Extraction
                           </Text>
                           <View className="flex-row items-center mt-1.5">
@@ -802,7 +802,7 @@ const UnifiedReportBox = React.memo(
                   ) : (
                     <View className="items-center justify-center p-12 border md:p-16 border-white/5 rounded-[32px] bg-black/20">
                       <Terminal size={28} color="#ffffff20" />
-                      <Text className="mt-6 font-mono text-[10px] md:text-xs text-white/30 uppercase tracking-[4px]">
+                      <Text className="mt-6 font-mono text-[10px] md:text-xs text-white/70 uppercase tracking-[4px]">
                         Data Stream Unavailable
                       </Text>
                     </View>

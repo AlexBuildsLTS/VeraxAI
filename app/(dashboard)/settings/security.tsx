@@ -2,15 +2,16 @@
  * app/(dashboard)/settings/security.tsx
  * VeraxAI — Security & Identity Vault
  * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOL:
+ * ARCHITECTURE:
  * 1. BIOMETRIC KERNEL: Real hardware verification via expo-local-authentication.
  * 2. 4-DIGIT PIN FALLBACK: Cross-platform vault access for Web & Desktop.
- * 3. CREDENTIAL ROTATION: Current-Password + New-Password + Confirmation.
+ * 3. CREDENTIALS : Current-Password + New-Password + Confirmation.
  * 4. ENCRYPTED AI VAULT (RBAC): Locked behind Biometrics/PIN. Premium/Admin ONLY.
+ * 5. ANIMATED UI: Synchronized SVG & Neon Line hover physics at 120fps.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import {
   View,
   Text,
@@ -23,7 +24,7 @@ import {
   KeyboardAvoidingView,
   StyleSheet,
   TextInput,
-  Image,
+  Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -51,7 +52,11 @@ import Animated, {
   withTiming,
   interpolate,
   withDelay,
+  useFrameCallback,
+  withSequence,
+  useAnimatedProps,
 } from 'react-native-reanimated';
+import Svg, { Rect, Path, Circle, G, Line } from 'react-native-svg';
 
 // ─── STRICT THEME ENFORCEMENT ───
 const THEME = {
@@ -64,57 +69,444 @@ const THEME = {
   slate: '#94a3b8',
 };
 
-// ─── MODULE 1: AMBIENT VISUAL ENGINE (APK TOUCH-SAFE) ───────────────────────
-const NeuralOrb = ({
-  delay = 0,
-  color = THEME.danger,
-  top,
-  bottom,
-  left,
-  right,
-}: any) => {
-  const pulse = useSharedValue(0);
-  const { width, height } = Dimensions.get('window');
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 1: THE WANDERING CORE ENGINE (Smooth, Sleek, Gliding Emitter)
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface RippleProps {
+  color: string;
+  delay: number;
+  duration: number;
+  maxSize: number;
+}
+
+const SingleRipple = memo(
+  ({ color, delay, duration, maxSize }: RippleProps) => {
+    const progress = useSharedValue(0);
+
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, [delay, duration, progress]);
+
+    const animatedStyle = useAnimatedStyle(() => {
+      return {
+        width: interpolate(progress.value, [0, 1], [0, maxSize]),
+        height: interpolate(progress.value, [0, 1], [0, maxSize]),
+        borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+        opacity: interpolate(
+          progress.value,
+          [0, 0.1, 0.6, 1],
+          [0, 0.4, 0.05, 0],
+        ),
+        borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
+      };
+    });
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+SingleRipple.displayName = 'SingleRipple';
+
+interface GlidingEmitterProps {
+  coreSize: number;
+  color: string;
+  maxWaveSize: number;
+  waveCount: number;
+  baseDuration: number;
+}
+
+const WanderingCore = memo(
+  ({
+    coreSize,
+    color,
+    maxWaveSize,
+    waveCount,
+    baseDuration,
+  }: GlidingEmitterProps) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+    const stagger = baseDuration / waveCount;
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    const animatedPosition = useAnimatedStyle(() => {
+      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
+      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
+
+      return {
+        transform: [
+          { translateX: width / 2 + xOffset },
+          { translateY: height / 2 + yOffset },
+        ],
+      };
+    });
+
+    const corePulse = useSharedValue(0.6);
+    useEffect(() => {
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
+        -1,
+        true,
+      );
+    }, []);
+
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          animatedPosition,
+        ]}
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <SingleRipple
+            key={`ripple-${index}`}
+            color={color}
+            delay={index * stagger}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+        <Animated.View
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              shadowColor: color,
+              shadowRadius: 15,
+              shadowOpacity: 1,
+              shadowOffset: { width: 0, height: 0 },
+              ...(Platform.OS === 'web'
+                ? ({ boxShadow: `0 0 20px ${color}` } as any)
+                : {}),
+            },
+          ]}
+        />
+      </Animated.View>
+    );
+  },
+);
+WanderingCore.displayName = 'WanderingCore';
+
+interface AmbientArchitectureProps {
+  delay?: number;
+  color?: string;
+  bottom?: number;
+  right?: number;
+}
+
+const AmbientArchitecture = memo(
+  ({ color = '#00F0FF', bottom, right, delay }: AmbientArchitectureProps) => {
+    const { width, height } = Dimensions.get('window');
+    const isDesktop = width >= 1024;
+    const massiveWaveRadius = isDesktop ? width * 1.0 : height * 1.4;
+    const [isVisible, setIsVisible] = useState(!delay);
+
+    useEffect(() => {
+      if (delay) {
+        const timer = setTimeout(() => setIsVisible(true), delay);
+        return () => clearTimeout(timer);
+      }
+    }, [delay]);
+
+    if (!isVisible) return null;
+
+    return (
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          { bottom: bottom ?? 0, right: right ?? 0 },
+        ]}
+        pointerEvents="none"
+      >
+        <WanderingCore
+          coreSize={18}
+          color={color}
+          maxWaveSize={massiveWaveRadius}
+          waveCount={4}
+          baseDuration={16000}
+        />
+      </View>
+    );
+  },
+);
+AmbientArchitecture.displayName = 'AmbientArchitecture';
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 2: ANIMATED SVG & SYNCHRONIZED HOVER HEADER
+// ══════════════════════════════════════════════════════════════════════════════
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+const AnimatedSecurityHeader = memo(() => {
+  const floatY = useSharedValue(0);
+  const pulseOpacity = useSharedValue(0.3);
 
   useEffect(() => {
-    pulse.value = withDelay(
-      delay,
-      withRepeat(withTiming(1, { duration: 8000 }), -1, true),
+    // Synchronized vertical floating sequence (applies to both SVG and Line)
+    floatY.value = withRepeat(
+      withSequence(
+        withTiming(-8, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(8, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
     );
-  }, [delay, pulse]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(pulse.value, [0, 1], [1, 1.4]) },
-      { translateX: interpolate(pulse.value, [0, 1], [0, width * 0.1]) },
-      { translateY: interpolate(pulse.value, [0, 1], [0, height * 0.05]) },
-    ],
-    opacity: interpolate(pulse.value, [0, 1], [0.03, 0.08]),
+    // Blinking effect for the neon green server nodes
+    pulseOpacity.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 800, easing: Easing.ease }),
+        withTiming(0.3, { duration: 800, easing: Easing.ease }),
+      ),
+      -1,
+      true,
+    );
+  }, []);
+
+  const hoverStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: floatY.value }],
+    alignItems: 'center',
   }));
 
-  return (
-    <Animated.View
-      style={[
-        {
-          position: 'absolute',
-          width: 500,
-          height: 500,
-          backgroundColor: color,
-          borderRadius: 250,
-          top,
-          bottom,
-          left,
-          right,
-          pointerEvents: 'none',
-          ...(Platform.OS === 'web' ? ({ filter: 'blur(120px)' } as any) : {}),
-        },
-        animatedStyle,
-      ]}
-    />
-  );
-};
+  const nodeProps = useAnimatedProps(() => ({
+    opacity: pulseOpacity.value,
+  }));
 
-// ─── MODULE 2: PASSWORD STRENGTH HELPERS ────────────────────────────────────
+  const C = {
+    purple: '#A87FFB',
+    navy: '#0B1B42',
+    pink: '#FF61A6',
+    green: '#9DFF00',
+    cyan: '#00F0FF',
+  };
+
+  return (
+    <Animated.View style={hoverStyle}>
+      {/* ── HIGH FIDELITY SECURITY DB SVG RECREATION ── */}
+      <View style={{ width: 100, height: 100 }}>
+        <Svg width="100%" height="100%" viewBox="0 0 200 200">
+          {/* Connecting Data Lines */}
+          <Path
+            d="M 100 60 L 100 80 L 50 80 L 50 120"
+            fill="none"
+            stroke={C.cyan}
+            strokeWidth="8"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M 100 60 L 100 80 L 150 80 L 150 120"
+            fill="none"
+            stroke={C.cyan}
+            strokeWidth="8"
+            strokeLinejoin="round"
+          />
+
+          {/* Top Server Node */}
+          <Rect
+            x="60"
+            y="20"
+            width="80"
+            height="30"
+            rx="8"
+            fill={C.purple}
+            stroke={C.navy}
+            strokeWidth="6"
+          />
+          <Rect x="100" y="32" width="25" height="6" rx="3" fill="#FFF" />
+          <AnimatedCircle
+            cx="75"
+            cy="35"
+            r="5"
+            fill={C.green}
+            animatedProps={nodeProps}
+          />
+
+          {/* Bottom Left Servers */}
+          <Rect
+            x="10"
+            y="120"
+            width="80"
+            height="30"
+            rx="8"
+            fill={C.purple}
+            stroke={C.navy}
+            strokeWidth="6"
+          />
+          <Rect x="50" y="132" width="25" height="6" rx="3" fill="#FFF" />
+          <AnimatedCircle
+            cx="25"
+            cy="135"
+            r="5"
+            fill={C.green}
+            animatedProps={nodeProps}
+          />
+
+          <Rect
+            x="10"
+            y="160"
+            width="80"
+            height="30"
+            rx="8"
+            fill={C.purple}
+            stroke={C.navy}
+            strokeWidth="6"
+          />
+          <Rect x="50" y="172" width="25" height="6" rx="3" fill="#FFF" />
+          <AnimatedCircle
+            cx="25"
+            cy="175"
+            r="5"
+            fill={C.green}
+            animatedProps={nodeProps}
+          />
+
+          {/* Bottom Right Servers */}
+          <Rect
+            x="110"
+            y="120"
+            width="80"
+            height="30"
+            rx="8"
+            fill={C.purple}
+            stroke={C.navy}
+            strokeWidth="6"
+          />
+          <Rect x="150" y="132" width="25" height="6" rx="3" fill="#FFF" />
+          <AnimatedCircle
+            cx="125"
+            cy="135"
+            r="5"
+            fill={C.green}
+            animatedProps={nodeProps}
+          />
+
+          <Rect
+            x="110"
+            y="160"
+            width="80"
+            height="30"
+            rx="8"
+            fill={C.purple}
+            stroke={C.navy}
+            strokeWidth="6"
+          />
+          <Rect x="150" y="172" width="25" height="6" rx="3" fill="#FFF" />
+          <AnimatedCircle
+            cx="125"
+            cy="175"
+            r="5"
+            fill={C.green}
+            animatedProps={nodeProps}
+          />
+
+          {/* Left Blockade (Pink X) */}
+          <Circle cx="50" cy="80" r="22" fill={C.navy} />
+          <Circle
+            cx="50"
+            cy="80"
+            r="18"
+            fill="transparent"
+            stroke={C.navy}
+            strokeWidth="4"
+          />
+          <Line
+            x1="38"
+            y1="68"
+            x2="62"
+            y2="92"
+            stroke={C.pink}
+            strokeWidth="6"
+            strokeLinecap="round"
+          />
+          <Line
+            x1="62"
+            y1="68"
+            x2="38"
+            y2="92"
+            stroke={C.pink}
+            strokeWidth="6"
+            strokeLinecap="round"
+          />
+
+          {/* Right Blockade (Pink X) */}
+          <Circle cx="150" cy="80" r="22" fill={C.navy} />
+          <Circle
+            cx="150"
+            cy="80"
+            r="18"
+            fill="transparent"
+            stroke={C.navy}
+            strokeWidth="4"
+          />
+          <Line
+            x1="138"
+            y1="68"
+            x2="162"
+            y2="92"
+            stroke={C.pink}
+            strokeWidth="6"
+            strokeLinecap="round"
+          />
+          <Line
+            x1="162"
+            y1="68"
+            x2="138"
+            y2="92"
+            stroke={C.pink}
+            strokeWidth="6"
+            strokeLinecap="round"
+          />
+        </Svg>
+      </View>
+
+      {/* ── THE SYNCHRONIZED GLOWING LINE ── */}
+      <View className="h-1 w-24 bg-[#FF007F] mt-4 rounded-full shadow-[0_0_15px_#FF007F]" />
+    </Animated.View>
+  );
+});
+AnimatedSecurityHeader.displayName = 'AnimatedSecurityHeader';
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 3: PASSWORD STRENGTH HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
 const calculateEntropy = (pw: string) => {
   const checks = [
     pw.length >= 10,
@@ -133,7 +525,6 @@ const ENTROPY_COLORS = [
   THEME.success,
 ];
 
-// ─── INPUT STYLE CONSTANT (Fixes Android Hover Bug) ─────────────────────────
 const strictInputStyle = {
   flex: 1,
   height: '100%',
@@ -144,7 +535,9 @@ const strictInputStyle = {
   ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
 } as any;
 
-// ─── MODULE 3: MAIN COMPONENT ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 4: MAIN DASHBOARD COMPONENT
+// ══════════════════════════════════════════════════════════════════════════════
 export default function SecuritySettingsScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -152,7 +545,9 @@ export default function SecuritySettingsScreen() {
   const isMobile = SCREEN_WIDTH < 768;
 
   // ── Role & Access State ──
-  const [userRole, setUserRole] = useState<'member' | 'premium' | 'admin' | 'support'>('member');
+  const [userRole, setUserRole] = useState<
+    'member' | 'premium' | 'admin' | 'support'
+  >('member');
 
   // ── Password States ──
   const [currentPw, setCurrentPw] = useState('');
@@ -183,14 +578,12 @@ export default function SecuritySettingsScreen() {
   // ── Initialization ──
   useEffect(() => {
     (async () => {
-      // 1. Check Hardware
       if (Platform.OS !== 'web') {
         const hasHw = await LocalAuthentication.hasHardwareAsync();
         const enrolled = await LocalAuthentication.isEnrolledAsync();
         setBioSupported(hasHw && enrolled);
       }
 
-      // 2. Fetch Vault Data & Role
       if (user) {
         const { data, error } = await supabase
           .from('profiles')
@@ -207,8 +600,7 @@ export default function SecuritySettingsScreen() {
           try {
             if (data.custom_api_key) {
               const keys = JSON.parse(data.custom_api_key);
-              
-              // Only hydrate API keys if user has premium rights
+
               if (data.role === 'premium' || data.role === 'admin') {
                 setApiKeys({
                   openai: keys.openai ?? '',
@@ -216,7 +608,7 @@ export default function SecuritySettingsScreen() {
                   anthropic: keys.anthropic ?? '',
                 });
               }
-              
+
               if (keys.pin) {
                 fetchedPin = keys.pin;
                 setMasterPin(keys.pin);
@@ -226,7 +618,6 @@ export default function SecuritySettingsScreen() {
             console.error('Vault integrity parse failed.', e);
           }
 
-          // 3. Lock the vault if ANY security is enabled
           if (isBioOn || fetchedPin.length > 0) {
             setIsVaultLocked(true);
           }
@@ -253,7 +644,7 @@ export default function SecuritySettingsScreen() {
 
       if (!error) {
         setBioEnabled(!bioEnabled);
-        if (!bioEnabled === true) setIsVaultLocked(true); // Lock immediately if turning on
+        if (!bioEnabled === true) setIsVaultLocked(true);
       }
     }
     setBioLoading(false);
@@ -269,9 +660,9 @@ export default function SecuritySettingsScreen() {
       return;
     }
     setIsSavingPin(true);
-    await handleSaveApiVault(masterPin); // Piggyback on the vault saver
+    await handleSaveApiVault(masterPin);
     setIsSavingPin(false);
-    if (masterPin.length === 4) setIsVaultLocked(true); // Lock immediately if setting new PIN
+    if (masterPin.length === 4) setIsVaultLocked(true);
   };
 
   // ── Action: Unlock Vault ──
@@ -347,11 +738,12 @@ export default function SecuritySettingsScreen() {
     const targetPin = overridePin !== undefined ? overridePin : masterPin;
     const hasPremiumRights = userRole === 'premium' || userRole === 'admin';
 
-    // ZERO-TRUST ENFORCEMENT: Strip API keys if user is a standard member
     const cleanedKeys = {
       ...(hasPremiumRights && apiKeys.openai ? { openai: apiKeys.openai } : {}),
       ...(hasPremiumRights && apiKeys.gemini ? { gemini: apiKeys.gemini } : {}),
-      ...(hasPremiumRights && apiKeys.anthropic ? { anthropic: apiKeys.anthropic } : {}),
+      ...(hasPremiumRights && apiKeys.anthropic
+        ? { anthropic: apiKeys.anthropic }
+        : {}),
       ...(targetPin ? { pin: targetPin } : {}),
     };
 
@@ -381,9 +773,13 @@ export default function SecuritySettingsScreen() {
   const isPremium = userRole === 'premium' || userRole === 'admin';
 
   return (
-    <SafeAreaView className="flex-1 bg-[#020205]">
-      <NeuralOrb delay={0} color={THEME.danger} top={-50} left={-100} />
-      <NeuralOrb delay={4000} color={THEME.purple} bottom={-100} right={-50} />
+    <SafeAreaView className="flex-1 bg-[#00001ad2]">
+      <AmbientArchitecture
+        delay={4000}
+        color={THEME.purple}
+        bottom={-100}
+        right={-50}
+      />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -402,7 +798,7 @@ export default function SecuritySettingsScreen() {
             width: '100%',
           }}
         >
-          {/* ── RETURN NAVIGATION & CENTERED HEADER ── */}
+          {/* ── RETURN NAVIGATION & HEADER WITH NEW SVG ANIMATION ── */}
           <FadeIn
             delay={100}
             className="relative z-50 items-center justify-center w-full pt-4 mb-12"
@@ -421,14 +817,7 @@ export default function SecuritySettingsScreen() {
               </Text>
             </TouchableOpacity>
 
-            <View className="items-center">
-              <Image
-                source={require('../../../assets/sha128.png')}
-                style={{ width: 72, height: 72 }}
-                resizeMode="contain"
-              />
-              <View className="h-1 w-24 bg-[#FF007F] mt-4 rounded-full shadow-[0_0_15px_#FF007F]" />
-            </View>
+            <AnimatedSecurityHeader />
           </FadeIn>
 
           {/* ── ACCESS PROTOCOLS (BIOMETRICS + PIN) ── */}
@@ -437,7 +826,7 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-8 gap-x-4">
                 <Fingerprint size={28} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  Access Protocols
+                  PIN & BIOMETRICS
                 </Text>
               </View>
 
@@ -527,14 +916,14 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-10 gap-x-4">
                 <Lock size={24} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  Credentials Protocol
+                  PASSWORD SECURITY
                 </Text>
               </View>
 
               <View className="gap-y-6">
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Current Verification
+                    Current PASSWORD
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -550,7 +939,7 @@ export default function SecuritySettingsScreen() {
 
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    New Identity Code
+                    NEW PASSWORD
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -582,14 +971,14 @@ export default function SecuritySettingsScreen() {
 
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Verify Identity Code
+                    Verify Password
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
                       value={confirmPw}
                       onChangeText={setConfirmPw}
                       secureTextEntry
-                      placeholder="Verify New Code"
+                      placeholder="Verify New PASSWORD"
                       placeholderTextColor="rgba(255,255,255,0.2)"
                       style={strictInputStyle}
                     />
@@ -620,8 +1009,6 @@ export default function SecuritySettingsScreen() {
           {/* ── AI INTEGRATION VAULT (RBAC ENFORCED) ── */}
           <FadeIn delay={400}>
             <GlassCard className="p-6 md:p-10 mb-8 bg-white/[0.015] border-white/5 rounded-[32px] overflow-hidden relative">
-              
-              {/* RBAC OVERLAY FOR NON-PREMIUM USERS */}
               {!isPremium && !isVaultLocked && (
                 <View className="absolute inset-0 z-20 items-center justify-center bg-[#020205]/90 backdrop-blur-xl">
                   <Crown size={40} color={THEME.gold} className="mb-4" />
@@ -629,7 +1016,8 @@ export default function SecuritySettingsScreen() {
                     Premium Protocol Required
                   </Text>
                   <Text className="text-[10px] text-white/60 tracking-[2px] uppercase mb-8 text-center max-w-[280px]">
-                    Unlock the Sovereign Vault to utilize custom LLM inference endpoints and bypass rate limits.
+                    Unlock the Sovereign Vault to utilize custom LLM inference
+                    endpoints and bypass rate limits.
                   </Text>
                   <TouchableOpacity
                     onPress={() => router.push('/settings/billing')}
@@ -642,7 +1030,6 @@ export default function SecuritySettingsScreen() {
                 </View>
               )}
 
-              {/* LOCK SCREEN OVERLAY */}
               {isVaultLocked ? (
                 <View className="items-center justify-center py-10">
                   <Lock
@@ -697,8 +1084,10 @@ export default function SecuritySettingsScreen() {
                   )}
                 </View>
               ) : (
-                /* UNLOCKED CONTENT (ONLY INTERACTABLE IF PREMIUM) */
-                <View style={{ opacity: isPremium ? 1 : 0.3 }}>
+                <View
+                  style={{ opacity: isPremium ? 1 : 0.3 }}
+                  pointerEvents={isPremium ? 'auto' : 'none'}
+                >
                   <View className="flex-row items-center mb-10 gap-x-4">
                     <Cpu size={24} color={THEME.cyan} />
                     <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
@@ -708,27 +1097,15 @@ export default function SecuritySettingsScreen() {
 
                   <View className="gap-y-6">
                     <View>
-                      <Text className="text-[9px] font-black text-[#00F0FF] tracking-[3px] uppercase mb-3 ml-2">
-                        OpenAI API Key
-                      </Text>
-                      <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#00F0FF]">
-                        <TextInput
-                          value={apiKeys.openai}
-                          onChangeText={(v) =>
-                            setApiKeys((p) => ({ ...p, openai: v }))
-                          }
-                          editable={isPremium}
-                          placeholder="sk-..."
-                          placeholderTextColor="rgba(255,255,255,0.2)"
-                          style={strictInputStyle}
-                        />
+                      <View className="flex-row items-center justify-between mb-3 ml-2">
+                        <Text className="text-[9px] font-black text-[#00F0FF] tracking-[3px] uppercase">
+                          Google Gemini Key
+                        </Text>
+                        <Text className="text-[9px] font-black text-[#32FF00] tracking-[2px] uppercase">
+                          ACTIVE ENGINE
+                        </Text>
                       </View>
-                    </View>
-                    <View>
-                      <Text className="text-[9px] font-black text-[#00F0FF] tracking-[3px] uppercase mb-3 ml-2">
-                        Google Gemini Key
-                      </Text>
-                      <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#00F0FF]">
+                      <View className="h-14 overflow-hidden border bg-black/40 border-[#00F0FF]/30 rounded-[20px] px-5 focus:border-[#00F0FF]">
                         <TextInput
                           value={apiKeys.gemini}
                           onChangeText={(v) =>
@@ -741,19 +1118,42 @@ export default function SecuritySettingsScreen() {
                         />
                       </View>
                     </View>
-                    <View>
-                      <Text className="text-[9px] font-black text-[#00F0FF] tracking-[3px] uppercase mb-3 ml-2">
-                        Anthropic Key
-                      </Text>
-                      <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#00F0FF]">
+
+                    <View style={{ opacity: 0.4 }}>
+                      <View className="flex-row items-center justify-between mb-3 ml-2">
+                        <Text className="text-[9px] font-black text-[#00F0FF]/50 tracking-[3px] uppercase">
+                          OpenAI API Key
+                        </Text>
+                        <Text className="text-[9px] font-black text-[#FF007F] tracking-[2px] uppercase">
+                          COMING SOON
+                        </Text>
+                      </View>
+                      <View className="h-14 overflow-hidden border bg-black/20 border-white/5 rounded-[20px] px-5">
+                        <TextInput
+                          value={apiKeys.openai}
+                          editable={false}
+                          placeholder="sk-proj-..."
+                          placeholderTextColor="rgba(255,255,255,0.1)"
+                          style={strictInputStyle}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={{ opacity: 0.4 }}>
+                      <View className="flex-row items-center justify-between mb-3 ml-2">
+                        <Text className="text-[9px] font-black text-[#00F0FF]/50 tracking-[3px] uppercase">
+                          Anthropic Key
+                        </Text>
+                        <Text className="text-[9px] font-black text-[#FF007F] tracking-[2px] uppercase">
+                          COMING SOON
+                        </Text>
+                      </View>
+                      <View className="h-14 overflow-hidden border bg-black/20 border-white/5 rounded-[20px] px-5">
                         <TextInput
                           value={apiKeys.anthropic}
-                          onChangeText={(v) =>
-                            setApiKeys((p) => ({ ...p, anthropic: v }))
-                          }
-                          editable={isPremium}
+                          editable={false}
                           placeholder="sk-ant-..."
-                          placeholderTextColor="rgba(255,255,255,0.2)"
+                          placeholderTextColor="rgba(255,255,255,0.1)"
                           style={strictInputStyle}
                         />
                       </View>
