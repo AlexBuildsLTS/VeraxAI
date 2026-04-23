@@ -92,7 +92,7 @@ const C_APP_BG = '#000012';
 const C_CYAN = '#00F0FF';
 const C_PURPLE = '#8A2BE2';
 const C_GREEN = '#32FF00';
-const C_PINK = '#FF007F';
+const C_PINK = '#6521AB';
 const C_AMBER = '#F59E0B';
 const C_NAVY = '#1A3370';
 const C_SLATE = '#94A3B8';
@@ -488,7 +488,7 @@ const AmbientArchitecture = React.memo(() => {
     >
       <WanderingCore
         coreSize={14}
-        color={C_CYAN}
+        color={C_PINK}
         maxWaveSize={width >= 1024 ? width * 0.8 : height * 1.0}
         waveCount={4}
         baseDuration={12000}
