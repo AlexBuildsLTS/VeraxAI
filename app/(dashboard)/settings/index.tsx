@@ -63,7 +63,7 @@ const THEME = {
   cyan: '#00F0FF',
   purple: '#8A2BE2',
   pink: '#FF007F',
-  green: '#32FF00',
+  green: '#048766',
   red: '#FF3333',
 } as const;
 
@@ -338,11 +338,11 @@ const AmbientArchitecture = memo(
           opacityBase={0.04}
         />
         <WanderingCore
-          coreSize={18}
-          color={color}
+          coreSize={14}
+          color={THEME.green}
           maxWaveSize={massiveWaveRadius}
           waveCount={4}
-          baseDuration={13000}
+          baseDuration={12000}
         />
       </View>
     );

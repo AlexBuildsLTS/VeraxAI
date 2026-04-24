@@ -65,7 +65,7 @@ import Svg, { Rect, Path, Circle, Line } from 'react-native-svg';
 const THEME = {
   obsidian: '#000b14',
   danger: '#FF007F', // Neon Pink
-  success: '#32FF00', // Neon Green
+  success: '#048766', // Neon Green
   cyan: '#00F0FF', // Neon Cyan
   purple: '#8A2BE2', // Neon Purple
   gold: '#FFD700', // Premium Gold
@@ -315,7 +315,7 @@ const AmbientArchitecture = memo(
           opacityBase={0.06}
         />
         <OrganicOrb
-          color={THEME.cyan}
+          color={THEME.success}
           size={width * 0.4}
           initialX={width * 0.5}
           initialY={height * 0.8}
