@@ -1,7 +1,7 @@
 {
   "name": "verai",
   "version": "1.0.0",
-  "description": "Videos Transcriber with AI Summaries, chapters.  ",
+  "description": "Videos Transcriber with AI Summaries, chapters.",
   "main": "expo-router/entry",
   "type": "module",
   "scripts": {
@@ -87,6 +87,10 @@
   "private": true,
   "overrides": {
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "glob": "^10.3.10",
+    "rimraf": "^5.0.5",
+    "inflight": "npm:lru-cache@^10.2.0",
+    "node-domexception": "npm:domexception@^4.0.0"
   }
 }

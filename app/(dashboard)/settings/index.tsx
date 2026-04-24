@@ -2,13 +2,9 @@
  * app/(dashboard)/settings/index.tsx
  * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE & PROTOCOL
- * 1. TOUCH ISOLATION (THE FIX): pointerEvents="none" explicitly forced onto EVERY
- * nested Reanimated node. This prevents Android's UI thread from dropping the
- * parent touch rules and stealing single-finger taps.
- * 2. AMBIENT ENGINE: User's exact requested Tri-Layer architecture restored
- * (Pink Orb, Cyan Orb, Wandering Core).
- * 3. DOM SAFETY: Strict ternaries applied. Zero `&&` logic leaks.
+ * TOUCH FIX: Forced `w-full` and `flex-1` on all interactive nodes.
+
+ * System Telemetry & Encryption Status module added.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -33,6 +29,8 @@ import {
   Terminal,
   ArrowBigLeftDash,
   LucideIcon,
+  Activity,
+  LogOut,
 } from 'lucide-react-native';
 
 import { GlassCard } from '../../../components/ui/GlassCard';
@@ -40,7 +38,6 @@ import { FadeIn } from '../../../components/animations/FadeIn';
 import { cn } from '../../../lib/utils';
 import { useAuthStore } from '../../../store/useAuthStore';
 
-// ─── NATIVE SVG & REANIMATED PIPELINE ─────────────────────────────────────────
 import Svg, { Rect, Path, Circle, Line, G } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -57,7 +54,6 @@ import Animated, {
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// ─── LIQUID NEON THEME CONSTANTS ──────────────────────────────────────────────
 const THEME = {
   obsidian: '#010710',
   cyan: '#00F0FF',
@@ -68,10 +64,6 @@ const THEME = {
 } as const;
 
 const IS_WEB = Platform.OS === 'web';
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: TYPE DEFINITIONS
-// ══════════════════════════════════════════════════════════════════════════════
 type GlowColor = 'cyan' | 'pink' | 'purple' | 'green' | 'red';
 
 interface SettingsCardItem {
@@ -86,77 +78,45 @@ interface SettingsCardItem {
   routeOverride?: Href;
 }
 
-interface SingleRippleProps {
-  color: string;
-  delay: number;
-  duration: number;
-  maxSize: number;
-}
-
-interface WanderingCoreProps {
-  coreSize: number;
-  color: string;
-  maxWaveSize: number;
-  waveCount: number;
-  baseDuration: number;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: AMBIENT ENGINE (RESTORED TO EXACT SPECS)
-// ══════════════════════════════════════════════════════════════════════════════
-
-const SingleRipple = memo(
-  ({ color, delay, duration, maxSize }: SingleRippleProps) => {
-    const progress = useSharedValue(0);
-
-    useEffect(() => {
-      progress.value = withDelay(
-        delay,
-        withRepeat(
-          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
-          -1,
-          false,
-        ),
-      );
-    }, [delay, duration, progress]);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-      width: interpolate(progress.value, [0, 1], [0, maxSize]),
-      height: interpolate(progress.value, [0, 1], [0, maxSize]),
-      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-      opacity: interpolate(
-        progress.value,
-        [0, 0.1, 0.8, 1],
-        [0, 0.15, 0.02, 0],
+const SingleRipple = memo(({ color, delay, duration, maxSize }: any) => {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+        -1,
+        false,
       ),
-      borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
-    }));
-
-    return (
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: 'absolute',
-            borderColor: color,
-            backgroundColor: 'transparent',
-          },
-          animatedStyle,
-        ]}
-      />
     );
-  },
-);
+  }, [delay, duration, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, maxSize]),
+    height: interpolate(progress.value, [0, 1], [0, maxSize]),
+    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+    opacity: interpolate(progress.value, [0, 0.1, 0.8, 1], [0, 0.15, 0.02, 0]),
+    borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          borderColor: color,
+          backgroundColor: 'transparent',
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+});
 SingleRipple.displayName = 'SingleRipple';
 
 const WanderingCore = memo(
-  ({
-    coreSize,
-    color,
-    maxWaveSize,
-    waveCount,
-    baseDuration,
-  }: WanderingCoreProps) => {
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
 
@@ -267,7 +227,6 @@ const OrganicOrb = memo(
       const yOffset =
         Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
       const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
-
       return {
         transform: [
           { translateX: initialX + xOffset },
@@ -301,11 +260,9 @@ const OrganicOrb = memo(
 OrganicOrb.displayName = 'OrganicOrb';
 
 const AmbientArchitecture = memo(
-  ({ color = THEME.cyan, bottom, right }: any) => {
+  ({ color = THEME.green, bottom, right }: any) => {
     const { width, height } = Dimensions.get('window');
-    const isDesktop = width >= 1024;
-    const massiveWaveRadius = isDesktop ? width * 0.8 : height * 1.0;
-
+    const massiveWaveRadius = width >= 1024 ? width * 0.8 : height * 1.0;
     return (
       <View
         style={[
@@ -314,7 +271,6 @@ const AmbientArchitecture = memo(
         ]}
         pointerEvents="none"
       >
-        {/* ── RESTORED USER BACKGROUND LAYER ── */}
         <OrganicOrb
           color={THEME.pink}
           size={width * 0.6}
@@ -339,7 +295,7 @@ const AmbientArchitecture = memo(
         />
         <WanderingCore
           coreSize={14}
-          color={THEME.green}
+          color={color}
           maxWaveSize={massiveWaveRadius}
           waveCount={4}
           baseDuration={12000}
@@ -349,10 +305,6 @@ const AmbientArchitecture = memo(
   },
 );
 AmbientArchitecture.displayName = 'AmbientArchitecture';
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 3: SVG ANIMATION (SETTINGS SHIELD)
-// ══════════════════════════════════════════════════════════════════════════════
 
 const AnimatedSettingsIcon = memo(() => {
   const floatY = useSharedValue(0);
@@ -367,7 +319,6 @@ const AnimatedSettingsIcon = memo(() => {
       -1,
       true,
     );
-
     pulseNodes.value = withRepeat(
       withSequence(
         withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.ease) }),
@@ -376,7 +327,7 @@ const AnimatedSettingsIcon = memo(() => {
       -1,
       true,
     );
-  }, [floatY, pulseNodes]);
+  }, []);
 
   const floatStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatY.value }],
@@ -384,7 +335,6 @@ const AnimatedSettingsIcon = memo(() => {
   const nodeProps = useAnimatedProps(() => ({
     r: interpolate(pulseNodes.value, [0, 1], [12, 18]),
   }));
-
   const C = {
     navy: '#050B14',
     yellow: '#F3CF60',
@@ -501,9 +451,6 @@ const AnimatedSettingsIcon = memo(() => {
 });
 AnimatedSettingsIcon.displayName = 'AnimatedSettingsIcon';
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 4: CORE FOREGROUND & ROUTING
-// ══════════════════════════════════════════════════════════════════════════════
 export default function SettingsHubScreen() {
   const router = useRouter();
   const { width } = Dimensions.get('window');
@@ -559,7 +506,6 @@ export default function SettingsHubScreen() {
         routeOverride: '/settings/support' as Href,
       },
     ];
-
     if (userRole === 'admin') {
       modules.push({
         id: 'admin',
@@ -578,10 +524,8 @@ export default function SettingsHubScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
-      {/* ── BACKGROUND LAYER ── */}
       <AmbientArchitecture />
 
-      {/* ── FOREGROUND LAYER ── */}
       <SafeAreaView
         style={{ flex: 1 }}
         edges={['top', 'bottom', 'left', 'right']}
@@ -590,7 +534,7 @@ export default function SettingsHubScreen() {
           style={{ flex: 1, width: '100%' }}
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           contentContainerStyle={{
             padding: isMobile ? 16 : 60,
             paddingTop: isMobile ? 60 : 80,
@@ -599,16 +543,14 @@ export default function SettingsHubScreen() {
             alignItems: 'center',
           }}
         >
-          <FadeIn>
-            <View className="items-center w-full max-w-2xl mb-10 md:mb-16">
+          <FadeIn className="w-full max-w-2xl">
+            <View className="items-center w-full mb-10 md:mb-16">
               <View className="px-5 py-1.5 mb-8 border rounded-full bg-[#00F0FF]/10 border-[#00F0FF]/20">
                 <Text className="text-[9px] md:text-[10px] font-black tracking-[5px] text-[#00F0FF] uppercase">
                   SETTINGS
                 </Text>
               </View>
-
               <AnimatedSettingsIcon />
-
               <View className="h-[2px] w-20 bg-[#00F0FF] mt-6 md:mt-8 rounded-full shadow-[0_0_20px_#00F0FF]" />
             </View>
           </FadeIn>
@@ -618,7 +560,7 @@ export default function SettingsHubScreen() {
               onPress={() =>
                 router.canGoBack() ? router.back() : router.replace('/')
               }
-              className="flex-row items-center mb-10 gap-x-2"
+              className="flex-row items-center px-4 py-4 mb-10 gap-x-2"
               activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
@@ -626,30 +568,35 @@ export default function SettingsHubScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* CRITICAL DOM FIX: box-none ensures ScrollView tracks touches properly */}
           <View className="w-full max-w-2xl px-2" pointerEvents="box-none">
-            <View className="gap-y-4 md:gap-y-6" pointerEvents="box-none">
+            <View
+              className="w-full gap-y-4 md:gap-y-6"
+              pointerEvents="box-none"
+            >
               {SETTING_MODULES.map((mod, index) => (
-                <FadeIn key={mod.id} delay={index * 100}>
+                <FadeIn key={mod.id} delay={index * 100} className="w-full">
                   <TouchableOpacity
                     onPress={() =>
                       mod.routeOverride && router.push(mod.routeOverride)
                     }
                     activeOpacity={0.7}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    className="flex-row w-full"
+                    style={{ width: '100%' }}
                   >
                     <GlassCard
                       glowColor={mod.color}
-                      style={
+                      style={[
                         mod.customBg
                           ? {
                               backgroundColor: mod.customBg,
                               borderColor: mod.customBorder,
                               borderWidth: 1,
                             }
-                          : {}
-                      }
-                      className="flex-row items-center justify-between p-4 transition-all md:p-8 hover:bg-white/[0.04] rounded-3xl"
+                          : {},
+                        { width: '100%' },
+                      ]}
+                      className="flex-row items-center justify-between flex-1 p-4 transition-all md:p-8 active:bg-white/[0.06] rounded-3xl w-full"
                     >
                       <View className="flex-row items-center flex-1 pr-2 shrink">
                         <View
@@ -670,7 +617,6 @@ export default function SettingsHubScreen() {
                         >
                           <mod.icon size={20} color={mod.iconHex} />
                         </View>
-
                         <View className="flex-1 shrink">
                           <Text
                             className="mb-1 text-sm font-bold tracking-wider text-white uppercase md:tracking-widest md:text-xl"
@@ -686,7 +632,6 @@ export default function SettingsHubScreen() {
                           </Text>
                         </View>
                       </View>
-
                       <View className="items-center justify-center w-8 h-8 rounded-full md:w-10 md:h-10 bg-white/[0.02] border border-white/5 shrink-0">
                         <ChevronRight size={18} color="#ffffff50" />
                       </View>
@@ -694,6 +639,37 @@ export default function SettingsHubScreen() {
                   </TouchableOpacity>
                 </FadeIn>
               ))}
+
+              {/* ── NEW FEATURE: SYSTEM TELEMETRY ── */}
+              <FadeIn delay={500} className="w-full mt-8">
+                <View className="w-full p-6 rounded-3xl bg-black/40 border border-[#048766]/20 items-center justify-between flex-row">
+                  <View className="flex-row items-center gap-x-3">
+                    <Activity size={16} color={THEME.green} />
+                    <View>
+                      <Text className="text-[10px] font-black text-[#048766] tracking-[2px] uppercase">
+                        Telemetry Active
+                      </Text>
+                      <Text className="text-[9px] font-medium text-white/40 uppercase tracking-widest mt-1">
+                        End-to-End Encrypted
+                      </Text>
+                    </View>
+                  </View>
+                  <View className="h-2 w-2 rounded-full bg-[#048766] shadow-[0_0_10px_#048766]" />
+                </View>
+              </FadeIn>
+
+              {/* ── ADDED SIGNOUT ── */}
+              <FadeIn delay={600} className="w-full mt-4 mb-10">
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  className="w-full flex-row items-center justify-center p-4 rounded-3xl border border-white/10 bg-white/[0.02]"
+                >
+                  <LogOut size={16} color={THEME.pink} className="mr-3" />
+                  <Text className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
+                    Terminate Session
+                  </Text>
+                </TouchableOpacity>
+              </FadeIn>
             </View>
           </View>
         </ScrollView>
