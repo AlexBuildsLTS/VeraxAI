@@ -15,7 +15,7 @@ export const THEME = {
       orange: '#FF4500',
       navy: '#000f2e',
       red: '#FF0000',
-      obsidian: '#F59E0B',
+      obsidian: '#000b14',
       green: '#1BA16F',
     },
     text: {

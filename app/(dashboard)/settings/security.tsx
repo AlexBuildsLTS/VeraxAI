@@ -7,7 +7,9 @@
  * 2. 4-DIGIT PIN FALLBACK: Cross-platform vault access for Web & Desktop.
  * 3. CREDENTIALS : Current-Password + New-Password + Confirmation.
  * 4. ENCRYPTED AI VAULT (RBAC): Locked behind Biometrics/PIN. Premium/Admin ONLY.
- * 5. ANIMATED UI: Synchronized SVG & Neon Line hover physics at 120fps.
+ * 5. CRASH-PROOF SVG: SVG pulsing decoupled from Reanimated to prevent Android JNI panics.
+ * 6. DOM SAFETY: Strict ternary logic (?:) used exclusively to prevent text-node crashes.
+ * 7. AMBIENT ENGINE: Fully restored multi-layered OrganicOrb + WanderingCore physics.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -45,6 +47,8 @@ import { FadeIn } from '../../../components/animations/FadeIn';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
 import { cn } from '../../../lib/utils';
+
+// ─── ANIMATION ENGINE ────────────────────────────────────────────────────────
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -54,23 +58,23 @@ import Animated, {
   withDelay,
   useFrameCallback,
   withSequence,
-  useAnimatedProps,
 } from 'react-native-reanimated';
-import Svg, { Rect, Path, Circle, G, Line } from 'react-native-svg';
+import Svg, { Rect, Path, Circle, Line } from 'react-native-svg';
 
-// ─── STRICT THEME ENFORCEMENT ───
+// ─── STRICT THEME ENFORCEMENT ────────────────────────────────────────────────
 const THEME = {
-  obsidian: '#020205',
+  obsidian: '#000b14',
   danger: '#FF007F', // Neon Pink
   success: '#32FF00', // Neon Green
   cyan: '#00F0FF', // Neon Cyan
   purple: '#8A2BE2', // Neon Purple
   gold: '#FFD700', // Premium Gold
   slate: '#94a3b8',
+  pink: '#a3244e',
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: THE WANDERING CORE ENGINE (Smooth, Sleek, Gliding Emitter)
+// MODULE 1: THE AMBIENT ENGINE (Restored to User Specs)
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface RippleProps {
@@ -111,6 +115,7 @@ const SingleRipple = memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -125,22 +130,8 @@ const SingleRipple = memo(
 );
 SingleRipple.displayName = 'SingleRipple';
 
-interface GlidingEmitterProps {
-  coreSize: number;
-  color: string;
-  maxWaveSize: number;
-  waveCount: number;
-  baseDuration: number;
-}
-
 const WanderingCore = memo(
-  ({
-    coreSize,
-    color,
-    maxWaveSize,
-    waveCount,
-    baseDuration,
-  }: GlidingEmitterProps) => {
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
     const stagger = baseDuration / waveCount;
@@ -180,6 +171,7 @@ const WanderingCore = memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -203,6 +195,7 @@ const WanderingCore = memo(
           />
         ))}
         <Animated.View
+          pointerEvents="none"
           style={[
             coreStyle,
             {
@@ -226,15 +219,67 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
-interface AmbientArchitectureProps {
-  delay?: number;
-  color?: string;
-  bottom?: number;
-  right?: number;
-}
+const OrganicOrb = memo(
+  ({
+    color,
+    size,
+    initialX,
+    initialY,
+    speedX,
+    speedY,
+    phaseOffsetX,
+    phaseOffsetY,
+    opacityBase,
+  }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 1000;
+    });
+
+    const animatedStyle = useAnimatedStyle(() => {
+      const xOffset =
+        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
+      const yOffset =
+        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
+      const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
+
+      return {
+        transform: [
+          { translateX: initialX + xOffset },
+          { translateY: initialY + yOffset },
+          { scale: breathe },
+        ],
+        opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
+      };
+    });
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: -size / 2,
+            left: -size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+            ...(Platform.OS === 'web' ? ({ filter: 'blur(60px)' } as any) : {}),
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+OrganicOrb.displayName = 'OrganicOrb';
 
 const AmbientArchitecture = memo(
-  ({ color = '#00F0FF', bottom, right, delay }: AmbientArchitectureProps) => {
+  ({ color = '#00F0FF', bottom, right, delay }: any) => {
     const { width, height } = Dimensions.get('window');
     const isDesktop = width >= 1024;
     const massiveWaveRadius = isDesktop ? width * 1.0 : height * 1.4;
@@ -257,12 +302,35 @@ const AmbientArchitecture = memo(
         ]}
         pointerEvents="none"
       >
+        {/* Restored to exact specs provided by user */}
+        <OrganicOrb
+          color={THEME.pink}
+          size={width * 0.6}
+          initialX={width * 0.8}
+          initialY={height * 0.6}
+          speedX={0.15}
+          speedY={0.2}
+          phaseOffsetX={Math.PI}
+          phaseOffsetY={0}
+          opacityBase={0.06}
+        />
+        <OrganicOrb
+          color={THEME.cyan}
+          size={width * 0.4}
+          initialX={width * 0.5}
+          initialY={height * 0.8}
+          speedX={0.25}
+          speedY={0.1}
+          phaseOffsetX={Math.PI / 4}
+          phaseOffsetY={Math.PI}
+          opacityBase={0.04}
+        />
         <WanderingCore
           coreSize={18}
-          color={color}
+          color={THEME.pink}
           maxWaveSize={massiveWaveRadius}
           waveCount={4}
-          baseDuration={16000}
+          baseDuration={13000}
         />
       </View>
     );
@@ -272,15 +340,14 @@ AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 2: ANIMATED SVG & SYNCHRONIZED HOVER HEADER
+// CRITICAL: Reanimated decoupled from SVG props to prevent Android ViewConfig crash.
 // ══════════════════════════════════════════════════════════════════════════════
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const AnimatedSecurityHeader = memo(() => {
   const floatY = useSharedValue(0);
-  const pulseOpacity = useSharedValue(0.3);
+  const [isPulsing, setIsPulsing] = useState(true);
 
   useEffect(() => {
-    // Synchronized vertical floating sequence (applies to both SVG and Line)
     floatY.value = withRepeat(
       withSequence(
         withTiming(-8, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
@@ -290,24 +357,16 @@ const AnimatedSecurityHeader = memo(() => {
       true,
     );
 
-    // Blinking effect for the neon green server nodes
-    pulseOpacity.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 800, easing: Easing.ease }),
-        withTiming(0.3, { duration: 800, easing: Easing.ease }),
-      ),
-      -1,
-      true,
-    );
+    const interval = setInterval(() => {
+      setIsPulsing((prev) => !prev);
+    }, 800);
+
+    return () => clearInterval(interval);
   }, []);
 
   const hoverStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatY.value }],
     alignItems: 'center',
-  }));
-
-  const nodeProps = useAnimatedProps(() => ({
-    opacity: pulseOpacity.value,
   }));
 
   const C = {
@@ -320,10 +379,8 @@ const AnimatedSecurityHeader = memo(() => {
 
   return (
     <Animated.View style={hoverStyle}>
-      {/* ── HIGH FIDELITY SECURITY DB SVG RECREATION ── */}
       <View style={{ width: 100, height: 100 }}>
         <Svg width="100%" height="100%" viewBox="0 0 200 200">
-          {/* Connecting Data Lines */}
           <Path
             d="M 100 60 L 100 80 L 50 80 L 50 120"
             fill="none"
@@ -339,7 +396,6 @@ const AnimatedSecurityHeader = memo(() => {
             strokeLinejoin="round"
           />
 
-          {/* Top Server Node */}
           <Rect
             x="60"
             y="20"
@@ -351,15 +407,14 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="100" y="32" width="25" height="6" rx="3" fill="#FFF" />
-          <AnimatedCircle
+          <Circle
             cx="75"
             cy="35"
             r="5"
             fill={C.green}
-            animatedProps={nodeProps}
+            opacity={isPulsing ? 1 : 0.3}
           />
 
-          {/* Bottom Left Servers */}
           <Rect
             x="10"
             y="120"
@@ -371,12 +426,12 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="50" y="132" width="25" height="6" rx="3" fill="#FFF" />
-          <AnimatedCircle
+          <Circle
             cx="25"
             cy="135"
             r="5"
             fill={C.green}
-            animatedProps={nodeProps}
+            opacity={isPulsing ? 1 : 0.3}
           />
 
           <Rect
@@ -390,15 +445,14 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="50" y="172" width="25" height="6" rx="3" fill="#FFF" />
-          <AnimatedCircle
+          <Circle
             cx="25"
             cy="175"
             r="5"
             fill={C.green}
-            animatedProps={nodeProps}
+            opacity={isPulsing ? 1 : 0.3}
           />
 
-          {/* Bottom Right Servers */}
           <Rect
             x="110"
             y="120"
@@ -410,12 +464,12 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="150" y="132" width="25" height="6" rx="3" fill="#FFF" />
-          <AnimatedCircle
+          <Circle
             cx="125"
             cy="135"
             r="5"
             fill={C.green}
-            animatedProps={nodeProps}
+            opacity={isPulsing ? 1 : 0.3}
           />
 
           <Rect
@@ -429,15 +483,14 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="150" y="172" width="25" height="6" rx="3" fill="#FFF" />
-          <AnimatedCircle
+          <Circle
             cx="125"
             cy="175"
             r="5"
             fill={C.green}
-            animatedProps={nodeProps}
+            opacity={isPulsing ? 1 : 0.3}
           />
 
-          {/* Left Blockade (Pink X) */}
           <Circle cx="50" cy="80" r="22" fill={C.navy} />
           <Circle
             cx="50"
@@ -466,7 +519,6 @@ const AnimatedSecurityHeader = memo(() => {
             strokeLinecap="round"
           />
 
-          {/* Right Blockade (Pink X) */}
           <Circle cx="150" cy="80" r="22" fill={C.navy} />
           <Circle
             cx="150"
@@ -496,8 +548,6 @@ const AnimatedSecurityHeader = memo(() => {
           />
         </Svg>
       </View>
-
-      {/* ── THE SYNCHRONIZED GLOWING LINE ── */}
       <View className="h-1 w-24 bg-[#FF007F] mt-4 rounded-full shadow-[0_0_15px_#FF007F]" />
     </Animated.View>
   );
@@ -507,6 +557,7 @@ AnimatedSecurityHeader.displayName = 'AnimatedSecurityHeader';
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 3: PASSWORD STRENGTH HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
+
 const calculateEntropy = (pw: string) => {
   const checks = [
     pw.length >= 10,
@@ -538,6 +589,7 @@ const strictInputStyle = {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 4: MAIN DASHBOARD COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
+
 export default function SecuritySettingsScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -773,9 +825,9 @@ export default function SecuritySettingsScreen() {
   const isPremium = userRole === 'premium' || userRole === 'admin';
 
   return (
-    <SafeAreaView className="flex-1 bg-[#00001ad2]">
+    <SafeAreaView className="flex-1 bg-[#000814e5]">
       <AmbientArchitecture
-        delay={4000}
+        delay={0}
         color={THEME.purple}
         bottom={-100}
         right={-50}
@@ -798,7 +850,7 @@ export default function SecuritySettingsScreen() {
             width: '100%',
           }}
         >
-          {/* ── RETURN NAVIGATION & HEADER WITH NEW SVG ANIMATION ── */}
+          {/* ── RETURN NAVIGATION & HEADER ── */}
           <FadeIn
             delay={100}
             className="relative z-50 items-center justify-center w-full pt-4 mb-12"
@@ -826,7 +878,7 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-8 gap-x-4">
                 <Fingerprint size={28} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  PIN & BIOMETRICS
+                  Access Protocols
                 </Text>
               </View>
 
@@ -916,14 +968,14 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-10 gap-x-4">
                 <Lock size={24} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  PASSWORD SECURITY
+                  Credentials Protocol
                 </Text>
               </View>
 
               <View className="gap-y-6">
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Current PASSWORD
+                    Current Verification
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -939,7 +991,7 @@ export default function SecuritySettingsScreen() {
 
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    NEW PASSWORD
+                    New Identity Code
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -951,7 +1003,7 @@ export default function SecuritySettingsScreen() {
                       style={strictInputStyle}
                     />
                   </View>
-                  {newPw.length > 0 && (
+                  {newPw.length > 0 ? (
                     <View className="flex-row h-1.5 px-2 mt-4 gap-x-2">
                       {[1, 2, 3, 4].map((n) => (
                         <View
@@ -966,19 +1018,19 @@ export default function SecuritySettingsScreen() {
                         />
                       ))}
                     </View>
-                  )}
+                  ) : null}
                 </View>
 
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Verify Password
+                    Verify Identity Code
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
                       value={confirmPw}
                       onChangeText={setConfirmPw}
                       secureTextEntry
-                      placeholder="Verify New PASSWORD"
+                      placeholder="Verify New Code"
                       placeholderTextColor="rgba(255,255,255,0.2)"
                       style={strictInputStyle}
                     />
@@ -1009,7 +1061,7 @@ export default function SecuritySettingsScreen() {
           {/* ── AI INTEGRATION VAULT (RBAC ENFORCED) ── */}
           <FadeIn delay={400}>
             <GlassCard className="p-6 md:p-10 mb-8 bg-white/[0.015] border-white/5 rounded-[32px] overflow-hidden relative">
-              {!isPremium && !isVaultLocked && (
+              {!isPremium && !isVaultLocked ? (
                 <View className="absolute inset-0 z-20 items-center justify-center bg-[#020205]/90 backdrop-blur-xl">
                   <Crown size={40} color={THEME.gold} className="mb-4" />
                   <Text className="mb-2 text-xl font-black tracking-widest text-white uppercase">
@@ -1028,7 +1080,7 @@ export default function SecuritySettingsScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-              )}
+              ) : null}
 
               {isVaultLocked ? (
                 <View className="items-center justify-center py-10">

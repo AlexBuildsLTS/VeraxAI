@@ -3,17 +3,16 @@
  * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
  * ARCHITECTURE & PROTOCOL
- * TOUCH ISOLATION: Reverted to standard TouchableOpacity and natural DOM flow.
- * Aggressive zIndex forcing removed to allow Android's native gesture responder
- * to process taps reliably. Touch delays mitigated via delayPressIn={0}.
- * AMBIENT ENGINE: Hardware-accelerated Wandering Core & Nebula engine
- * maintained at 120fps, isolated via pointerEvents="none".
- * UX SYSTEM: Liquid Neon glassmorphism enforced across all interactive nodes.
- * STRICT TYPING: Zero 'any' types utilized across routing and animations.
+ * 1. TOUCH ISOLATION (THE FIX): pointerEvents="none" explicitly forced onto EVERY
+ * nested Reanimated node. This prevents Android's UI thread from dropping the
+ * parent touch rules and stealing single-finger taps.
+ * 2. AMBIENT ENGINE: User's exact requested Tri-Layer architecture restored
+ * (Pink Orb, Cyan Orb, Wandering Core).
+ * 3. DOM SAFETY: Strict ternaries applied. Zero `&&` logic leaks.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,9 +23,6 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter, Href } from 'expo-router';
-import { GlassCard } from '../../../components/ui/GlassCard';
-import { FadeIn } from '../../../components/animations/FadeIn';
-import { cn } from '../../../lib/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   User,
@@ -38,6 +34,10 @@ import {
   ArrowBigLeftDash,
   LucideIcon,
 } from 'lucide-react-native';
+
+import { GlassCard } from '../../../components/ui/GlassCard';
+import { FadeIn } from '../../../components/animations/FadeIn';
+import { cn } from '../../../lib/utils';
 import { useAuthStore } from '../../../store/useAuthStore';
 
 // ─── NATIVE SVG & REANIMATED PIPELINE ─────────────────────────────────────────
@@ -55,12 +55,11 @@ import Animated, {
   useFrameCallback,
 } from 'react-native-reanimated';
 
-// Animated wrapper for SVG sub-components allowing direct Reanimated prop injection
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─── LIQUID NEON THEME CONSTANTS ──────────────────────────────────────────────
 const THEME = {
-  obsidian: '#000012',
+  obsidian: '#020205',
   cyan: '#00F0FF',
   purple: '#8A2BE2',
   pink: '#FF007F',
@@ -68,7 +67,6 @@ const THEME = {
   red: '#FF3333',
 } as const;
 
-// Environment flag for platform-specific rendering (e.g., CSS BoxShadow vs Native Shadow)
 const IS_WEB = Platform.OS === 'web';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -104,21 +102,11 @@ interface WanderingCoreProps {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: THE WANDERING CORE ENGINE (Smooth, Sleek, Gliding Emitter)
+// MODULE 2: AMBIENT ENGINE (RESTORED TO EXACT SPECS)
 // ══════════════════════════════════════════════════════════════════════════════
-//  CUSTOMIZATION
-// - color: Change the hex code to alter the wave and core ball color.
-// - waveCount: Number of pulses active at the same time
-
-interface RippleProps {
-  color: string;
-  delay: number;
-  duration: number;
-  maxSize: number;
-}
 
 const SingleRipple = memo(
-  ({ color, delay, duration, maxSize }: RippleProps) => {
+  ({ color, delay, duration, maxSize }: SingleRippleProps) => {
     const progress = useSharedValue(0);
 
     useEffect(() => {
@@ -132,25 +120,21 @@ const SingleRipple = memo(
       );
     }, [delay, duration, progress]);
 
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        // The wave physically expands from 0 to maxSize
-        width: interpolate(progress.value, [0, 1], [0, maxSize]),
-        height: interpolate(progress.value, [0, 1], [0, maxSize]),
-        borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-
-        // The opacity mathematically gets weaker as the wave expands (progress -> 1)
-        opacity: interpolate(
-          progress.value,
-          [0, 0.1, 0.6, 1],
-          [0, 0.4, 0.05, 0],
-        ),
-        borderWidth: interpolate(progress.value, [0, 1], [24, 2]), // pulse size
-      };
-    });
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(
+        progress.value,
+        [0, 0.1, 0.8, 1],
+        [0, 0.15, 0.02, 0],
+      ),
+      borderWidth: interpolate(progress.value, [0, 1], [60, 20]),
+    }));
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -165,14 +149,6 @@ const SingleRipple = memo(
 );
 SingleRipple.displayName = 'SingleRipple';
 
-interface GlidingEmitterProps {
-  coreSize: number;
-  color: string;
-  maxWaveSize: number;
-  waveCount: number;
-  baseDuration: number;
-}
-
 const WanderingCore = memo(
   ({
     coreSize,
@@ -180,41 +156,32 @@ const WanderingCore = memo(
     maxWaveSize,
     waveCount,
     baseDuration,
-  }: GlidingEmitterProps) => {
+  }: WanderingCoreProps) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
-    const stagger = baseDuration / waveCount;
 
-    // 120fps UI-Thread Logic for ultra-smooth gliding
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
-      // Slower time multiplier = slower, sleeker movement across the screen
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
 
-    // Math.sin and Math.cos create an organic "Infinity" looping path
-    // It moves horizontally across 60% of the screen, and vertically across 40%.
-    const animatedPosition = useAnimatedStyle(() => {
-      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
-      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
 
-      return {
-        transform: [
-          { translateX: width / 2 + xOffset },
-          { translateY: height / 2 + yOffset },
-        ],
-      };
-    });
-
-    // Breathing effect for the core ball itself
-    const corePulse = useSharedValue(0.6);
+    const corePulse = useSharedValue(0.4);
     useEffect(() => {
       corePulse.value = withRepeat(
         withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
         -1,
         true,
       );
-    }, []);
+    }, [corePulse]);
 
     const coreStyle = useAnimatedStyle(() => ({
       opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
@@ -225,6 +192,7 @@ const WanderingCore = memo(
 
     return (
       <Animated.View
+        pointerEvents="none"
         style={[
           {
             position: 'absolute',
@@ -238,19 +206,17 @@ const WanderingCore = memo(
           animatedPosition,
         ]}
       >
-        {/* ── SPATIAL WAVES ── */}
         {Array.from({ length: waveCount }).map((_, index) => (
           <SingleRipple
             key={`ripple-${index}`}
             color={color}
-            delay={index * stagger}
+            delay={index * (baseDuration / waveCount)}
             duration={baseDuration}
             maxSize={maxWaveSize}
           />
         ))}
-
-        {/* ── THE CORE BALL ── */}
         <Animated.View
+          pointerEvents="none"
           style={[
             coreStyle,
             {
@@ -258,13 +224,14 @@ const WanderingCore = memo(
               height: coreSize,
               borderRadius: coreSize / 2,
               backgroundColor: color,
-              shadowColor: color,
-              shadowRadius: 15,
-              shadowOpacity: 1,
-              shadowOffset: { width: 0, height: 0 },
-              ...(Platform.OS === 'web'
-                ? ({ boxShadow: `0 0 20px ${color}` } as any)
-                : {}),
+              ...(IS_WEB
+                ? { boxShadow: `0 0 20px ${color}` }
+                : {
+                    shadowColor: color,
+                    shadowRadius: 15,
+                    shadowOpacity: 1,
+                    shadowOffset: { width: 0, height: 0 },
+                  }),
             },
           ]}
         />
@@ -274,12 +241,6 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
-interface AmbientArchitectureProps {
-  delay?: number;
-  color?: string;
-  bottom?: number;
-  right?: number;
-}
 const OrganicOrb = memo(
   ({
     color,
@@ -338,26 +299,14 @@ const OrganicOrb = memo(
   },
 );
 OrganicOrb.displayName = 'OrganicOrb';
-// ─── MASTER AMBIENT CONTROLLER ───
+
 const AmbientArchitecture = memo(
-  ({ color = '#4a0c2f', bottom, right, delay }: AmbientArchitectureProps) => {
+  ({ color = THEME.cyan, bottom, right }: any) => {
     const { width, height } = Dimensions.get('window');
     const isDesktop = width >= 1024;
-    const massiveWaveRadius = isDesktop ? width * 1.0 : height * 1.4;
-
-    const [isVisible, setIsVisible] = useState(!delay);
-
-    useEffect(() => {
-      if (delay) {
-        const timer = setTimeout(() => setIsVisible(true), delay);
-        return () => clearTimeout(timer);
-      }
-    }, [delay]);
-
-    if (!isVisible) return null;
+    const massiveWaveRadius = isDesktop ? width * 0.8 : height * 1.0;
 
     return (
-      // CRITICAL: pointerEvents="none" guarantees zero touch overlap
       <View
         style={[
           StyleSheet.absoluteFill,
@@ -365,35 +314,35 @@ const AmbientArchitecture = memo(
         ]}
         pointerEvents="none"
       >
+        {/* ── RESTORED USER BACKGROUND LAYER ── */}
         <OrganicOrb
-        color={THEME.pink}
-        size={width * 0.6}
-        initialX={width * 0.8}
-        initialY={height * 0.6}
-        speedX={0.15}
-        speedY={0.2}
-        phaseOffsetX={Math.PI}
-        phaseOffsetY={0}
-        opacityBase={0.06}
-      />
-      <OrganicOrb
-        color={THEME.cyan}
-        size={width * 0.4}
-        initialX={width * 0.5}
-        initialY={height * 0.8}
-        speedX={0.25}
-        speedY={0.1}
-        phaseOffsetX={Math.PI / 4}
-        phaseOffsetY={Math.PI}
-        opacityBase={0.04}
-      />
-        {/* ── THE WANDERING CORE ── */}
+          color={THEME.pink}
+          size={width * 0.6}
+          initialX={width * 0.8}
+          initialY={height * 0.6}
+          speedX={0.15}
+          speedY={0.2}
+          phaseOffsetX={Math.PI}
+          phaseOffsetY={0}
+          opacityBase={0.06}
+        />
+        <OrganicOrb
+          color={THEME.cyan}
+          size={width * 0.4}
+          initialX={width * 0.5}
+          initialY={height * 0.8}
+          speedX={0.25}
+          speedY={0.1}
+          phaseOffsetX={Math.PI / 4}
+          phaseOffsetY={Math.PI}
+          opacityBase={0.04}
+        />
         <WanderingCore
           coreSize={18}
           color={color}
           maxWaveSize={massiveWaveRadius}
-          waveCount={4} // 4 simultaneous pulses fading as they grow
-          baseDuration={13000} // 12 seconds for a wave to fully expand
+          waveCount={4}
+          baseDuration={13000}
         />
       </View>
     );
@@ -401,42 +350,50 @@ const AmbientArchitecture = memo(
 );
 AmbientArchitecture.displayName = 'AmbientArchitecture';
 
-// ─── MODULE 2: ANIMATED SETTINGS ICON (SVG PIPELINE) ─────────────────────────
-const C = {
-  navy: '#000033',
-  white: '#FFFFFF',
-  purple: '#8A2BE2',
-  lightPurple: '#B066FF',
-  yellow: '#FFD700',
-  teal: '#00F0FF',
-  bgCircle: '#010710',
-};
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 3: SVG ANIMATION (SETTINGS SHIELD)
+// ══════════════════════════════════════════════════════════════════════════════
 
 const AnimatedSettingsIcon = memo(() => {
-  const float = useSharedValue(0);
-  const pulse = useSharedValue(0);
+  const floatY = useSharedValue(0);
+  const pulseNodes = useSharedValue(0);
 
   useEffect(() => {
-    float.value = withRepeat(
-      withTiming(1, { duration: 4000, easing: Easing.inOut(Easing.sin) }),
+    floatY.value = withRepeat(
+      withSequence(
+        withTiming(-6, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(6, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+      ),
       -1,
       true,
     );
-    pulse.value = withRepeat(
-      withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.sin) }),
+
+    pulseNodes.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(2, { duration: 5000, easing: Easing.inOut(Easing.ease) }),
+      ),
       -1,
       true,
     );
-  }, []);
+  }, [floatY, pulseNodes]);
 
   const floatStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: interpolate(float.value, [0, 1], [0, -10]) }],
+    transform: [{ translateY: floatY.value }],
+  }));
+  const nodeProps = useAnimatedProps(() => ({
+    r: interpolate(pulseNodes.value, [0, 1], [12, 18]),
   }));
 
-  const nodeProps = useAnimatedProps(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.4, 1]),
-    r: interpolate(pulse.value, [0, 1], [6, 10]),
-  }));
+  const C = {
+    navy: '#050B14',
+    yellow: '#F3CF60',
+    purple: '#C496FC',
+    lightPurple: '#6A5DF1',
+    teal: '#77DFCA',
+    white: '#FFFFFF',
+    bgCircle: '#E8E9FF',
+  };
 
   return (
     <View
@@ -485,7 +442,6 @@ const AnimatedSettingsIcon = memo(() => {
           />
         </Svg>
       </View>
-
       <Animated.View
         style={[
           { position: 'absolute', top: -5, left: 10, width: 120, height: 120 },
@@ -548,7 +504,7 @@ AnimatedSettingsIcon.displayName = 'AnimatedSettingsIcon';
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 4: CORE FOREGROUND & ROUTING
 // ══════════════════════════════════════════════════════════════════════════════
-export default memo(function SettingsHubScreen() {
+export default function SettingsHubScreen() {
   const router = useRouter();
   const { width } = Dimensions.get('window');
   const isMobile = width < 768;
@@ -556,7 +512,6 @@ export default memo(function SettingsHubScreen() {
   const { profile } = useAuthStore();
   const userRole = profile?.role || 'member';
 
-  // Memoized configuration block mapping settings domains to Liquid Neon styling
   const SETTING_MODULES: SettingsCardItem[] = useMemo(() => {
     const modules: SettingsCardItem[] = [
       {
@@ -605,7 +560,6 @@ export default memo(function SettingsHubScreen() {
       },
     ];
 
-    // RBAC: Admin Module conditionally unmounted
     if (userRole === 'admin') {
       modules.push({
         id: 'admin',
@@ -619,7 +573,6 @@ export default memo(function SettingsHubScreen() {
         routeOverride: '/admin' as Href,
       });
     }
-
     return modules;
   }, [userRole]);
 
@@ -628,9 +581,7 @@ export default memo(function SettingsHubScreen() {
       {/* ── BACKGROUND LAYER ── */}
       <AmbientArchitecture />
 
-      {/* ── FOREGROUND LAYER ──
-       * SafeAreaView restricts boundaries cleanly to device notches.
-       */}
+      {/* ── FOREGROUND LAYER ── */}
       <SafeAreaView
         style={{ flex: 1 }}
         edges={['top', 'bottom', 'left', 'right']}
@@ -670,24 +621,22 @@ export default memo(function SettingsHubScreen() {
               className="flex-row items-center mb-10 gap-x-2"
               activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-              // ARCHITECTURE FIX: Bypasses Android's scroll-wait time
-              delayPressIn={0}
             >
               <ArrowBigLeftDash size={18} color={THEME.cyan} />
             </TouchableOpacity>
           </View>
 
-          <View className="w-full max-w-2xl px-2">
-            <View className="gap-y-4 md:gap-y-6">
+          {/* CRITICAL DOM FIX: box-none ensures ScrollView tracks touches properly */}
+          <View className="w-full max-w-2xl px-2" pointerEvents="box-none">
+            <View className="gap-y-4 md:gap-y-6" pointerEvents="box-none">
               {SETTING_MODULES.map((mod, index) => (
                 <FadeIn key={mod.id} delay={index * 100}>
                   <TouchableOpacity
-                    onPress={() => {
-                      if (mod.routeOverride) {
-                        router.push(mod.routeOverride);
-                      }
-                    }}
+                    onPress={() =>
+                      mod.routeOverride && router.push(mod.routeOverride)
+                    }
                     activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <GlassCard
                       glowColor={mod.color}
@@ -730,7 +679,7 @@ export default memo(function SettingsHubScreen() {
                             {mod.title}
                           </Text>
                           <Text
-                            className="text-[9px] md:text-xs text-white/80 font-medium uppercase tracking-widest md:tracking-[3px]"
+                            className="text-[9px] md:text-xs text-white/40 font-medium uppercase tracking-widest md:tracking-[3px]"
                             numberOfLines={2}
                           >
                             {mod.desc}
@@ -751,37 +700,4 @@ export default memo(function SettingsHubScreen() {
       </SafeAreaView>
     </View>
   );
-}) as React.FC;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 5: STYLES
-// ══════════════════════════════════════════════════════════════════════════════
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: THEME.obsidian },
-  scrollContent: { flexGrow: 1, alignItems: 'center' },
-  headerContainer: { alignItems: 'center', width: '100%', maxWidth: 640 },
-  badge: {
-    paddingHorizontal: 20,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0, 240, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 240, 255, 0.2)',
-    marginBottom: 32,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 5,
-    color: THEME.cyan,
-    textTransform: 'uppercase',
-  },
-  moduleList: { width: '100%', maxWidth: 640, paddingHorizontal: 8 },
-  moduleGap: { rowGap: 16 },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 40,
-    padding: 8,
-  },
-});
+}
