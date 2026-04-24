@@ -1,21 +1,3 @@
-/**
- * app/(dashboard)/settings/security.tsx
- * VeraxAI — Security & Identity Vault
- * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE & PROTOCOL (Verified: 2026-04-24)
- * 1. SVG CRASH FIX: All `opacity` values inside `<Svg>` are strictly cast as
- * strings (`"1"` vs `"0.3"`) to prevent the Android ClassCastException Native Crash.
- * 2. REANIMATED CRASH FIX: Layout prop `alignItems: 'center'` removed from
- * `useAnimatedStyle` to prevent UI thread panic.
- * 3. EXACT COLOR PALETTE: User's exact Hex values applied (Obsidian: #000b14,
- * Green: #048766, Pink: #a3244e).
- * 4. TOUCH ISOLATION: `keyboardShouldPersistTaps="always"` applied to ScrollView.
- * hitSlop and w-full injected. Single-finger routing guaranteed.
- * 5. AMBIENT ENGINE: User's exact requested Tri-Layer architecture restored
- * (Pink Orb, Green Orb, Pink Wandering Core).
- * ══════════════════════════════════════════════════════════════════════════════
- */
-
 import React, { useState, useEffect, memo } from 'react';
 import {
   View,
@@ -25,11 +7,10 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
-  Dimensions,
   KeyboardAvoidingView,
   StyleSheet,
   TextInput,
-  Easing,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -51,7 +32,6 @@ import { useAuthStore } from '../../../store/useAuthStore';
 import { supabase } from '../../../lib/supabase/client';
 import { cn } from '../../../lib/utils';
 
-// ─── ANIMATION ENGINE ────────────────────────────────────────────────────────
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -60,77 +40,59 @@ import Animated, {
   interpolate,
   withDelay,
   useFrameCallback,
+  Easing,
   withSequence,
 } from 'react-native-reanimated';
 import Svg, { Rect, Path, Circle, Line } from 'react-native-svg';
 
-// ─── STRICT THEME ENFORCEMENT (USER EXACT SPECIFICATIONS) ────────────────────
 const THEME = {
   obsidian: '#000b14',
-  danger: '#FF007F', // Neon Pink
-  success: '#048766', // Neon Green
-  cyan: '#00F0FF', // Neon Cyan
-  purple: '#8A2BE2', // Neon Purple
-  gold: '#FFD700', // Premium Gold
+  danger: '#FF007F',
+  success: '#048766',
+  cyan: '#00F0FF',
+  purple: '#8A2BE2',
+  gold: '#FFD700',
   slate: '#94a3b8',
   pink: '#a3244e',
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: THE AMBIENT ENGINE
+// MODULE 1: AMBIENT ENGINE (Confirmed working on other pages)
 // ══════════════════════════════════════════════════════════════════════════════
 
-interface RippleProps {
-  color: string;
-  delay: number;
-  duration: number;
-  maxSize: number;
-}
-
-const SingleRipple = memo(
-  ({ color, delay, duration, maxSize }: RippleProps) => {
-    const progress = useSharedValue(0);
-
-    useEffect(() => {
-      progress.value = withDelay(
-        delay,
-        withRepeat(
-          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
-          -1,
-          false,
-        ),
-      );
-    }, [delay, duration, progress]);
-
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        width: interpolate(progress.value, [0, 1], [0, maxSize]),
-        height: interpolate(progress.value, [0, 1], [0, maxSize]),
-        borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-        opacity: interpolate(
-          progress.value,
-          [0, 0.1, 0.6, 1],
-          [0, 0.4, 0.05, 0],
-        ),
-        borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
-      };
-    });
-
-    return (
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          {
-            position: 'absolute',
-            borderColor: color,
-            backgroundColor: 'transparent',
-          },
-          animatedStyle,
-        ]}
-      />
+const SingleRipple = memo(({ color, delay, duration, maxSize }: any) => {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+        -1,
+        false,
+      ),
     );
-  },
-);
+  }, [delay, duration, progress]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: interpolate(progress.value, [0, 1], [0, maxSize]),
+    height: interpolate(progress.value, [0, 1], [0, maxSize]),
+    borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+    opacity: interpolate(progress.value, [0, 0.1, 0.6, 1], [0, 0.4, 0.05, 0]),
+    borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          borderColor: color,
+          backgroundColor: 'transparent',
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+});
 SingleRipple.displayName = 'SingleRipple';
 
 const WanderingCore = memo(
@@ -138,23 +100,18 @@ const WanderingCore = memo(
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
     const stagger = baseDuration / waveCount;
-
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
-
-    const animatedPosition = useAnimatedStyle(() => {
-      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
-      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
-      return {
-        transform: [
-          { translateX: width / 2 + xOffset },
-          { translateY: height / 2 + yOffset },
-        ],
-      };
-    });
-
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
     const corePulse = useSharedValue(0.6);
     useEffect(() => {
       corePulse.value = withRepeat(
@@ -163,7 +120,6 @@ const WanderingCore = memo(
         true,
       );
     }, []);
-
     const coreStyle = useAnimatedStyle(() => ({
       opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
       transform: [
@@ -235,12 +191,10 @@ const OrganicOrb = memo(
   }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
-
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
       time.value += frameInfo.timeSincePreviousFrame / 1000;
     });
-
     const animatedStyle = useAnimatedStyle(() => {
       const xOffset =
         Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
@@ -256,7 +210,6 @@ const OrganicOrb = memo(
         opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
       };
     });
-
     return (
       <Animated.View
         pointerEvents="none"
@@ -279,71 +232,62 @@ const OrganicOrb = memo(
 );
 OrganicOrb.displayName = 'OrganicOrb';
 
-const AmbientArchitecture = memo(
-  ({ color = '#00F0FF', bottom, right, delay }: any) => {
-    const { width, height } = Dimensions.get('window');
-    const massiveWaveRadius = width >= 1024 ? width * 1.0 : height * 1.4;
-    const [isVisible, setIsVisible] = useState(!delay);
-
-    useEffect(() => {
-      if (delay) {
-        const timer = setTimeout(() => setIsVisible(true), delay);
-        return () => clearTimeout(timer);
-      }
-    }, [delay]);
-
-    if (!isVisible) return null;
-
-    return (
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          { bottom: bottom ?? 0, right: right ?? 0 },
-        ]}
-        pointerEvents="none"
-      >
-        <OrganicOrb
-          color={THEME.pink}
-          size={width * 0.6}
-          initialX={width * 0.8}
-          initialY={height * 0.6}
-          speedX={0.15}
-          speedY={0.2}
-          phaseOffsetX={Math.PI}
-          phaseOffsetY={0}
-          opacityBase={0.06}
-        />
-        <OrganicOrb
-          color={THEME.success}
-          size={width * 0.4}
-          initialX={width * 0.5}
-          initialY={height * 0.8}
-          speedX={0.25}
-          speedY={0.1}
-          phaseOffsetX={Math.PI / 4}
-          phaseOffsetY={Math.PI}
-          opacityBase={0.04}
-        />
-        <WanderingCore
-          coreSize={18}
-          color={THEME.pink}
-          maxWaveSize={massiveWaveRadius}
-          waveCount={4}
-          baseDuration={13000}
-        />
-      </View>
-    );
-  },
-);
+const AmbientArchitecture = memo(({ delay }: any) => {
+  const { width, height } = Dimensions.get('window');
+  const massiveWaveRadius = width >= 1024 ? width * 1.0 : height * 1.4;
+  const [isVisible, setIsVisible] = useState(!delay);
+  useEffect(() => {
+    if (delay) {
+      const timer = setTimeout(() => setIsVisible(true), delay);
+      return () => clearTimeout(timer);
+    }
+  }, [delay]);
+  if (!isVisible) return null;
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, { bottom: 0, right: 0 }]}
+      pointerEvents="none"
+    >
+      <OrganicOrb
+        color={THEME.pink}
+        size={width * 0.6}
+        initialX={width * 0.8}
+        initialY={height * 0.6}
+        speedX={0.15}
+        speedY={0.2}
+        phaseOffsetX={Math.PI}
+        phaseOffsetY={0}
+        opacityBase={0.06}
+      />
+      <OrganicOrb
+        color={THEME.success}
+        size={width * 0.4}
+        initialX={width * 0.5}
+        initialY={height * 0.8}
+        speedX={0.25}
+        speedY={0.1}
+        phaseOffsetX={Math.PI / 4}
+        phaseOffsetY={Math.PI}
+        opacityBase={0.04}
+      />
+      <WanderingCore
+        coreSize={18}
+        color={THEME.pink}
+        maxWaveSize={massiveWaveRadius}
+        waveCount={4}
+        baseDuration={13000}
+      />
+    </View>
+  );
+});
 AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: ANIMATED SVG & SYNCHRONIZED HOVER HEADER
+// MODULE 2: STATIC SVG HEADER (Crash-Proofed)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const AnimatedSecurityHeader = memo(() => {
   const floatY = useSharedValue(0);
-  const [isPulsing, setIsPulsing] = useState(true);
 
   useEffect(() => {
     floatY.value = withRepeat(
@@ -354,19 +298,11 @@ const AnimatedSecurityHeader = memo(() => {
       -1,
       true,
     );
-
-    const interval = setInterval(() => {
-      setIsPulsing((prev) => !prev);
-    }, 800);
-
-    return () => clearInterval(interval);
   }, []);
 
-  // CRITICAL FIX: Removed alignItems from animated style, applied to View style array
   const hoverStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatY.value }],
   }));
-
   const C = {
     purple: '#A87FFB',
     navy: '#0B1B42',
@@ -393,7 +329,6 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="8"
             strokeLinejoin="round"
           />
-
           <Rect
             x="60"
             y="20"
@@ -405,15 +340,7 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="100" y="32" width="25" height="6" rx="3" fill="#FFF" />
-          {/* CRITICAL FIX: Opacity explicitly cast as STRING to prevent Android Crash */}
-          <Circle
-            cx="75"
-            cy="35"
-            r="5"
-            fill={C.green}
-            opacity={isPulsing ? '1' : '0.3'}
-          />
-
+          <Circle cx="75" cy="35" r="5" fill={C.green} />
           <Rect
             x="10"
             y="120"
@@ -425,14 +352,7 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="50" y="132" width="25" height="6" rx="3" fill="#FFF" />
-          <Circle
-            cx="25"
-            cy="135"
-            r="5"
-            fill={C.green}
-            opacity={isPulsing ? '1' : '0.3'}
-          />
-
+          <Circle cx="25" cy="135" r="5" fill={C.green} />
           <Rect
             x="10"
             y="160"
@@ -444,14 +364,7 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="50" y="172" width="25" height="6" rx="3" fill="#FFF" />
-          <Circle
-            cx="25"
-            cy="175"
-            r="5"
-            fill={C.green}
-            opacity={isPulsing ? '1' : '0.3'}
-          />
-
+          <Circle cx="25" cy="175" r="5" fill={C.green} />
           <Rect
             x="110"
             y="120"
@@ -463,14 +376,7 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="150" y="132" width="25" height="6" rx="3" fill="#FFF" />
-          <Circle
-            cx="125"
-            cy="135"
-            r="5"
-            fill={C.green}
-            opacity={isPulsing ? '1' : '0.3'}
-          />
-
+          <Circle cx="125" cy="135" r="5" fill={C.green} />
           <Rect
             x="110"
             y="160"
@@ -482,14 +388,7 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
           />
           <Rect x="150" y="172" width="25" height="6" rx="3" fill="#FFF" />
-          <Circle
-            cx="125"
-            cy="175"
-            r="5"
-            fill={C.green}
-            opacity={isPulsing ? '1' : '0.3'}
-          />
-
+          <Circle cx="125" cy="175" r="5" fill={C.green} />
           <Circle cx="50" cy="80" r="22" fill={C.navy} />
           <Circle
             cx="50"
@@ -517,7 +416,6 @@ const AnimatedSecurityHeader = memo(() => {
             strokeWidth="6"
             strokeLinecap="round"
           />
-
           <Circle cx="150" cy="80" r="22" fill={C.navy} />
           <Circle
             cx="150"
@@ -553,10 +451,6 @@ const AnimatedSecurityHeader = memo(() => {
 });
 AnimatedSecurityHeader.displayName = 'AnimatedSecurityHeader';
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 3: PASSWORD STRENGTH HELPERS
-// ══════════════════════════════════════════════════════════════════════════════
-
 const calculateEntropy = (pw: string) => {
   const checks = [
     pw.length >= 10,
@@ -586,7 +480,7 @@ const strictInputStyle = {
 } as any;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 4: MAIN DASHBOARD COMPONENT
+// MODULE 3: MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 
 export default function SecuritySettingsScreen() {
@@ -620,7 +514,6 @@ export default function SecuritySettingsScreen() {
   const [masterPin, setMasterPin] = useState('');
   const [isSavingPin, setIsSavingPin] = useState(false);
 
-  // ── CRITICAL FIX: Robust try/catch and isMounted for Hardware Check ──
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -660,16 +553,14 @@ export default function SecuritySettingsScreen() {
                 }
               }
             } catch (e) {
-              console.error('Vault parse failed.', e);
+              console.error('Vault parse failed', e);
             }
 
-            if (isBioOn || fetchedPin.length > 0) {
-              setIsVaultLocked(true);
-            }
+            if (isBioOn || fetchedPin.length > 0) setIsVaultLocked(true);
           }
         }
       } catch (e) {
-        console.error('Mount Failure: ', e);
+        console.error('Mount Failure', e);
       }
     })();
     return () => {
@@ -810,20 +701,15 @@ export default function SecuritySettingsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: THEME.obsidian }}>
-      <AmbientArchitecture
-        delay={0}
-        color={THEME.purple}
-        bottom={-100}
-        right={-50}
-      />
+      <AmbientArchitecture delay={0} />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="always" /* CRITICAL FIX */
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingHorizontal: isMobile ? 16 : 40,
             paddingTop: 16,
@@ -842,7 +728,7 @@ export default function SecuritySettingsScreen() {
               onPress={() =>
                 router.canGoBack() ? router.back() : router.replace('/settings')
               }
-              className="absolute left-0 z-50 flex-row items-center px-4 py-4 gap-x-2 active:scale-95"
+              className="absolute left-0 z-50 flex-row items-center px-4 py-4 gap-x-2"
               style={{ top: 15 }}
               activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
@@ -860,7 +746,7 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-8 gap-x-4">
                 <Fingerprint size={28} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  API SECURITY BIOMETRICS & PIN
+                  Access Protocols
                 </Text>
               </View>
 
@@ -868,9 +754,8 @@ export default function SecuritySettingsScreen() {
                 <View className="flex-row items-center justify-between p-5 md:p-6 border bg-black/40 border-white/10 rounded-[24px]">
                   <View>
                     <Text className="text-xs font-bold tracking-wider text-white uppercase md:text-sm">
-                      BIOMETRICS
+                      Hardware Shield
                     </Text>
-                    {/* CRITICAL FIX: Safe Template Literal applied */}
                     <Text className="text-[9px] md:text-[10px] font-black text-white/30 uppercase tracking-[2px] mt-1.5">
                       {`Status: ${bioSupported ? (bioEnabled ? 'ACTIVE' : 'READY') : 'NO HARDWARE'}`}
                     </Text>
@@ -900,7 +785,7 @@ export default function SecuritySettingsScreen() {
                       Vault PIN (4-Digit)
                     </Text>
                     <Text className="text-[9px] md:text-[10px] font-black text-white/30 uppercase tracking-[2px] mt-1.5 leading-relaxed">
-                      Primary lock for Web (Fallback For Mobile)
+                      Primary lock for Web. Fallback for Mobile.
                     </Text>
                   </View>
                   <View className="flex-row items-center gap-x-3">
@@ -915,11 +800,7 @@ export default function SecuritySettingsScreen() {
                         placeholderTextColor="rgba(255,255,255,0.2)"
                         style={[
                           strictInputStyle,
-                          {
-                            fontSize: 20,
-                            letterSpacing: 6,
-                            textAlign: 'center',
-                          },
+                          { fontSize: 20, textAlign: 'center' },
                         ]}
                       />
                     </View>
@@ -946,14 +827,14 @@ export default function SecuritySettingsScreen() {
               <View className="flex-row items-center mb-10 gap-x-4">
                 <Lock size={24} color={THEME.danger} />
                 <Text className="text-lg font-black tracking-widest text-white uppercase md:text-xl">
-                  Security Protocol
+                  Credentials Protocol
                 </Text>
               </View>
 
               <View className="gap-y-6">
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Current Password
+                    Current Verification
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -968,7 +849,7 @@ export default function SecuritySettingsScreen() {
                 </View>
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    New Password
+                    New Identity Code
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -999,7 +880,7 @@ export default function SecuritySettingsScreen() {
                 </View>
                 <View>
                   <Text className="text-[9px] font-black text-[#FF007F] tracking-[3px] uppercase mb-3 ml-2">
-                    Verify New Password
+                    Verify Identity Code
                   </Text>
                   <View className="h-14 overflow-hidden border bg-black/40 border-white/10 rounded-[20px] px-5 focus:border-[#FF007F]">
                     <TextInput
@@ -1015,7 +896,7 @@ export default function SecuritySettingsScreen() {
                 <TouchableOpacity
                   onPress={handleRotateCredentials}
                   disabled={isRotating}
-                  className="flex-row items-center justify-center w-full h-14 mt-4 bg-[#FF007F]/10 border border-[#FF007F]/30 rounded-[20px] active:scale-95 transition-transform"
+                  className="flex-row items-center justify-center h-14 mt-4 bg-[#FF007F]/10 border border-[#FF007F]/30 rounded-[20px] active:scale-95 transition-transform"
                 >
                   {isRotating ? (
                     <ActivityIndicator size="small" color={THEME.danger} />
@@ -1047,7 +928,7 @@ export default function SecuritySettingsScreen() {
                   </Text>
                   <TouchableOpacity
                     onPress={() => router.push('/settings/billing')}
-                    className="flex-row items-center justify-center w-full px-8 py-4 bg-[#FFD700]/10 border border-[#FFD700]/40 rounded-2xl active:scale-95"
+                    className="flex-row items-center justify-center px-8 py-4 bg-[#FFD700]/10 border border-[#FFD700]/40 rounded-2xl active:scale-95"
                   >
                     <Text className="text-xs font-black text-[#FFD700] uppercase tracking-widest">
                       Upgrade to Premium
@@ -1088,7 +969,6 @@ export default function SecuritySettingsScreen() {
                             strictInputStyle,
                             {
                               fontSize: 24,
-                              letterSpacing: 16,
                               textAlign: 'center',
                               color: THEME.cyan,
                             },
@@ -1099,7 +979,7 @@ export default function SecuritySettingsScreen() {
                   ) : (
                     <TouchableOpacity
                       onPress={attemptUnlock}
-                      className="flex-row items-center justify-center w-full px-8 py-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-2xl active:scale-95"
+                      className="flex-row items-center justify-center px-8 py-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-2xl active:scale-95"
                     >
                       <Unlock size={16} color={THEME.cyan} className="mr-3" />
                       <Text className="text-xs font-black text-[#00F0FF] uppercase tracking-widest">
@@ -1183,7 +1063,7 @@ export default function SecuritySettingsScreen() {
                     <TouchableOpacity
                       onPress={() => handleSaveApiVault()}
                       disabled={isSyncingKeys || !isPremium}
-                      className="flex-row items-center justify-center w-full h-14 mt-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-[20px] active:scale-95 transition-transform"
+                      className="flex-row items-center justify-center h-14 mt-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-[20px] active:scale-95 transition-transform"
                     >
                       {isSyncingKeys ? (
                         <ActivityIndicator size="small" color={THEME.cyan} />
@@ -1224,7 +1104,7 @@ export default function SecuritySettingsScreen() {
                     'Contact root administrator to execute full data purge.',
                   )
                 }
-                className="items-center justify-center w-full h-14 border border-rose-500/20 bg-rose-500/10 rounded-[20px] active:scale-95 transition-transform"
+                className="items-center justify-center h-14 border border-rose-500/20 bg-rose-500/10 rounded-[20px] active:scale-95 transition-transform"
               >
                 <Text className="text-[10px] md:text-xs font-black text-rose-500 uppercase tracking-[4px]">
                   Account Closure
