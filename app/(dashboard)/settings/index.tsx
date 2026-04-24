@@ -59,7 +59,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─── LIQUID NEON THEME CONSTANTS ──────────────────────────────────────────────
 const THEME = {
-  obsidian: '#020205',
+  obsidian: '#010710',
   cyan: '#00F0FF',
   purple: '#8A2BE2',
   pink: '#FF007F',
