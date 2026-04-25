@@ -8,9 +8,23 @@
  * 3. DUAL-MODALITY: Handles both direct URLs and raw ArrayBuffers effortlessly.
  */
 
+export interface DeepgramResponse {
+  results?: {
+    channels?: Array<{
+      alternatives?: Array<{
+        transcript?: string;
+        [key: string]: unknown;
+      }>;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface DeepgramResult {
   text: string;
-  json: Record<string, any>;
+  json: DeepgramResponse;
 }
 
 // Shared Response Handler
@@ -20,7 +34,7 @@ async function processDeepgramResponse(response: Response): Promise<DeepgramResu
     throw new Error(`TRANSCRIPTION_REJECTED_${response.status}: ${errorText}`);
   }
 
-  const payload = await response.json();
+  const payload: DeepgramResponse = await response.json();
   const extractedText = payload.results?.channels?.[0]?.alternatives?.[0]?.transcript;
 
   if (!extractedText || extractedText.trim().length === 0) {

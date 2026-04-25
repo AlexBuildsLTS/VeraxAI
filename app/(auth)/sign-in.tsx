@@ -7,6 +7,8 @@
  * ============================================================================
  * This file serves a primary entry point for users identity verifications
  * - Multi-Platform OAuth: Native device browser handoff for Google Sign-In and Web redirect
+ * - UX STABILIZATION: Added full-screen ProcessingLoader overlay to mask Native OS browser transitions.
+ * - ROUTING FIX: Removed invalid callback path to prevent Unmatched Route white screens.
  * - Anti-Flash UX: Reanimated button morphing prevents DOM destruction and keyboard snap
  * - UI Physics: The "Wandering Core" Engine. A single, smooth gliding emitter.
  * - Layout: Desktop split-pane with perfectly centered flex layouts.
@@ -40,6 +42,7 @@ import * as WebBrowser from 'expo-web-browser';
 
 // ─── COMPONENTS & ICONS ──────────────────────────────────────────────────────
 import { FadeIn as CustomFadeIn } from '../../components/animations/FadeIn';
+import { ProcessingLoader } from '../../components/ui/ProcessingLoader';
 import {
   Mail,
   Lock,
@@ -193,12 +196,6 @@ function mapAuthError(errorMessage: string): {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODULE 1: THE WANDERING CORE ENGINE (Smooth, Sleek, Gliding Emitter)
 // ══════════════════════════════════════════════════════════════════════════════
-// ⚙️ CUSTOMIZATION GUIDE:
-// - color: Change the hex code to alter the wave and core ball color.
-// - waveCount: Number of pulses active at the same time (e.g., 4).
-// - baseDuration: Speed of the waves expanding (Default: 12000ms / 12 seconds).
-// - opacity interpolation: [0, 0.4, 0.05, 0] ensures waves start invisible, fade
-//   in to 40% strength, and get weaker as they expand until they vanish perfectly.
 
 interface RippleProps {
   color: string;
@@ -222,22 +219,13 @@ const SingleRipple = memo(
       );
     }, [delay, duration, progress]);
 
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        // The wave physically expands from 0 to maxSize
-        width: interpolate(progress.value, [0, 1], [0, maxSize]),
-        height: interpolate(progress.value, [0, 1], [0, maxSize]),
-        borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
-
-        // The opacity mathematically gets weaker as the wave expands (progress -> 1)
-        opacity: interpolate(
-          progress.value,
-          [0, 0.1, 0.6, 1],
-          [0, 0.4, 0.05, 0],
-        ),
-        borderWidth: interpolate(progress.value, [0, 1], [24, 2]), // pulse size
-      };
-    });
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(progress.value, [0, 0.1, 0.6, 1], [0, 0.4, 0.05, 0]),
+      borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
+    }));
 
     return (
       <Animated.View
@@ -275,15 +263,11 @@ const WanderingCore = memo(
     const time = useSharedValue(0);
     const stagger = baseDuration / waveCount;
 
-    // 120fps UI-Thread Logic for ultra-smooth gliding
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
-      // Slower time multiplier = slower, sleeker movement across the screen
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
 
-    // Math.sin and Math.cos create an organic "Infinity" looping path
-    // It moves horizontally across 60% of the screen, and vertically across 40%.
     const animatedPosition = useAnimatedStyle(() => {
       const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
       const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
@@ -296,7 +280,6 @@ const WanderingCore = memo(
       };
     });
 
-    // Breathing effect for the core ball itself
     const corePulse = useSharedValue(0.6);
     useEffect(() => {
       corePulse.value = withRepeat(
@@ -328,7 +311,6 @@ const WanderingCore = memo(
           animatedPosition,
         ]}
       >
-        {/* ── SPATIAL WAVES ── */}
         {Array.from({ length: waveCount }).map((_, index) => (
           <SingleRipple
             key={`ripple-${index}`}
@@ -338,8 +320,6 @@ const WanderingCore = memo(
             maxSize={maxWaveSize}
           />
         ))}
-
-        {/* ── THE CORE BALL ── */}
         <Animated.View
           style={[
             coreStyle,
@@ -364,22 +344,19 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
-// ─── MASTER AMBIENT CONTROLLER ───
 const AmbientArchitecture = memo(() => {
   const { width, height } = Dimensions.get('window');
   const isDesktop = width >= 1024;
   const massiveWaveRadius = isDesktop ? width * 1.0 : height * 1.4;
 
   return (
-    // CRITICAL: pointerEvents="none" guarantees zero touch overlap
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* ── THE WANDERING CORE ── */}
       <WanderingCore
         coreSize={18}
-        color="#00F0FF" // Cyan Core
+        color="#00F0FF"
         maxWaveSize={massiveWaveRadius}
-        waveCount={4} // 4 simultaneous pulses fading as they grow
-        baseDuration={16000} // 12 seconds for a wave to fully expand
+        waveCount={4}
+        baseDuration={16000}
       />
     </View>
   );
@@ -495,6 +472,9 @@ export default function SignInScreen() {
     router,
   ]);
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // NATIVE GOOGLE OAUTH FIXES APPLIED HERE
+  // ══════════════════════════════════════════════════════════════════════════════
   const handleGoogleSignIn = async () => {
     setIsGoogleLoading(true);
     setMessage(null);
@@ -508,9 +488,10 @@ export default function SignInScreen() {
         return;
       }
 
+      // 1. CRITICAL FIX: Removed the `path: 'auth/callback'` to prevent the
+      // Expo Router "Unmatched Route" blank white screen. Safely targets root.
       const redirectUri = AuthSession.makeRedirectUri({
         scheme: 'veraxai',
-        path: 'auth/callback',
       });
 
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -527,6 +508,8 @@ export default function SignInScreen() {
         redirectUri,
       );
 
+      // 2. CRITICAL FIX: Explicitly handle the 'cancel' state so the user doesn't
+      // get permanently stuck on a loading screen, requiring a "double login"
       if (result.type === 'success' && result.url) {
         const urlParts = result.url.split('#');
         const hashParams = urlParts[1];
@@ -555,6 +538,9 @@ export default function SignInScreen() {
             'Verification failed: Handshake tokens were not returned.',
           );
         }
+      } else {
+        // User closed the browser or OS rejected intent. Reset loading securely.
+        setIsGoogleLoading(false);
       }
     } catch (e: any) {
       console.error('[VeraxAI Auth Fault]', e);
@@ -568,6 +554,27 @@ export default function SignInScreen() {
 
   return (
     <View className="flex-1 bg-[#000016]">
+      {/* 3. CRITICAL VISUAL FIX: Full-screen overlay to perfectly mask the OS browser handoff */}
+      {isGoogleLoading && (
+        <Animated.View
+          entering={FadeInDown.duration(300)}
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: 'rgba(0,0,22,0.95)',
+              zIndex: 9999,
+              justifyContent: 'center',
+              alignItems: 'center',
+            },
+          ]}
+        >
+          <ProcessingLoader size={100} color="#00F0FF" />
+          <Text className="text-[#00F0FF] text-[10px] font-black tracking-[4px] uppercase mt-8">
+            Authenticating...
+          </Text>
+        </Animated.View>
+      )}
+
       {/* ── AMBIENT GLIDING CORE ENGINE ── */}
       <View
         style={[
@@ -831,9 +838,7 @@ const AuthForm = memo(
                 </View>
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity
-                    onPress={() => {
-                      setAuthMode('sign-up');
-                    }}
+                    onPress={() => setAuthMode('sign-up')}
                     activeOpacity={0.8}
                     style={[
                       styles.tabButton,
@@ -1191,7 +1196,6 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
           </CustomFadeIn>
         ))}
       </View>
-
       <CustomFadeIn delay={800} duration={800} translateYStart={15}>
         <View style={styles.socialIconsContainer}>
           <Youtube color="#FFFFFF" size={26} />

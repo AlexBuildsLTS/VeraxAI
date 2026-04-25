@@ -486,13 +486,16 @@ const AmbientArchitecture = React.memo(() => {
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
     >
-      <WanderingCore
-        coreSize={14}
-        color={C_PINK}
-        maxWaveSize={width >= 1024 ? width * 0.8 : height * 1.0}
-        waveCount={4}
-        baseDuration={12000}
-      />
+    {/*
+ * VeraxAI Core Animation [id].tsx
+ * ══════════════════════════════════════════════════════════════════════════════
+ * <WanderingCore
+ * coreSize={14}
+ * color={C_PINK}
+ * maxWaveSize={massiveWaveRadius}
+ * baseDuration={12000}
+ * />
+ */}
     </View>
   );
 });

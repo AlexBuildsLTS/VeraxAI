@@ -5,7 +5,11 @@
     "version": "1.0.0",
     "scheme": "veraxai",
     "orientation": "portrait",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -15,7 +19,9 @@
         "NSMicrophoneUsageDescription": "This app needs access to the microphone to transcribe your speech in real-time.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your library to import video files for transcription.",
         "NSAppleMusicUsageDescription": "This app needs access to your audio files for transcription.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -84,6 +90,9 @@
     },
     "updates": {
       "url": "https://u.expo.dev/c1d22081-046b-4228-afc5-35389f7d88a2"
-    }
-  }
+    },
+    "sdkVersion": "55.0.0",
+    "entryPoint": ".vscode/exponentIndex.js"
+  },
+  "name": "verai"
 }

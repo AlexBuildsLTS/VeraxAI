@@ -10,7 +10,7 @@
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, memo } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -49,6 +49,7 @@ import {
 
 import { useHistoryData } from '../../hooks/queries/useHistoryData';
 import { useDeleteVideo } from '../../hooks/mutations/useDeleteVideo';
+import { THEME } from '@/constants/theme';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -56,7 +57,7 @@ const IS_WEB = Platform.OS === 'web';
 const DARK_NAVY = '#000012'; // Master Background
 const CYAN = '#00F0FF';
 const PURPLE = '#8A2BE2';
-const GREEN = '#32FF00';
+const GREEN = '#00c67d';
 const PINK = '#FF007F';
 const AMBER = '#FFB800';
 const NAVY = '#1A3370';
@@ -279,201 +280,261 @@ const FloatingShape = React.memo(
       if (y.value > height + size * 2) y.value = -size;
     });
 
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        transform: [
-          { translateX: x.value },
-          { translateY: y.value },
-          { rotate: `${rot.value}deg` },
-        ],
-      };
-    });
-
-    const renderShape = () => {
-      switch (type) {
-        case 'hexagon': // Isometric 3D Cube
-          return (
-            <Svg width={size} height={size} viewBox="0 0 100 100" fill="none">
-              <Path
-                d="M 50 5 L 89 27.5 L 89 72.5 L 50 95 L 11 72.5 L 11 27.5 Z"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 50 L 50 95"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 50 L 11 27.5"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 50 L 89 27.5"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-            </Svg>
-          );
-        case 'diamond': // Multi-faceted 3D Gem (FIXED VIEWBOX)
-          return (
-            <Svg width={size} height={size} viewBox="0 0 100 100" fill="none">
-              <Path
-                d="M 50 5 L 90 40 L 50 95 L 10 40 Z"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 10 40 L 90 40"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 5 L 30 40 L 50 95"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 5 L 70 40 L 50 95"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-            </Svg>
-          );
-        case 'tetrahedron': // Translucent 4-vertex 3D Pyramid
-          return (
-            <Svg width={size} height={size} viewBox="0 0 100 100" fill="none">
-              <Path
-                d="M 50 10 L 15 80 L 85 80 Z"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 10 L 50 65 L 15 80"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-              <Path
-                d="M 50 65 L 85 80"
-                stroke={color}
-                strokeWidth="1.5"
-                opacity="0.6"
-              />
-            </Svg>
-          );
-      }
-    };
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: x.value },
+        { translateY: y.value },
+        { rotate: `${rot.value}rad` },
+      ],
+    }));
 
     return (
       <Animated.View
-        pointerEvents="none"
-        style={[{ position: 'absolute', top: 0, left: 0 }, animatedStyle]}
-      >
-        {renderShape()}
-      </Animated.View>
+        style={[
+          {
+            position: 'absolute',
+            width: size,
+            height: size,
+            backgroundColor: color,
+            opacity: 0.1,
+          },
+          animatedStyle,
+        ]}
+      />
     );
   },
 );
 FloatingShape.displayName = 'FloatingShape';
 
-// ─── MASTER AMBIENT CONTROLLER ───
-const AmbientArchitecture = React.memo(() => {
+// ══════════════════════════════════════════════════════════════════════════════
+// MODULE 2: HARDWARE-ACCELERATED AMBIENT ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface AmbientRippleProps {
+  color: string;
+  delay: number;
+  duration: number;
+  maxSize: number;
+}
+
+const AmbientRipple = memo(
+  ({ color, delay, duration, maxSize }: AmbientRippleProps) => {
+    const progress = useSharedValue(0);
+
+    useEffect(() => {
+      progress.value = withDelay(
+        delay,
+        withRepeat(
+          withTiming(1, { duration, easing: Easing.out(Easing.sin) }),
+          -1,
+          false,
+        ),
+      );
+    }, []);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      width: interpolate(progress.value, [0, 1], [0, maxSize]),
+      height: interpolate(progress.value, [0, 1], [0, maxSize]),
+      borderRadius: interpolate(progress.value, [0, 1], [0, maxSize / 2]),
+      opacity: interpolate(progress.value, [0, 0.1, 0.6, 1], [0, 0.4, 0.05, 0]),
+      borderWidth: interpolate(progress.value, [0, 1], [24, 2]),
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            borderColor: color,
+            backgroundColor: 'transparent',
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+AmbientRipple.displayName = 'AmbientRipple';
+
+const WanderingCore = memo(
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+    const stagger = baseDuration / waveCount;
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 3000;
+    });
+
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
+
+    const corePulse = useSharedValue(0.6);
+    useEffect(() => {
+      corePulse.value = withRepeat(
+        withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
+        -1,
+        true,
+      );
+    }, []);
+
+    const coreStyle = useAnimatedStyle(() => ({
+      opacity: interpolate(corePulse.value, [0.4, 1], [0.4, 1]),
+      transform: [
+        { scale: interpolate(corePulse.value, [0.4, 1], [0.8, 1.2]) },
+      ],
+    }));
+
+    return (
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          animatedPosition,
+        ]}
+      >
+        {Array.from({ length: waveCount }).map((_, index) => (
+          <AmbientRipple
+            key={`ripple-${index}`}
+            color={color}
+            delay={index * stagger}
+            duration={baseDuration}
+            maxSize={maxWaveSize}
+          />
+        ))}
+        <Animated.View
+          style={[
+            coreStyle,
+            {
+              width: coreSize,
+              height: coreSize,
+              borderRadius: coreSize / 2,
+              backgroundColor: color,
+              shadowColor: color,
+              shadowRadius: 15,
+              shadowOpacity: 1,
+              shadowOffset: { width: 0, height: 0 },
+              ...(IS_WEB ? ({ boxShadow: `0 0 20px ${color}` } as any) : {}),
+            },
+          ]}
+        />
+      </Animated.View>
+    );
+  },
+);
+WanderingCore.displayName = 'WanderingCore';
+
+const OrganicOrb = memo(
+  ({
+    color,
+    size,
+    initialX,
+    initialY,
+    speedX,
+    speedY,
+    phaseOffsetX,
+    phaseOffsetY,
+    opacityBase,
+  }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 1000;
+    });
+
+    const animatedStyle = useAnimatedStyle(() => {
+      const xOffset =
+        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
+      const yOffset =
+        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
+      const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
+      return {
+        transform: [
+          { translateX: initialX + xOffset },
+          { translateY: initialY + yOffset },
+          { scale: breathe },
+        ],
+        opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
+      };
+    });
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: -size / 2,
+            left: -size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+            ...(IS_WEB ? ({ filter: 'blur(60px)' } as any) : {}),
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+OrganicOrb.displayName = 'OrganicOrb';
+
+const AmbientArchitecture = memo(() => {
   const { width, height } = Dimensions.get('window');
   const isDesktop = width >= 1024;
-
-  // Anchors - SINGLE Wave exactly centered behind the SVG Vault icon
-  const primaryX = width / 2;
-  const primaryY = Platform.OS === 'ios' ? 100 : 200;
-
-  const massiveWaveRadius = isDesktop ? width * 0.3 : height * 0.6;
-  const GLOBAL_WAVE_DURATION = 14000;
+  const massiveWaveRadius = isDesktop ? width * 0.4 : height * 1.0;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* ── 6 3D WIREFRAME SHAPES ── */}
-
-      {/* ZONE 1: Top Left - Gliding down and right */}
-      <FloatingShape
-        type="hexagon"
-        color={CYAN}
-        size={55}
-        initialX={width * 0.15}
-        initialY={height * 0.15}
-        velocityX={0.15}
-        velocityY={0.12}
-        rotationSpeed={0.4}
-      />
-
-      {/* ZONE 2: Bottom Right - Drifting up and left */}
-      <FloatingShape
-        type="tetrahedron"
-        color={PINK}
-        size={60}
-        initialX={width * 0.85}
-        initialY={height * 0.85}
-        velocityX={-0.12}
-        velocityY={-0.18}
-        rotationSpeed={-0.5}
-      />
-
-      {/* ZONE 3: Top Right - Sinking slowly */}
-      <FloatingShape
-        type="diamond"
-        color={CYAN}
-        size={45}
+      <OrganicOrb
+        color={GREEN}
+        size={width * 0.6}
         initialX={width * 0.8}
-        initialY={height * 0.2}
-        velocityX={-0.1}
-        velocityY={0.2}
-        rotationSpeed={0.6}
+        initialY={height * 0.6}
+        speedX={0.15}
+        speedY={0.2}
+        phaseOffsetX={Math.PI}
+        phaseOffsetY={0}
+        opacityBase={0.06}
       />
-
-      {/* ZONE 4: Bottom Left - Rising gracefully */}
-      <FloatingShape
-        type="hexagon"
-        color={PINK}
-        size={50}
-        initialX={width * 0.15}
-        initialY={height * 0.8}
-        velocityX={0.14}
-        velocityY={-0.15}
-        rotationSpeed={-0.4}
-      />
-
-      {/* ZONE 5: Mid-Left Edge - Drifting across horizontally */}
-      <FloatingShape
-        type="tetrahedron"
+      <OrganicOrb
         color={CYAN}
-        size={55}
-        initialX={width * 0.05}
-        initialY={height * 0.5}
-        velocityX={0.2}
-        velocityY={0.05}
-        rotationSpeed={0.5}
+        size={width * 0.4}
+        initialX={width * 0.5}
+        initialY={height * 0.8}
+        speedX={0.25}
+        speedY={0.1}
+        phaseOffsetX={Math.PI / 4}
+        phaseOffsetY={Math.PI}
+        opacityBase={0.04}
       />
-
-      {/* ZONE 6: Mid-Right Edge - Pushing inwards */}
-      <FloatingShape
-        type="diamond"
-        color={PINK}
-        size={48}
-        initialX={width * 0.95}
-        initialY={height * 0.5}
-        velocityX={-0.18}
-        velocityY={-0.08}
-        rotationSpeed={-0.7}
-      />
+      {/*
+       * VeraxAI Core Animation
+       * ══════════════════════════════════════════════════════════════════════════════
+       * <WanderingCore
+       * coreSize={14}
+       * color={PURPLE}
+       * maxWaveSize={massiveWaveRadius}
+       * baseDuration={12000}
+       * />
+       */}
     </View>
   );
 });

@@ -270,13 +270,16 @@ const AmbientArchitecture = memo(({ delay }: any) => {
         phaseOffsetY={Math.PI}
         opacityBase={0.04}
       />
-      <WanderingCore
-        coreSize={18}
-        color={THEME.pink}
-        maxWaveSize={massiveWaveRadius}
-        waveCount={4}
-        baseDuration={13000}
-      />
+      {/*
+       * VeraxAI Core Animation security page
+       * ══════════════════════════════════════════════════════════════════════════════
+       * <WanderingCore
+       * coreSize={14}
+       * color={THEME.pink}
+       * maxWaveSize={massiveWaveRadius}
+       * baseDuration={12000}
+       * />
+       */}
     </View>
   );
 });

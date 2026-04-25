@@ -2,10 +2,9 @@
  * app/(dashboard)/settings/index.tsx
  * VeraxAI Settings Dashboard
  * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE & BEST PRACTICES (Verified: 2026-04-25):
+ * PROTOCOL:
  * 1. TOUCH TARGET RESOLUTION: Explicit `style={{ width: '100%' }}` applied
- * directly to TouchableOpacity. FadeIn wrapper remains untouched to preserve
- * strict TypeScript props compliance (FadeInProps).
+ * directly to TouchableOpacity to preserve strict TypeScript props compliance.
  * 2. GESTURE DELEGATION: ScrollView utilizes `keyboardShouldPersistTaps="handled"`
  * to ensure taps on cards execute instantly without dropping frames.
  * 3. EVENT ISOLATION: The ambient background strictly enforces `pointerEvents="none"`
@@ -26,6 +25,8 @@ import {
 } from 'react-native';
 import { useRouter, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+// ─── ICONOGRAPHY ─────────────────────────────────────────────────────────────
 import {
   User,
   ShieldCheck,
@@ -37,11 +38,13 @@ import {
   LucideIcon,
 } from 'lucide-react-native';
 
+// ─── STATE & UI COMPONENTS ───────────────────────────────────────────────────
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { cn } from '../../../lib/utils';
 import { useAuthStore } from '../../../store/useAuthStore';
 
+// ─── ANIMATIONS & NATIVE SVG ─────────────────────────────────────────────────
 import Svg, { Rect, Path, Circle, Line, G } from 'react-native-svg';
 import Animated, {
   useSharedValue,
@@ -56,13 +59,7 @@ import Animated, {
   useFrameCallback,
 } from 'react-native-reanimated';
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: TYPE DEFINITIONS & THEME CONSTANTS
-// Description: Centralizes strict static typing and exact color variables.
-// Best Practice: Implements `as const` to freeze the theme object in memory,
-// preventing accidental runtime mutations and ensuring type safety.
-// ══════════════════════════════════════════════════════════════════════════════
-
+// ─── THEME CONSTANTS & TYPES ─────────────────────────────────────────────────
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const THEME = {
@@ -90,11 +87,7 @@ interface SettingsCardItem {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 2: AMBIENT BACKGROUND ENGINE
-// Description: Tri-Layer Nebula (Pink Orb, Cyan Orb, Green Wandering Core).
-// Best Practice: Uses `useFrameCallback` and `useSharedValue` to offload
-// mathematical wave calculations to the C++ UI thread, bypassing the JS thread
-// entirely to maintain a steady 120fps.
+// MODULE 1: AMBIENT PHYSICS ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
 
 const SingleRipple = memo(({ color, delay, duration, maxSize }: any) => {
@@ -155,7 +148,6 @@ const WanderingCore = memo(
     }));
 
     const corePulse = useSharedValue(0.4);
-
     useEffect(() => {
       corePulse.value = withRepeat(
         withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.sin) }),
@@ -206,7 +198,7 @@ const WanderingCore = memo(
               borderRadius: coreSize / 2,
               backgroundColor: color,
               ...(IS_WEB
-                ? { boxShadow: `0 0 20px ${color}` }
+                ? ({ boxShadow: `0 0 20px ${color}` } as any)
                 : {
                     shadowColor: color,
                     shadowRadius: 15,
@@ -315,13 +307,16 @@ const AmbientArchitecture = memo(
           phaseOffsetY={Math.PI}
           opacityBase={0.04}
         />
-        <WanderingCore
-          coreSize={14}
-          color={color}
-          maxWaveSize={massiveWaveRadius}
-          waveCount={4}
-          baseDuration={12000}
-        />
+  {/*
+ * VeraxAI Core Animation settings/index
+ * ══════════════════════════════════════════════════════════════════════════════
+ * <WanderingCore
+ * coreSize={14}
+ * color={color}
+ * maxWaveSize={massiveWaveRadius}
+ * baseDuration={12000}
+ * />
+ */}
       </View>
     );
   },
@@ -329,10 +324,7 @@ const AmbientArchitecture = memo(
 AmbientArchitecture.displayName = 'AmbientArchitecture';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 3: SYNCHRONIZED HEADER ANIMATION
-// Description: Decoupled SVG graphics mapped to React Native Reanimated.
-// Best Practice: Leverages `useAnimatedProps` to pipe node radiuses directly
-// to the SVG layout layer, preventing the Android ClassCastException Native Crash.
+// MODULE 2: HEADER SUB-COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
 
 const AnimatedSettingsIcon = memo(() => {
@@ -482,11 +474,7 @@ const AnimatedSettingsIcon = memo(() => {
 AnimatedSettingsIcon.displayName = 'AnimatedSettingsIcon';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 4: MAIN DASHBOARD & ROUTING COMPONENT
-// Description: Dynamic rendering of settings cards strictly typed and isolated.
-// Best Practice: Binds explicitly declared `width: '100%'` onto `TouchableOpacity`
-// to ensure the Android gesture responder recognizes the full surface area of the
-// bounding box, eliminating edge-case dead zones.
+// MODULE 3: MAIN SCREEN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 
 export default function SettingsHubScreen() {
@@ -544,6 +532,7 @@ export default function SettingsHubScreen() {
         routeOverride: '/settings/support' as Href,
       },
     ];
+
     if (userRole === 'admin') {
       modules.push({
         id: 'admin',
@@ -557,6 +546,7 @@ export default function SettingsHubScreen() {
         routeOverride: '/admin' as Href,
       });
     }
+
     return modules;
   }, [userRole]);
 
@@ -573,14 +563,19 @@ export default function SettingsHubScreen() {
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            padding: isMobile ? 16 : 60,
-            paddingTop: isMobile ? 60 : 80,
-            paddingBottom: isMobile ? 140 : 200,
-            flexGrow: 1,
-            alignItems: 'center',
-          }}
+          contentContainerStyle={[
+            {
+              flexGrow: 1,
+              alignItems: 'center',
+            },
+            {
+              padding: isMobile ? 16 : 60,
+              paddingTop: isMobile ? 60 : 80,
+              paddingBottom: isMobile ? 140 : 200,
+            },
+          ]}
         >
+          {/* ── HEADER ── */}
           <FadeIn>
             <View className="items-center w-full mb-10 md:mb-16">
               <View className="px-5 py-1.5 mb-8 border rounded-full bg-[#00F0FF]/10 border-[#00F0FF]/20">
@@ -593,6 +588,7 @@ export default function SettingsHubScreen() {
             </View>
           </FadeIn>
 
+          {/* ── BACK BUTTON ── */}
           <View className="flex-row items-center justify-between w-full max-w-2xl px-4 py-4 md:px-8">
             <TouchableOpacity
               onPress={() =>
@@ -606,6 +602,7 @@ export default function SettingsHubScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* ── MODULE CARDS ── */}
           <View className="w-full max-w-2xl px-2" pointerEvents="box-none">
             <View
               className="w-full gap-y-4 md:gap-y-6"
@@ -639,6 +636,7 @@ export default function SettingsHubScreen() {
                         className="flex-row items-center flex-1 pr-2 shrink"
                         pointerEvents="none"
                       >
+                        {/* Dynamic Icon Container */}
                         <View
                           style={
                             mod.customBg
@@ -657,6 +655,8 @@ export default function SettingsHubScreen() {
                         >
                           <mod.icon size={20} color={mod.iconHex} />
                         </View>
+
+                        {/* Text Metadata */}
                         <View className="flex-1 shrink">
                           <Text
                             className="mb-1 text-sm font-bold tracking-wider text-white uppercase md:tracking-widest md:text-xl"
@@ -672,6 +672,8 @@ export default function SettingsHubScreen() {
                           </Text>
                         </View>
                       </View>
+
+                      {/* Navigation Arrow */}
                       <View
                         className="items-center justify-center w-8 h-8 rounded-full md:w-10 md:h-10 bg-white/[0.02] border border-white/5 shrink-0"
                         pointerEvents="none"

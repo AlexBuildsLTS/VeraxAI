@@ -10,7 +10,7 @@
  * 5. Finalization & JSON Metadata Telemetry (Chart tracking per key)
  */
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { serve } from "std/http/server.ts";
 import { corsHeaders } from '../_shared/cors.ts';
 import { createAdminClient } from '../_shared/supabaseAdmin.ts';
 import { getCaptions } from './captions.ts';
@@ -158,9 +158,9 @@ serve(async (req: Request) => {
       video_id: persistentJobId,
       summary: insights.summary,
       conclusion: insights.conclusion,
-      chapters: insights.chapters as any,
-      key_takeaways: insights.key_takeaways as any,
-      seo_metadata: insights.seo_metadata as any,
+      chapters: insights.chapters as unknown as Database['public']['Tables']['ai_insights']['Insert']['chapters'],
+      key_takeaways: insights.key_takeaways as unknown as Database['public']['Tables']['ai_insights']['Insert']['key_takeaways'],
+      seo_metadata: insights.seo_metadata as unknown as Database['public']['Tables']['ai_insights']['Insert']['seo_metadata'],
       language,
       ai_model: insights.model,
       tokens_used: insights.tokens_used,
