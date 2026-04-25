@@ -1,212 +1,73 @@
-# ⚡ VeraxAI — Transcriber Intelligence Engine
+# ⚡ VeraxAI — Universal Audio Intelligence Engine
 
 <div align="center">
 
 [![Platform](https://img.shields.io/badge/Platform-Web%20%7C%20iOS%20%7C%20Android-0A0D14.svg?style=flat-square&logo=expo)](https://expo.dev)
 [![Framework](https://img.shields.io/badge/Framework-React%20Native%200.83-61DAFB.svg?style=flat-square&logo=react)](https://reactnative.dev)
 [![Backend](https://img.shields.io/badge/Backend-Supabase-3ECF8E.svg?style=flat-square&logo=supabase)](https://supabase.com)
-[![AI](https://img.shields.io/badge/AI-Gemini%203.1%20Flash--Lite-4285F4.svg?style=flat-square&logo=google)](https://ai.google.dev)
-[![Deploy](https://img.shields.io/badge/Deploy-Vercel-000000.svg?style=flat-square&logo=vercel)](https://veraxai.vercel.app/)
+[![Cloud AI](https://img.shields.io/badge/Cloud%20AI-Gemini%203.1%20Flash--Lite-4285F4.svg?style=flat-square&logo=google)](https://ai.google.dev)
+[![Local AI](https://img.shields.io/badge/Local%20AI-Gemma%204%20Edge-FF6F00.svg?style=flat-square&logo=linux)](https://huggingface.co/google)
 
-**Supabase Ref:** `jhcgkqzjabsitfilajuh`
+**VeraxAI Enterprise Build (2026)** | **Supabase Ref:** `jhcgkqzjabsitfilajuh`
 
 </div>
 
 ---
 
-## 🌐 Universal Audio Intelligence 🌐
+## 🌐 Platform Overview
 
-**VeraxAI** is a transcription and audio-intelligence platform engineered for the modern digital landscape. this application delivers lightning-fast, 95%+ accurate video-to-text conversion
+**VeraxAI** is a premium, enterprise-grade transcription and audio-intelligence platform engineered for high-throughput compliance teams and content creators. It delivers lightning-fast, 95%+ accurate video-to-text conversion across 30+ languages.
 
-Designed for content creators and compliance teams, VeraxAI utilizes a multi-stage AI pipeline powered by **Google Gemini 3.1 Flash-Lite** and **Deepgram Nova-2** to generate SEO metadata, chapter markers, and actionable insights — all within a fluid, Reanimated-driven "Liquid Neon" dark glassmorphism interface
-
----
-
-## 🛡️ The 5 Technical Moats
-
-| Strategic Pillar                | Technological Implementation        | Market Value Proposition                                                                  |
-| :------------------------------ | :---------------------------------- | :---------------------------------------------------------------------------------------- |
-| **Waterfall Cost Optimization** | Tiered Extraction (`process-video`) | Attempts $0 scraping via native captions first. Falls back to Deepgram only if necessary. |
-| **Cascading API Rotation**      | UI-Managed Fallback Matrix          | AI autonomously rotates through database-injected API keys to bypass rate limits.         |
-| **Neural Analytics**            | Real-time Telemetry Engine          | Live token burn tracking and SaaS MRR forecasting integrated into the Admin Root.         |
-| **Hybrid Edge Architecture**    | Deno + Supabase Functions           | Zero-latency processing with strict schema enforcement for 100% valid JSON payloads.      |
-| **"Liquid Neon" UX**            | React Native + Reanimated 4.2       | Hardware-accelerated GlassCards and Touch-Safe Ambient Orbs at 120fps.                    |
+The platform utilizes a groundbreaking **Hybrid Cloud-Local Architecture**. It seamlessly routes heavy audio extraction (Cobalt) and transcription (Deepgram Nova-2) through secure Deno Edge nodes. Users then have the ultimate choice: synthesize the data using the paid **Cloud Gemini 3.1 Flash-Lite** matrix, or utilize a zero-cost, privacy-first **Local Gemma 4 Edge** model running natively on their own hardware.
 
 ---
 
-### The Universal Architecture
+## 🧠 The Hybrid Intelligence Pipeline
 
-```mermaid
-graph TD;
-    %% Core Nodes
-    Input["🔗 Any URL / Upload"]
-    Edge["🌩️ Deno Edge Resolver (WASM)"]
-    STT["🎙️ Deepgram Nova-2"]
-    LLM["🧠 Gemini 3.1 Flash-Lite"]
-    DB["🗄️ Supabase PostgreSQL"]
-    UI["📱 VeraxAI Clients"]
-
-    %% Flow
-    Input -->|Media Stream| Edge
-    Edge -->|Universal Audio Extraction| STT
-    STT -->|diarize: true / JSON| DB
-    DB -->|Trigger Synthesis| LLM
-    LLM -->|Speaker-Mapped Insights| DB
-    DB -->|Realtime WebSocket| UI
-
-    %% Styling based on Liquid Neon System
-    style Input fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style Edge fill:#020205,stroke:#8A2BE2,stroke-width:3px,color:#fff
-    style STT fill:#020205,stroke:#FF007F,stroke-width:2px,color:#fff
-    style LLM fill:#020205,stroke:#32FF00,stroke-width:2px,color:#fff
-    style DB fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style UI fill:#020205,stroke:#8A2BE2,stroke-width:2px,color:#fff
-```
-
-## 🚀 Feature Modules & Micro-Architectures
-
-Every feature in VeraxAI is decoupled and designed for absolute scalability. Below are the architectural flows for our core sub-systems.
-
-### 1. Multi-Language AI Synthesis
-
-_Current System constraint: Raw STT extraction captures the native language. Multi-language output (translation, localization, dialect adaptation) is exclusively handled by Gemini 3.1 Flash-Lite in the Tier 4 synthesis stage._
-
-```mermaid
-graph LR
-    A["Raw Transcript (e.g., Swedish)"] --> B["Deno Edge: insights.ts"]
-    B -->|Prompt Payload + Target Locale| C["🧠 Gemini 3.1 Flash-Lite"]
-    C -->|Auto-Translation| D["Localized Summary"]
-    C -->|Cross-lingual Indexing| E["Localized Chapters"]
-    C -->|Market Adaptation| F["Localized SEO Tags"]
-
-    style A fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style B fill:#020205,stroke:#8A2BE2,stroke-width:2px,color:#fff
-    style C fill:#020205,stroke:#32FF00,stroke-width:2px,color:#fff
-    style D fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style E fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style F fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-```
-
-### 2. Real-Time Telemetry & UI Feedback
-
-_Utilizes Supabase Realtime (PostgreSQL logical replication) bridged to React Query to update the Liquid Neon interface at 120fps without manual polling._
-
-```mermaid
-graph TD
-    DB[("PostgreSQL trigger \n (UPDATE videos.status)")] --> WAL["Write-Ahead Log (WAL)"]
-    WAL --> Realtime["Supabase Realtime Channel"]
-    Realtime -->|WebSocket Payload| Client["React Native Client"]
-    Client -->|Zustand Update| UI["GlassCard Processing Loader (SVG)"]
-
-    style DB fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style WAL fill:#020205,stroke:#00F0FF,stroke-width:1px,color:#fff
-    style Realtime fill:#020205,stroke:#32FF00,stroke-width:2px,color:#fff
-    style Client fill:#020205,stroke:#8A2BE2,stroke-width:1px,color:#fff
-    style UI fill:#020205,stroke:#8A2BE2,stroke-width:2px,color:#fff
-```
-
-### 3. Executive Summaries, Exports & SEO
-
-_Data formatting pipeline bridging the AI output directly to user-facing clipboards and file downloads._
-
-```mermaid
-graph LR
-    DB["ai_insights JSONB"] --> Query["useVideoData Hook"]
-    Query --> UI["[id].tsx View"]
-    UI --> EX1["Export JSON"]
-    UI --> EX2["Export Markdown"]
-    UI --> EX3["Export SRT/VTT"]
-
-    style DB fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style Query fill:#020205,stroke:#8A2BE2,stroke-width:2px,color:#fff
-    style UI fill:#020205,stroke:#8A2BE2,stroke-width:1px,color:#fff
-    style EX1 fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style EX2 fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style EX3 fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-```
-
-### 4. 2026 Target: Universal Extraction & Diarization
-
-_Next-generation features bypassing specific platform restrictions utilizing Edge WASM binaries and Deepgram's native speaker tagging._
-
-```mermaid
-graph TD
-    Input["Any Media URL (1000+ Domains)"] --> WASM["Edge WASM Extractor (yt-dlp port)"]
-    WASM -->|Raw Audio| DG["Deepgram STT (diarize=true)"]
-    DG --> Map{"Speaker Mapped Array"}
-    Map -->|Speaker 1| T1["Timestamp"]
-    Map -->|Speaker 2| T2["Timestamp"]
-    T1 & T2 --> Gem["Gemini 3.1: Dialogue Summary"]
-
-    style Input fill:#020205,stroke:#00F0FF,stroke-width:2px,color:#fff
-    style WASM fill:#020205,stroke:#8A2BE2,stroke-width:2px,color:#fff
-    style DG fill:#020205,stroke:#FF007F,stroke-width:2px,color:#fff
-    style Map fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style T1 fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style T2 fill:#020205,stroke:#FF007F,stroke-width:1px,color:#fff
-    style Gem fill:#020205,stroke:#32FF00,stroke-width:2px,color:#fff
-```
-
----
-
-**Speaker Diarization Mapping:** The STT engine separates audio into distinct speakers (Speaker 1, Speaker 2). Gemini 3.1 synthesizes this into dialogue-aware chapters (e.g., "Interviewer asked X, Guest answered Y").
-
-**Universal URL Parsing (Edge Extensions):** Moving beyond simple regex to utilizing Rust/WASM-based proxy extractors within the Edge environment, allowing users to paste a URL from over 1,000+ supported audio/video hosting sites.
-
-**Browser Extension Integration:** 1-click execution from any active webpage, beaming the current browser audio stream directly to the VeraxAI `process-video` pipeline via REST API.
-
-## 🗺️ The Pipeline Logic (Current)
-
-This diagram illustrates the **Waterfall Cost Protocol**. If Layer 1 is successful, the system completely bypasses expensive API layers.
+VeraxAI employs a master pipeline orchestrator (`process-video/index.ts`) that dynamically routes synthesis based on hardware availability and user preference.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as VeraxAI Client
-    participant DB as Supabase (PostgreSQL)
-    participant Edge as Deno Edge: process-video
-    participant L1 as L1: Caption Scraper ($0)
-    participant L2 as L2: Audio Proxy (Premium)
-    participant STT as L3: Deepgram Nova-2
-    participant AI as L4: Gemini 3.1 Flash-Lite
+    participant User
+    participant Client as VeraxAI App (APK/Web)
+    participant Edge as Supabase Edge (Deno)
+    participant STT as Cobalt / Deepgram
+    participant Gemini as Cloud Gemini 3.1
+    participant Gemma as Local Gemma 4
+    participant Vault as Supabase DB
 
-    User->>DB: 1. INSERT video (status: queued)
-    User->>Edge: 2. Invoke Orchestrator
-    Edge->>DB: 3. UPDATE status: downloading
+    User->>Client: Submit Media URL
+    Client->>Edge: Dispatch Task (skip_ai flag)
 
-    rect rgb(2, 2, 5)
-    Note over Edge, L1: TIER 1: Zero-Cost Native Scrape
-    Edge->>L1: Attempt XML/JSON3 Scrape
-    L1-->>Edge: Success? (Return Transcript)
+    rect rgb(10, 20, 30)
+        Note over Edge, STT: Universal Extraction & STT Phase
+        Edge->>STT: Extract Audio & Transcribe (Nova-2)
+        STT-->>Edge: Return Raw Transcript
+        Edge->>Vault: Persist Verbatim Transcript
     end
 
-    alt Scraping Success
-        Edge->>DB: 4a. INSERT transcripts (method: captions)
-    else Scraping Failed
-        rect rgb(10, 0, 20)
-        Note over Edge, STT: TIER 2 & 3: Sovereign Fallback
-        Edge->>L2: Resolve Audio Stream
-        L2-->>Edge: Valid audio_url
-        Edge->>STT: Transcribe Audio Stream
-        STT-->>Edge: Return NOVA-2 Transcript
-        Edge->>DB: 4b. INSERT transcripts (method: deepgram)
+    alt Cloud Execution (Default)
+        rect rgb(15, 30, 60)
+            Edge->>Gemini: Build Prompt & Execute Matrix
+            Gemini-->>Edge: Return JSON Insights
+            Edge->>Vault: Upsert Insights & Sync Telemetry
+        end
+    else Local Execution (skip_ai = true)
+        rect rgb(60, 20, 15)
+            Edge-->>Client: Return Transcript & System Prompts
+            Client->>Gemma: Execute Local Inference (Port 4891)
+            Gemma-->>Client: Return JSON Insights
+            Client->>Vault: Upsert Insights to Cloud Vault
         end
     end
 
-    Edge->>DB: 5. UPDATE status: ai_processing
-
-    rect rgb(5, 20, 5)
-    Note over Edge, AI: TIER 4: AI Synthesis Rotation
-    Edge->>AI: generateInsights (Primary Key -> Fallback Matrix)
-    AI-->>Edge: { summary, chapters, takeaways, seo }
-    Edge->>DB: 6. UPSERT ai_insights (Track Token Burn)
-    end
-
-    Edge->>DB: 7. UPDATE status: completed
-    DB-->>User: 8. Realtime WebSocket Update
+    Vault-->>User: Real-time WebSocket UI Update
 ```
 
 ---
+
+## 🚀 Core Enterprise Features
 
 | FEATURES                   | TECHNICAL DETAILS                                                          |
 | :------------------------- | :------------------------------------------------------------------------- |
@@ -218,33 +79,135 @@ sequenceDiagram
 | **6. Speaker Diarization** | _(2026)_ Millisecond-precise segmentation mapped to distinct speakers      |
 | **7. Universal Extractor** | _(2026)_ Edge-deployed WASM parsers to extract audio from 1,000+ domains   |
 
-```VeraxAI/
-├── app/                              # EXPO ROUTER (FILE-BASED)
-│   ├── admin/                        # ENTERPRISE COMMAND CENTER
+### Hybrid LLM Orchestration
+
+- **Cloud Engine:** Rapid processing via `gemini-3.1-flash-lite` featuring a cascading key rotation matrix (User BYOK -> Master Env -> DB Fallback).
+- **Local Engine:** On-device, offline synthesis utilizing **Google Gemma 4** (`http://127.0.0.1:4891`). Exposes advanced hardware tuners (Threads, GPU Layers).
+
+### Cross-Platform Hardware Parity
+
+- **Native Android (APK):** Bypasses device RAM limits by utilizing `expo-file-system` to stream multi-gigabyte `.gguf` vector binaries directly to hidden device storage.
+- **Web/Desktop (Vercel):** Detects browser execution and gracefully falls back to native downloads, allowing users to bind the web client to local desktop runners.
+
+### Liquid Neon UX Design System
+
+Hardware-accelerated `react-native-reanimated` interfaces featuring an ambient physics engine. Utilizes absolute `zIndex` isolation and `pointerEvents="none"` to achieve 110% touch-safe operability on Native platforms.
+
+---
+
+## 📂 Architectural Structure
+
+```text
+📁 VeraxAI
+├── 📁 app/                           # EXPO ROUTER (FILE-BASED NAVIGATION)
+│   ├── 📁 admin/                     # ENTERPRISE COMMAND CENTER
 │   │   ├── index.tsx                 # Telemetry & SaaS Forecaster
 │   │   ├── keys.tsx                  # Secure API Vault & Token Burn Charts
 │   │   └── users.tsx                 # Identity Registry & Access Control
-│   ├── settings/                     # USER CONFIGURATION ENGINE
+│   ├── 📁 settings/                  # USER CONFIGURATION ENGINE
+│   │   ├── index.tsx                 # Master settings orchestrator
+│   │   ├── models.tsx                # Local GGUF Engine & Hardware Tuning
 │   │   └── security.tsx              # Biometrics & Personal API Vault
-│   └── video/                        # ANALYTICS VIEW
+│   └── 📁 video/                     # ANALYTICS VIEW
 │       └── [id].tsx                  # Chronologically mapped insights
-├── components/                       # ATOMIC DESIGN SYSTEM
-│   ├── ui/                           # LIQUID NEON COMPONENTS
-│   │   ├── GlassCard.tsx             # Hardware-accelerated containers
-│   │   └── ProcessingLoader.tsx      # SVG orbital spinner
-├── hooks/                            # DATA ORCHESTRATION (REACT QUERY)
-│   └── mutations/useProcessVideo.ts  # Cross-platform safe UUID dispatcher
-├── supabase/                         # BACKEND INFRASTRUCTURE
-│   └── functions/process-video/
-│                └── index.ts         # Master Pipeline Orchestrator
-│
-└── assets/                           # BRANDED MEDIA ASSETS
+├── 📁 components/                    # ATOMIC DESIGN SYSTEM
+│   ├── 📁 animations/                # Reanimated wrappers (FadeIn)
+│   └── 📁 ui/                        # LIQUID NEON COMPONENTS
+│       ├── GlassCard.tsx             # Hardware-accelerated containers
+│       └── ProcessingLoader.tsx      # SVG orbital spinner
+├── 📁 hooks/                         # DATA ORCHESTRATION (REACT QUERY)
+│   ├── 📁 mutations/useProcessVideo.ts # Cross-platform safe UUID dispatcher
+│   └── 📁 queries/                   # Real-time WebSocket listeners
+├── 📁 store/                         # ZUSTAND STATE MANAGEMENT
+│   ├── useAuthStore.ts               # Session and Role tracking
+│   ├── useLocalAIStore.ts            # Hardware overrides & Local Models
+│   └── useVideoStore.ts              # Pipeline routing & Hybrid Handoff
+├── 📁 supabase/                      # BACKEND INFRASTRUCTURE
+│   └── 📁 functions/process-video/   # DENO EDGE FUNCTIONS
+│       ├── index.ts                  # Master Pipeline Orchestrator
+│       ├── audio.ts                  # Universal Cobalt Extractor
+│       ├── deepgram.ts               # Nova-2 STT Interface
+│       └── insights.ts               # Gemini Matrix & Hybrid Prompt Builder
+└── 📁 types/                         # STRICT TYPESCRIPT DEFINITIONS
 ```
 
-### 2026 Feature Roadmap
+---
 
-- Future implementations: universal extraction on the Edge cross-compiling tools like `yt-dlp` into WASM or utilize a lightweight third-party API proxy. Deepgram natively accepts a `diarize=true` query parameter, so that implementation on the `deepgram.ts` edge function will be a trivial flag update once the UI is ready to render speaker tags
+## 🛠️ Build & Deployment
 
-- ## 🚀 Universal Diarization Engine
+### Prerequisites
 
-Our core roadmap for 2026 expands VeraxAI beyond standard platforms (YouTube/Vimeo/TikTok) into a **Universal Audio Intelligence** platform. By migrating extraction tasks directly to the Deno Edge using specialized WebAssembly (WASM) resolvers, we can process **ANY** URL. Combined with native Speaker Diarization, the platform will identify _who_ is speaking, unlocking potential for meeting summaries and podcasts
+- Node.js >= 20.x
+- EAS CLI (`npm install -g eas-cli`)
+- Supabase CLI (`npm install -g supabase-cli`)
+
+### Environment Variables
+
+Duplicate `.env.example` to `.env`:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=your_project_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
+
+### Edge Pipeline Deployment
+
+Deploy the Deno backend required for Extraction and Synthesis:
+
+```bash
+npx supabase functions deploy process-video
+```
+
+### Production Compilation
+
+**Vercel (Web Application):**
+
+```bash
+npm run build:web
+```
+
+**Google Play Store (Native Android APK):**
+
+```bash
+eas build --platform android --profile production
+```
+
+_Note: Due to massive binary file streaming requirements, Local LLM downloading capabilities operate at maximum efficiency strictly on compiled Native environments._
+
+---
+
+## 🚀 2026 Feature Roadmap & Universal Diarization Engine
+
+Our core roadmap for 2026 expands VeraxAI beyond standard platforms (YouTube/Vimeo/TikTok) into a true **Universal Audio Intelligence** platform.
+
+Currently, our `audio.ts` engine leverages Cobalt, which seamlessly handles ~1,000+ major domains. However, to guarantee 100% processing of **ANY URL** (including heavily encrypted corporate video players), we are migrating extraction tasks directly to the Deno Edge using specialized WebAssembly (WASM) resolvers.
+
+Additionally, Deepgram natively accepts a `diarize=true` query parameter. Implementing this on the `deepgram.ts` edge function will be a trivial flag update, allowing the platform to identify _who_ is speaking—unlocking massive potential for meeting summaries and multi-host podcasts.
+
+### Next-Gen Architecture Flow
+
+```mermaid
+graph TD
+    A[Client URL Input] -->|HTTPS| B(Supabase Edge: process-video)
+
+    subgraph Universal Extraction Engine
+    B --> C{Domain Recognized?}
+    C -->|Yes - Tier 1| D[Cobalt API]
+    C -->|No - Tier 2| E[yt-dlp WASM Proxy]
+    D --> F[Raw Audio Buffer]
+    E --> F
+    end
+
+    subgraph Deepgram Nova-2
+    F -->|diarize=true| G[Speaker Tagged Transcript]
+    end
+
+    G --> H[VeraxAI Intelligence Engine]
+
+    style E fill:#8A2BE2,stroke:#00F0FF,stroke-width:2px,color:#fff
+    style G fill:#FF007F,stroke:#00F0FF,stroke-width:2px,color:#fff
+```
+
+---
+
+&copy; 2026 VeraxAI Enterprise Architecture. All rights reserved.

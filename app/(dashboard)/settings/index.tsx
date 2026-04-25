@@ -66,9 +66,12 @@ const THEME = {
   obsidian: '#010710',
   cyan: '#00F0FF',
   purple: '#8A2BE2',
-  pink: '#FF007F',
+  pink: '#de8304',
   green: '#048766',
   red: '#FF3333',
+  orange: '#de8304',
+  slate: '#94A3B8',
+  amber: '#F59E0B',
 } as const;
 
 const IS_WEB = Platform.OS === 'web';
@@ -307,16 +310,16 @@ const AmbientArchitecture = memo(
           phaseOffsetY={Math.PI}
           opacityBase={0.04}
         />
-  {/*
- * VeraxAI Core Animation settings/index
- * ══════════════════════════════════════════════════════════════════════════════
- * <WanderingCore
- * coreSize={14}
- * color={color}
- * maxWaveSize={massiveWaveRadius}
- * baseDuration={12000}
- * />
- */}
+        {/*
+         * VeraxAI Core Animation settings/index
+         * ══════════════════════════════════════════════════════════════════════════════
+         * <WanderingCore
+         * coreSize={14}
+         * color={color}
+         * maxWaveSize={massiveWaveRadius}
+         * baseDuration={12000}
+         * />
+         */}
       </View>
     );
   },
@@ -502,11 +505,11 @@ export default function SettingsHubScreen() {
         id: 'security',
         title: 'Security',
         desc: 'Account Security, Biometrics, API Keys',
-        color: 'pink',
-        iconHex: THEME.pink,
+        color: 'red',
+        iconHex: THEME.red,
         icon: ShieldCheck,
         customBg: `${THEME.pink}08`,
-        customBorder: `${THEME.pink}25`,
+        customBorder: `${THEME.red}25`,
         routeOverride: '/settings/security' as Href,
       },
       {
@@ -519,6 +522,17 @@ export default function SettingsHubScreen() {
         customBg: `${THEME.purple}08`,
         customBorder: `${THEME.purple}25`,
         routeOverride: '/settings/billing' as Href,
+      },
+      {
+        id: 'models',
+        title: 'AI MODELS',
+        desc: 'Gemma 4, LOCAL LLM',
+        color: 'pink',
+        iconHex: THEME.pink,
+        icon: LifeBuoy,
+        customBg: `${THEME.amber}08`,
+        customBorder: `${THEME.pink}25`,
+        routeOverride: '/settings/models' as Href,
       },
       {
         id: 'support',

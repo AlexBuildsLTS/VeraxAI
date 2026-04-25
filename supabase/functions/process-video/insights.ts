@@ -301,3 +301,28 @@ VERBATIM TRANSCRIPT:
 ${transcript}
 """`;
 }
+
+// ─── LOCAL AI GEMMA4 EXPORT ────────────────────────────────────────────────
+/**
+ * Wraps the elite prompt engine for consumption by the Local Gemma edge device.
+ * Splits the output into the standard system/user message array required by local endpoints.
+ */
+export function buildAgentPrompt(transcript: string, language: string, difficulty: string) {
+  const category = getContentCategory(transcript);
+  const fullPrompt = buildPrompt(transcript, language, difficulty, category);
+
+  // Split out the transcript from the system instructions for OpenAI-compatible formatting
+  const splitIndex = fullPrompt.indexOf('VERBATIM TRANSCRIPT:');
+
+  if (splitIndex !== -1) {
+    const systemInstruction = fullPrompt.substring(0, splitIndex).trim();
+    const userMessage = fullPrompt.substring(splitIndex).trim();
+    return { systemInstruction, userMessage };
+  }
+
+  // Fallback failsafe
+  return {
+    systemInstruction: fullPrompt,
+    userMessage: 'Proceed with the instructions provided.'
+  };
+}

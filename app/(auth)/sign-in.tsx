@@ -84,6 +84,26 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// ─── THEME CONSTANTS (Liquid Neon) ───────────────────────────────────────────
+const AUTH_THEME = {
+  cyan: '#00F0FF',
+  purple: '#024765',
+  pink: '#800347',
+  green: '#09db72',
+  navy: '#00C6A2',
+  obsidian: '#020205',
+  blue: '#0074A7',
+};
+
+const IS_WEB = Platform.OS === 'web';
+const {
+  purple: PURPLE,
+  cyan: CYAN,
+  green: GREEN,
+  navy: NAVY,
+  blue: BLUE,
+} = AUTH_THEME;
+
 WebBrowser.maybeCompleteAuthSession();
 const APP_ICON = require('../../assets/icon.png');
 
@@ -194,7 +214,7 @@ function mapAuthError(errorMessage: string): {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODULE 1: THE WANDERING CORE ENGINE (Smooth, Sleek, Gliding Emitter)
+// MODULE 2: HARDWARE-ACCELERATED AMBIENT ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface RippleProps {
@@ -217,7 +237,7 @@ const SingleRipple = memo(
           false,
         ),
       );
-    }, [delay, duration, progress]);
+    }, []);
 
     const animatedStyle = useAnimatedStyle(() => ({
       width: interpolate(progress.value, [0, 1], [0, maxSize]),
@@ -243,22 +263,8 @@ const SingleRipple = memo(
 );
 SingleRipple.displayName = 'SingleRipple';
 
-interface GlidingEmitterProps {
-  coreSize: number;
-  color: string;
-  maxWaveSize: number;
-  waveCount: number;
-  baseDuration: number;
-}
-
 const WanderingCore = memo(
-  ({
-    coreSize,
-    color,
-    maxWaveSize,
-    waveCount,
-    baseDuration,
-  }: GlidingEmitterProps) => {
+  ({ coreSize, color, maxWaveSize, waveCount, baseDuration }: any) => {
     const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
     const stagger = baseDuration / waveCount;
@@ -268,17 +274,14 @@ const WanderingCore = memo(
       time.value += frameInfo.timeSincePreviousFrame / 3000;
     });
 
-    const animatedPosition = useAnimatedStyle(() => {
-      const xOffset = Math.sin(time.value * 0.4) * (width * 0.3);
-      const yOffset = Math.cos(time.value * 0.3) * (height * 0.2);
-
-      return {
-        transform: [
-          { translateX: width / 2 + xOffset },
-          { translateY: height / 2 + yOffset },
-        ],
-      };
-    });
+    const animatedPosition = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: width / 2 + Math.sin(time.value * 0.4) * (width * 0.3) },
+        {
+          translateY: height / 2 + Math.cos(time.value * 0.3) * (height * 0.2),
+        },
+      ],
+    }));
 
     const corePulse = useSharedValue(0.6);
     useEffect(() => {
@@ -332,9 +335,7 @@ const WanderingCore = memo(
               shadowRadius: 15,
               shadowOpacity: 1,
               shadowOffset: { width: 0, height: 0 },
-              ...(Platform.OS === 'web'
-                ? ({ boxShadow: `0 0 20px ${color}` } as any)
-                : {}),
+              ...(IS_WEB ? ({ boxShadow: `0 0 20px ${color}` } as any) : {}),
             },
           ]}
         />
@@ -344,19 +345,101 @@ const WanderingCore = memo(
 );
 WanderingCore.displayName = 'WanderingCore';
 
+const OrganicOrb = memo(
+  ({
+    color,
+    size,
+    initialX,
+    initialY,
+    speedX,
+    speedY,
+    phaseOffsetX,
+    phaseOffsetY,
+    opacityBase,
+  }: any) => {
+    const { width, height } = Dimensions.get('window');
+    const time = useSharedValue(0);
+
+    useFrameCallback((frameInfo) => {
+      if (frameInfo.timeSincePreviousFrame === null) return;
+      time.value += frameInfo.timeSincePreviousFrame / 1000;
+    });
+
+    const animatedStyle = useAnimatedStyle(() => {
+      const xOffset =
+        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
+      const yOffset =
+        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
+      const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
+      return {
+        transform: [
+          { translateX: initialX + xOffset },
+          { translateY: initialY + yOffset },
+          { scale: breathe },
+        ],
+        opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
+      };
+    });
+
+    return (
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            top: -size / 2,
+            left: -size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+            ...(IS_WEB ? ({ filter: 'blur(60px)' } as any) : {}),
+          },
+          animatedStyle,
+        ]}
+      />
+    );
+  },
+);
+OrganicOrb.displayName = 'OrganicOrb';
+
 const AmbientArchitecture = memo(() => {
   const { width, height } = Dimensions.get('window');
   const isDesktop = width >= 1024;
-  const massiveWaveRadius = isDesktop ? width * 1.0 : height * 1.4;
+  const isTablet = width >= 768 && width < 1024 ;
+  const massiveWaveRadius = isDesktop ? width * 0.4 : height * 1.0;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <OrganicOrb
+        color={PURPLE}
+        size={width * 0.6}
+        initialX={width * 0.8}
+        initialY={height * 0.6}
+        speedX={0.15}
+        speedY={0.2}
+        phaseOffsetX={Math.PI}
+        phaseOffsetY={0}
+        opacityBase={0.06}
+      />
+      <OrganicOrb
+        color={CYAN}
+        size={width * 0.4}
+        initialX={width * 0.5}
+        initialY={height * 0.8}
+        speedX={0.25}
+        speedY={0.1}
+        phaseOffsetX={Math.PI / 4}
+        phaseOffsetY={Math.PI}
+        opacityBase={0.04}
+      />
+
       <WanderingCore
-        coreSize={18}
-        color="#00F0FF"
+        coreSize={12}
+        color={PURPLE}
         maxWaveSize={massiveWaveRadius}
         waveCount={4}
-        baseDuration={16000}
+        baseDuration={12000}
       />
     </View>
   );
@@ -553,7 +636,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <View className="flex-1 bg-[#000016]">
+    <View className="flex-1 bg-[#060016]">
       {/* 3. CRITICAL VISUAL FIX: Full-screen overlay to perfectly mask the OS browser handoff */}
       {isGoogleLoading && (
         <Animated.View
@@ -893,7 +976,7 @@ const AuthForm = memo(
               <Text className="text-[#00F0FF] font-black text-[10px] tracking-widest uppercase mb-2 ml-1">
                 PASSWORD
               </Text>
-              <View className="bg-white/[0.02] border border-white/10 rounded-2xl h-16 flex-row items-center px-4">
+              <View className="bg-white/[0.02] border border-dark/30 rounded-2xl h-16 flex-row items-center px-4">
                 <Lock size={18} color="#A1A1AA" />
                 <TextInput
                   className="flex-1 h-full ml-3 text-sm font-medium text-white outline-none"
@@ -911,9 +994,9 @@ const AuthForm = memo(
                   hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
                 >
                   {showPassword ? (
-                    <EyeOff size={18} color="#A1A1AA" />
+                    <EyeOff size={14} color="#ccccde" />
                   ) : (
-                    <Eye size={18} color="#A1A1AA" />
+                    <Eye size={18} color="#ccccde" />
                   )}
                 </TouchableOpacity>
               </View>
@@ -933,13 +1016,13 @@ const AuthForm = memo(
                           backgroundColor:
                             strength.score >= level
                               ? strength.color
-                              : 'rgba(255,255,255,0.1)',
+                              : 'rgba(255,255,255,0.01)',
                         }}
                       />
                     ))}
                   </View>
                   <View className="flex-row items-center justify-between">
-                    <Text className="text-white/20 text-[8px] font-mono uppercase tracking-widest">
+                    <Text className="text-white/40 text-[8px] font-mono uppercase tracking-widest">
                       uppercase, number, symbol
                     </Text>
                     <Text
@@ -984,7 +1067,7 @@ const AuthForm = memo(
                       ? 'border-rose-500/50'
                       : passwordsMatch
                         ? 'border-[#32FF00]/50'
-                        : 'border-white/10',
+                        : 'border-dark/10',
                   )}
                   style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}
                 >
@@ -1173,7 +1256,7 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
           >
             <TouchableOpacity
               activeOpacity={0.8}
-              className="p-6 border rounded-3xl border-white/10"
+              className="p-6 border rounded-3xl border-dark/10"
               style={{ backgroundColor: 'rgba(5, 5, 10, 0.6)' }}
             >
               <View className="flex-row items-center gap-4 mb-2">
@@ -1198,13 +1281,13 @@ const MarketingContent = memo(({ isDesktop }: { isDesktop: boolean }) => {
       </View>
       <CustomFadeIn delay={800} duration={800} translateYStart={15}>
         <View style={styles.socialIconsContainer}>
-          <Youtube color="#FFFFFF" size={26} />
-          <Twitter color="#FFFFFF" size={26} />
-          <Github color="#FFFFFF" size={26} />
-          <Facebook color="#FFFFFF" size={26} />
-          <Instagram color="#FFFFFF" size={26} />
-          <Twitch color="#FFFFFF" size={26} />
-          <Video color="#FFFFFF" size={26} />
+          <Youtube color="#a31515" size={26} />
+          <Twitter color="#155fa3" size={26} />
+          <Github color="#3b15a3" size={26} />
+          <Facebook color="#1593a3" size={26} />
+          <Instagram color="#a3155a" size={26} />
+          <Twitch color="#9c2f05" size={26} />
+          <Video color="#4ead71" size={26} />
         </View>
       </CustomFadeIn>
     </View>

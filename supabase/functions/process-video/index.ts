@@ -1,13 +1,17 @@
 /**
  * supabase/functions/process-video/index.ts
- * Master Pipeline Orchestrator
+ * Master Pipeline Orchestrator (Hybrid Cloud/Local Ready)
  * ----------------------------------------------------------------------------
  * TIER PIPELINE:
  * 1. Client-provided transcript (fast path)
  * 2. Server-side native caption scraper (Forced execution on YouTube URLs)
  * 3. Audio Resolver -> Deepgram transcription
- * 4. AI insights (Gemini 3.1 Flash-Lite with BYOK Support)
- * 5. Finalization & JSON Metadata Telemetry (Chart tracking per key)
+ * 4. AI Insights (Cloud Gemini 3.1 OR Local Device Handoff)
+ * 5. Finalization & JSON Metadata Telemetry
+ * ----------------------------------------------------------------------------
+ * COMPILER PROTOCOL (Strict TS):
+ * Zero 'any' types. All Supabase upserts utilize strict JSONB double-casting.
+ * ----------------------------------------------------------------------------
  */
 
 import { serve } from "std/http/server.ts";
@@ -16,11 +20,15 @@ import { createAdminClient } from '../_shared/supabaseAdmin.ts';
 import { getCaptions } from './captions.ts';
 import { getAudioUrl } from './audio.ts';
 import { transcribeAudio } from './deepgram.ts';
-import { generateInsights } from './insights.ts';
+import { generateInsights, buildAgentPrompt } from './insights.ts';
 import { extractYouTubeId, diffMs, sanitizeForDb, estimateReadingTime } from './utils.ts';
 import { Database } from '../../../types/database/database.types.ts';
 
+// Strict Type Aliases mapped to the Supabase Schema
 type VideoStatus = Database['public']['Enums']['video_status'];
+type ChaptersType = Database['public']['Tables']['ai_insights']['Insert']['chapters'];
+type TakeawaysType = Database['public']['Tables']['ai_insights']['Insert']['key_takeaways'];
+type SeoMetaType = Database['public']['Tables']['ai_insights']['Insert']['seo_metadata'];
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders, status: 200 });
@@ -50,13 +58,17 @@ serve(async (req: Request) => {
     const body = await req.json() as Record<string, unknown>;
     persistentJobId = body.video_id as string;
 
+    // Core payload variables strictly typed
     const video_url = body.video_url as string;
     const language = (body.language as string) || 'English';
     const difficulty = (body.difficulty as string) || 'standard';
 
+    // CRITICAL: Local AI Handoff Flag
+    const skip_ai = body.skip_ai === true;
+
     if (!persistentJobId || !video_url) throw new Error('MISSING_MANDATORY_PAYLOAD');
 
-    console.log(`[Pipeline] Starting job ${persistentJobId}`);
+    console.log(`[Pipeline] Starting job ${persistentJobId} | Target: ${language} | Difficulty: ${difficulty}`);
     await broadcastStatus('downloading');
 
     // ── TIER 0: FETCH INVOKING USER & BYOK CREDENTIALS ───────────────────────
@@ -68,7 +80,6 @@ serve(async (req: Request) => {
       invokingUserId = videoData.user_id;
       const { data: profile } = await supabase.from('profiles').select('role, custom_api_key').eq('id', invokingUserId).single();
 
-      // Strict RBAC: Only parse keys if user is Premium or Admin
       if (profile && (profile.role === 'premium' || profile.role === 'admin') && profile.custom_api_key) {
         try {
           const parsedKeys = JSON.parse(profile.custom_api_key);
@@ -94,7 +105,7 @@ serve(async (req: Request) => {
       const scrapeResult = await getCaptions(mediaId);
       if (scrapeResult && scrapeResult.text.length > 100) {
         finalTranscript = sanitizeForDb(scrapeResult.text);
-        rawMetadata = (scrapeResult.json as Record<string, unknown>) ?? {};
+        rawMetadata = scrapeResult.json;
         extractionMethod = scrapeResult.method;
         console.log(`[Tier 1] ✓ Scraped ${finalTranscript.split(/\s+/).length} words. Bypassing Deepgram.`);
       } else {
@@ -108,10 +119,10 @@ serve(async (req: Request) => {
       await broadcastStatus('transcribing');
 
       try {
-        const audioUrl = await getAudioUrl(video_url);
+        const audioData = await getAudioUrl(video_url);
 
-        console.log('[Tier 2] Streaming media to buffer...');
-        const audioResponse = await fetch(audioUrl, { signal: AbortSignal.timeout(45000) });
+        console.log(`[Tier 2] Streaming media to buffer from ${audioData.source}...`);
+        const audioResponse = await fetch(audioData.audioUrl, { signal: AbortSignal.timeout(45000) });
         if (!audioResponse.ok) throw new Error(`STREAM_REJECTED: HTTP ${audioResponse.status}`);
 
         const buffer = await audioResponse.arrayBuffer();
@@ -120,7 +131,7 @@ serve(async (req: Request) => {
         const transcription = await transcribeAudio(buffer);
 
         finalTranscript = sanitizeForDb(transcription.text);
-        rawMetadata = transcription.json;
+        rawMetadata = transcription.json as unknown as Record<string, unknown>;
         extractionMethod = 'deepgram_nova_2';
       } catch (err: unknown) {
         throw new Error(`TRANSCRIPTION_FAILED: ${(err as Error).message}`);
@@ -147,20 +158,36 @@ serve(async (req: Request) => {
 
     if (transcriptError) throw new Error(`DB_FAIL: ${transcriptError.message}`);
 
-    // ── TIER 4: AI INSIGHTS ───────────────────────────────────────────────────
+    // ── TIER 4A: LOCAL AI HANDOFF CIRCUIT BREAKER ─────────────────────────────
+    if (skip_ai) {
+      console.log(`[Pipeline] skip_ai flag detected. Halting cloud processing and returning structured payload.`);
+      await broadcastStatus('ai_processing');
+
+      // Directly consumes finalTranscript, language, and difficulty
+      const { systemInstruction, userMessage } = buildAgentPrompt(finalTranscript, language, difficulty);
+
+      return new Response(JSON.stringify({
+        success: true,
+        is_local_handoff: true,
+        transcript: finalTranscript,
+        system_instruction: systemInstruction,
+        user_message: userMessage
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+    }
+
+    // ── TIER 4B: CLOUD AI INSIGHTS (Gemini) ───────────────────────────────────
     activePhase = 'intelligence_engine';
     await broadcastStatus('ai_processing');
 
-    // Passes the extracted custom key directly to the insights generation engine
     const insights = await generateInsights(finalTranscript, language, difficulty, customGeminiKey);
 
     const { error: insightError } = await supabase.from('ai_insights').upsert({
       video_id: persistentJobId,
       summary: insights.summary,
       conclusion: insights.conclusion,
-      chapters: insights.chapters as unknown as Database['public']['Tables']['ai_insights']['Insert']['chapters'],
-      key_takeaways: insights.key_takeaways as unknown as Database['public']['Tables']['ai_insights']['Insert']['key_takeaways'],
-      seo_metadata: insights.seo_metadata as unknown as Database['public']['Tables']['ai_insights']['Insert']['seo_metadata'],
+      chapters: insights.chapters as unknown as ChaptersType,
+      key_takeaways: insights.key_takeaways as unknown as TakeawaysType,
+      seo_metadata: insights.seo_metadata as unknown as SeoMetaType,
       language,
       ai_model: insights.model,
       tokens_used: insights.tokens_used,
