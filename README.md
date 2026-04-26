@@ -1,7 +1,5 @@
 # ⚡ VeraxAI — Universal Audio Intelligence Engine
 
-<div align="center">
-
 [![Platform](https://img.shields.io/badge/Platform-Web%20%7C%20iOS%20%7C%20Android-0A0D14.svg?style=flat-square&logo=expo)](https://expo.dev)
 [![Framework](https://img.shields.io/badge/Framework-React%20Native%200.83-61DAFB.svg?style=flat-square&logo=react)](https://reactnative.dev)
 [![Backend](https://img.shields.io/badge/Backend-Supabase-3ECF8E.svg?style=flat-square&logo=supabase)](https://supabase.com)
@@ -9,8 +7,6 @@
 [![Local AI](https://img.shields.io/badge/Local%20AI-Gemma%204%20Edge-FF6F00.svg?style=flat-square&logo=linux)](https://huggingface.co/google)
 
 **VeraxAI Enterprise Build (2026)** | **Supabase Ref:** `jhcgkqzjabsitfilajuh`
-
-</div>
 
 ---
 

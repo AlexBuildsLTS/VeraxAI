@@ -5,7 +5,8 @@
  * ARCHITECTURE:
  * 1. FULL HARDWARE EXPOSURE: Threads, GPU Layers, and Temp explicitly typed.
  * 2. NETWORKING: External binding state tracked for desktop-class execution.
- * 3. PERSISTENCE: Ensures hardware choices survive app restarts.
+ * 3. PERSISTENCE: Ensures hardware choices AND active model state survive app 
+ * navigations and restarts.
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -39,6 +40,8 @@ interface LocalAIState {
     threads: number;
     gpuLayers: number;
     temperature: number;
+    prefillTokens: number;
+    decodeTokens: number;
 
     // Model State
     activeModelId: string | null;
@@ -50,7 +53,7 @@ interface LocalAIState {
     setPort: (port: string) => void;
     toggleExternalConnections: (enabled: boolean) => void;
     setComputeBackend: (backend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu') => void;
-    setHardwareState: (key: 'threads' | 'gpuLayers' | 'temperature', value: number) => void;
+    setHardwareState: (key: 'threads' | 'gpuLayers' | 'temperature' | 'prefillTokens' | 'decodeTokens', value: number) => void;
     setActiveModel: (id: string | null) => void;
 
     // File System Actions
@@ -71,6 +74,8 @@ export const useLocalAIStore = create<LocalAIState>()(
             threads: 4,
             gpuLayers: 33,
             temperature: 0.3,
+            prefillTokens: 256,
+            decodeTokens: 256,
 
             activeModelId: null,
             downloadedModels: [],
@@ -93,7 +98,7 @@ export const useLocalAIStore = create<LocalAIState>()(
                 const newProgress = { ...state.downloadProgress };
                 delete newProgress[id];
                 return {
-                    downloadedModels: [...new Set([...state.downloadedModels, id])],
+                    downloadedModels: Array.from(new Set([...state.downloadedModels, id])),
                     downloadProgress: newProgress
                 };
             }),
@@ -113,12 +118,18 @@ export const useLocalAIStore = create<LocalAIState>()(
             name: 'verax-local-ai-storage',
             storage: createJSONStorage(() => AsyncStorage),
             partialize: (state) => ({
+                // CRITICAL FIX: activeModelId and isLocalServerEnabled MUST be persisted 
+                // so the app remembers the Local Node is active when switching screens.
+                isLocalServerEnabled: state.isLocalServerEnabled,
+                activeModelId: state.activeModelId,
                 port: state.port,
                 allowExternalConnections: state.allowExternalConnections,
                 computeBackend: state.computeBackend,
                 threads: state.threads,
                 gpuLayers: state.gpuLayers,
                 temperature: state.temperature,
+                prefillTokens: state.prefillTokens,
+                decodeTokens: state.decodeTokens,
                 downloadedModels: state.downloadedModels,
             }),
         }

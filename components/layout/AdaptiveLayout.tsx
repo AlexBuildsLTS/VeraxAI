@@ -185,7 +185,7 @@ export const AdaptiveLayout = ({ children }: { children: React.ReactNode }) => {
                       className={cn(
                         'w-12 h-12 rounded-2xl items-center justify-center transition-all',
                         isActive
-                          ? 'bg-[#00F0FF]/10 border border-[#00F0FF]/40 shadow-[0_0_15px_rgba(0,240,255,0.5)]'
+                          ? 'bg-[#00F0FF]/10 border border-[#1200b8]/40 shadow-[0_0_15px_rgba(0,240,255,0.5)]'
                           : 'bg-transparent border-transparent',
                       )}
                     >

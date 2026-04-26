@@ -1,18 +1,4 @@
-/**
- * @file app/(dashboard)/settings/models.tsx
- * @description VeraxAI Local Inference Engine & Hardware Manager
- * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE & PROTOCOLS (2026 ENTERPRISE TIER):
- * 1. DUAL-ENGINE PARITY:
- * - DESKTOP WEB: Acts as an API Gateway Client. Connects directly to local native
- * runners (LM Studio, Ollama, Llama.cpp) via user-defined Port Binding.
- * - NATIVE APK: Streams raw GGUF binaries via `expo-file-system` to internal storage.
- * 2. UNGATED MIRRORS: Utilizes community Unsloth GGUF repositories.
- * 3. STRICT TYPING: Zero 'any' props in UI components. Interface strictly mapped.
- * ══════════════════════════════════════════════════════════════════════════════
- */
-
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,12 +11,12 @@ import {
   Dimensions,
   StyleSheet,
   KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
-
-// ─── ICONOGRAPHY ──────────────────────────────────────────────────────────────
+import * as FileSystem from 'expo-file-system/legacy';
+import Slider from '@react-native-community/slider';
 import {
   ArrowBigLeftDash,
   Cpu,
@@ -42,39 +28,32 @@ import {
   Settings2,
   Database,
   Info,
-  Minus,
-  Plus,
+  Sparkles,
+  ChevronUp,
+  Check,
   Flame,
-  Layers,
-  Activity,
-  AlertOctagon,
+  ExternalLink,
+  HelpCircle,
 } from 'lucide-react-native';
 
-// ─── SYSTEM COMPONENTS & STATE ────────────────────────────────────────────────
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { useLocalAIStore } from '../../../store/useLocalAIStore';
 import { cn } from '../../../lib/utils';
 
-// ─── ANIMATION ENGINE ─────────────────────────────────────────────────────────
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   useFrameCallback,
 } from 'react-native-reanimated';
 
-// ─── STRICT PLATFORM DETECTION ────────────────────────────────────────────────
+// --- Constants & Types ---
+
 const IS_WEB = Platform.OS === 'web';
-const IS_MOBILE_WEB =
-  IS_WEB &&
-  typeof window !== 'undefined' &&
-  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent,
-  );
-const IS_DESKTOP_WEB = IS_WEB && !IS_MOBILE_WEB;
+const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
 
 const THEME = {
-  obsidian: '#04001a',
+  obsidian: '#020205',
   cyan: '#00F0FF',
   purple: '#8A2BE2',
   pink: '#FF007F',
@@ -82,9 +61,9 @@ const THEME = {
   red: '#FF3333',
   slate: '#94A3B8',
   amber: '#F59E0B',
-};
+  primary: '#6366F1',
+} as const;
 
-// TS-2353 FIX: 'architecture' explicitly added to the strict definition
 export interface LocalModel {
   id: string;
   name: string;
@@ -100,47 +79,49 @@ export interface LocalModel {
     promptEvalMs: number;
     memoryBandwidth: string;
   };
+  description?: string;
 }
 
-// ─── ENTERPRISE MODEL CATALOG ─────────────────────────────────────────────────
 const AVAILABLE_MODELS: LocalModel[] = [
   {
     id: 'gemma-4-e2b-it',
-    name: 'Gemma 4 E2B (Edge Audio)',
-    sizeGb: 1.8,
+    name: 'Gemma-4 E2B-it',
+    sizeGb: 2.5,
     minRamGb: 4,
     isUncensored: false,
-    tags: ['E2B', 'NATIVE-AUDIO', 'FAST'],
+    tags: ['E2B', 'LITERT', 'UNGATED'],
     downloadUrl:
-      'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-e2b-it-Q4_K_M.gguf',
-    fileName: 'gemma-4-e2b-it.gguf',
+      'https://huggingface.co/litert-community/gemma-4-e2b-it-litertlm/resolve/main/model.litertlm',
+    fileName: 'gemma-4-e2b-it.litertlm',
     architecture: 'gemma4',
     benchmarks: {
       expectedTokSec: 32.5,
       promptEvalMs: 120,
       memoryBandwidth: 'Low',
     },
+    description: 'Optimized for speed and low-latency tasks. Best for simple extraction and short-form Q&A.',
   },
   {
     id: 'gemma-4-e4b-it',
-    name: 'Gemma 4 E4B (Edge Heavy)',
+    name: 'Gemma-4 E4B-it',
     sizeGb: 3.6,
     minRamGb: 8,
     isUncensored: false,
-    tags: ['E4B', 'REASONING', 'NATIVE-AUDIO'],
+    tags: ['E4B', 'LITERT', 'REASONING'],
     downloadUrl:
-      'https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-e4b-it-Q4_K_M.gguf',
-    fileName: 'gemma-4-e4b-it.gguf',
+      'https://huggingface.co/litert-community/gemma-4-e4b-it-litertlm/resolve/main/model.litertlm',
+    fileName: 'gemma-4-e4b-it.litertlm',
     architecture: 'gemma4',
     benchmarks: {
       expectedTokSec: 18.2,
       promptEvalMs: 380,
       memoryBandwidth: 'Medium',
     },
+    description: 'Superior reasoning and multi-step logic. Best for complex data extraction and long context.',
   },
 ];
 
-// ─── AMBIENT ARCHITECTURE ─────────────────────────────────────────────────────
+// --- Sub-components ---
 
 interface OrganicOrbProps {
   color: string;
@@ -166,7 +147,6 @@ const OrganicOrb = memo(
     phaseOffsetY,
     opacityBase,
   }: OrganicOrbProps) => {
-    const { width, height } = Dimensions.get('window');
     const time = useSharedValue(0);
 
     useFrameCallback((frameInfo) => {
@@ -176,9 +156,9 @@ const OrganicOrb = memo(
 
     const animatedStyle = useAnimatedStyle(() => {
       const xOffset =
-        Math.sin(time.value * speedX + phaseOffsetX) * (width * 0.3);
+        Math.sin(time.value * speedX + phaseOffsetX) * (WINDOW_WIDTH * 0.3);
       const yOffset =
-        Math.cos(time.value * speedY + phaseOffsetY) * (height * 0.2);
+        Math.cos(time.value * speedY + phaseOffsetY) * (WINDOW_HEIGHT * 0.2);
       const breathe = 1 + Math.sin(time.value * 0.5) * 0.15;
       return {
         transform: [
@@ -212,171 +192,307 @@ const OrganicOrb = memo(
 );
 OrganicOrb.displayName = 'OrganicOrb';
 
-const AmbientArchitecture = memo(() => {
-  const { width, height } = Dimensions.get('window');
+const AmbientArchitecture = memo(() => (
+  <View style={[StyleSheet.absoluteFill, { zIndex: 0 }]} pointerEvents="none">
+    <OrganicOrb
+      color={THEME.purple}
+      size={WINDOW_WIDTH * 0.7}
+      initialX={WINDOW_WIDTH * 0.8}
+      initialY={WINDOW_HEIGHT * 0.6}
+      speedX={0.12}
+      speedY={0.18}
+      phaseOffsetX={Math.PI}
+      phaseOffsetY={0}
+      opacityBase={0.05}
+    />
+    <OrganicOrb
+      color={THEME.cyan}
+      size={WINDOW_WIDTH * 0.5}
+      initialX={WINDOW_WIDTH * 0.2}
+      initialY={WINDOW_HEIGHT * 0.3}
+      speedX={0.2}
+      speedY={0.1}
+      phaseOffsetX={Math.PI / 4}
+      phaseOffsetY={Math.PI}
+      opacityBase={0.04}
+    />
+  </View>
+));
+AmbientArchitecture.displayName = 'AmbientArchitecture';
+
+const Tag = memo(({ tag }: { tag: string }) => {
+  const style = useMemo(() => {
+    switch (tag) {
+      case 'E2B':
+        return {
+          bg: 'bg-[#00F0FF]/20',
+          border: 'border-[#00F0FF]/40',
+          text: 'text-[#00F0FF]',
+        };
+      case 'UNGATED':
+        return {
+          bg: 'bg-[#8A2BE2]/20',
+          border: 'border-[#8A2BE2]/40',
+          text: 'text-[#C496FC]',
+        };
+      case 'LITERT':
+        return {
+          bg: 'bg-[#32FF00]/20',
+          border: 'border-[#32FF00]/40',
+          text: 'text-[#32FF00]',
+        };
+      case 'E4B':
+      case 'REASONING':
+        return {
+          bg: 'bg-[#F59E0B]/20',
+          border: 'border-[#F59E0B]/40',
+          text: 'text-[#F59E0B]',
+        };
+      default:
+        return {
+          bg: 'bg-white/5',
+          border: 'border-white/10',
+          text: 'text-white/60',
+        };
+    }
+  }, [tag]);
+
   return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 0 }]} pointerEvents="none">
-      <OrganicOrb
-        color={THEME.purple}
-        size={width * 0.7}
-        initialX={width * 0.8}
-        initialY={height * 0.6}
-        speedX={0.12}
-        speedY={0.18}
-        phaseOffsetX={Math.PI}
-        phaseOffsetY={0}
-        opacityBase={0.05}
-      />
-      <OrganicOrb
-        color={THEME.cyan}
-        size={width * 0.5}
-        initialX={width * 0.2}
-        initialY={height * 0.3}
-        speedX={0.2}
-        speedY={0.1}
-        phaseOffsetX={Math.PI / 4}
-        phaseOffsetY={Math.PI}
-        opacityBase={0.04}
-      />
+    <View
+      className={cn('px-2 py-1 border rounded', style.bg, style.border)}
+    >
+      <Text
+        className={cn(
+          'text-[8px] font-black uppercase tracking-[1px]',
+          style.text,
+        )}
+      >
+        {tag}
+      </Text>
     </View>
   );
 });
-AmbientArchitecture.displayName = 'AmbientArchitecture';
+Tag.displayName = 'Tag';
 
-// ─── MOBILE-RESPONSIVE HARDWARE STEPPER ───────────────────────────────────────
-
-interface HardwareStepperProps {
-  label: string;
-  value: number;
-  onIncrease: () => void;
-  onDecrease: () => void;
-  icon: any;
-  unit?: string;
-  min: number;
-  max: number;
-  disabled?: boolean;
+interface ModelCardProps {
+  model: LocalModel;
+  isActive: boolean;
+  downloaded: boolean;
+  isDownloading: boolean;
+  progress: number;
+  onLoad: (id: string) => void;
+  onDownload: (model: LocalModel) => void;
+  onRemove: (model: LocalModel) => void;
 }
 
-const HardwareStepper = ({
-  label,
-  value,
-  onIncrease,
-  onDecrease,
-  icon: Icon,
-  unit = '',
-  min,
-  max,
-  disabled = false,
-}: HardwareStepperProps) => (
-  <View
-    className={cn(
-      'flex-col items-start justify-between p-4 mb-4 border md:flex-row md:items-center rounded-2xl bg-black/40 border-white/10 gap-y-4',
-      disabled && 'opacity-50',
-    )}
-  >
-    <View className="flex-row items-center gap-3">
-      <View className="p-2 border rounded-full bg-white/5 border-white/10">
-        <Icon size={16} color={THEME.cyan} />
+const ModelCard = memo(
+  ({
+    model,
+    isActive,
+    downloaded,
+    isDownloading,
+    progress,
+    onLoad,
+    onDownload,
+    onRemove,
+  }: ModelCardProps) => (
+    <GlassCard
+      className={cn(
+        'p-4 md:p-5 rounded-3xl border',
+        isActive
+          ? 'border-[#32FF00]/30 bg-[#32FF00]/5'
+          : 'border-white/5 bg-white/[0.015]',
+      )}
+    >
+      <View className="flex-row flex-wrap items-center gap-2 mb-3">
+        {model.tags.map((tag) => (
+          <Tag key={tag} tag={tag} />
+        ))}
+        {isActive && (
+          <View className="px-2 py-1 rounded bg-[#32FF00]/20 border border-[#32FF00]/30 ml-auto">
+            <Text className="text-[8px] font-black text-[#32FF00] uppercase tracking-[1px]">
+              Online
+            </Text>
+          </View>
+        )}
       </View>
-      <Text className="text-xs font-bold tracking-widest text-white uppercase">
-        {label}
+
+      <Text className="mb-2 text-sm font-bold tracking-widest text-white">
+        {model.name}
       </Text>
-    </View>
-    <View className="flex-row items-center self-end gap-4 md:self-auto">
-      <TouchableOpacity
-        onPress={onDecrease}
-        disabled={disabled || value <= min}
-        activeOpacity={0.6}
-        className={cn(
-          'p-2 rounded-full border',
-          disabled || value <= min
-            ? 'bg-black/20 border-white/5 opacity-50'
-            : 'bg-white/10 border-white/20',
-        )}
-      >
-        <Minus size={14} color="white" />
-      </TouchableOpacity>
-      <Text className="w-12 font-mono text-sm text-center text-white">
-        {value}
-        {unit}
-      </Text>
-      <TouchableOpacity
-        onPress={onIncrease}
-        disabled={disabled || value >= max}
-        activeOpacity={0.6}
-        className={cn(
-          'p-2 rounded-full border',
-          disabled || value >= max
-            ? 'bg-black/20 border-white/5 opacity-50'
-            : 'bg-white/10 border-white/20',
-        )}
-      >
-        <Plus size={14} color="white" />
-      </TouchableOpacity>
-    </View>
-  </View>
+      
+      {model.description && (
+        <Text className="mb-4 text-[11px] text-white/50 leading-4">
+          {model.description}
+        </Text>
+      )}
+
+      <View className="flex-row flex-wrap items-center gap-4 pb-4 mb-6 border-b gap-y-3 border-white/5">
+        <View className="flex-row items-center gap-1">
+          <Database size={12} color={THEME.slate} />
+          <Text className="text-[10px] font-mono text-white/50">
+            {model.sizeGb} GB
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Cpu size={12} color={THEME.slate} />
+          <Text className="text-[10px] font-mono text-white/50">
+            Min {model.minRamGb}GB
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1 ml-auto">
+          <Zap size={12} color={THEME.amber} />
+          <Text className="text-[10px] font-mono text-amber-400/80">
+            ~{model.benchmarks.expectedTokSec} t/s
+          </Text>
+        </View>
+      </View>
+
+      {downloaded ? (
+        <View className="flex-row gap-3">
+          <TouchableOpacity
+            onPress={() => onLoad(model.id)}
+            disabled={isActive}
+            activeOpacity={0.7}
+            style={{ flex: 1 }} // Ensure explicit width for web responder
+            className={cn(
+              'h-12 flex-row items-center justify-center rounded-xl border',
+              isActive
+                ? 'bg-[#32FF00]/10 border-[#32FF00]/30'
+                : 'bg-[#00F0FF]/10 border-[#00F0FF]/30',
+            )}
+          >
+            <Play
+              size={14}
+              color={isActive ? THEME.green : THEME.cyan}
+              className="mr-2"
+            />
+            <Text
+              className={cn(
+                'text-[10px] font-black tracking-[2px] uppercase shrink-0',
+                isActive ? 'text-[#32FF00]' : 'text-[#00F0FF]',
+              )}
+            >
+              {isActive ? 'Engine Active' : 'Load Model'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onRemove(model)}
+            activeOpacity={0.7}
+            style={{ width: 48 }} // Explicit width
+            className="items-center justify-center h-12 border rounded-xl bg-rose-500/10 border-rose-500/20"
+          >
+            <Trash2 size={16} color={THEME.red} />
+          </TouchableOpacity>
+        </View>
+      ) : isDownloading ? (
+        <View className="relative justify-center w-full h-12 overflow-hidden border rounded-xl bg-white/5 border-[#00F0FF]/30">
+          <View
+            style={{
+              width: `${progress * 100}%`,
+              height: '100%',
+              backgroundColor: 'rgba(0, 240, 255, 0.2)',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            }}
+          />
+          <Text className="text-center text-[10px] md:text-[11px] font-black text-[#00F0FF] uppercase tracking-[2px]">
+            {IS_WEB ? 'Configuring Gateway...' : 'Downloading Binary...'} {Math.round(progress * 100)}%
+          </Text>
+        </View>
+      ) : (
+        <TouchableOpacity
+          onPress={() => onDownload(model)}
+          activeOpacity={0.7}
+          style={{ width: '100%' }} // Explicit width
+          className="flex-row items-center justify-center h-12 border rounded-xl bg-white/5 border-white/10"
+        >
+          <Download size={14} color="white" className="mr-2" />
+          <Text className="text-[10px] font-black text-white uppercase tracking-[2px] shrink-0">
+            {IS_WEB ? 'Configure Endpoint' : 'Download Vector Binary'}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </GlassCard>
+  ),
 );
+ModelCard.displayName = 'ModelCard';
 
-const getTagStyle = (tag: string) => {
-  switch (tag) {
-    case 'E2B':
-      return {
-        bg: 'bg-[#00F0FF]/20',
-        border: 'border-[#00F0FF]/40',
-        text: 'text-[#00F0FF]',
-      };
-    case 'E4B':
-      return {
-        bg: 'bg-[#8A2BE2]/20',
-        border: 'border-[#8A2BE2]/40',
-        text: 'text-[#C496FC]',
-      };
-    case 'NATIVE-AUDIO':
-      return {
-        bg: 'bg-[#FF007F]/20',
-        border: 'border-[#FF007F]/40',
-        text: 'text-[#FF007F]',
-      };
-    case 'FAST':
-      return {
-        bg: 'bg-[#32FF00]/20',
-        border: 'border-[#32FF00]/40',
-        text: 'text-[#32FF00]',
-      };
-    case 'REASONING':
-      return {
-        bg: 'bg-[#F59E0B]/20',
-        border: 'border-[#F59E0B]/40',
-        text: 'text-[#F59E0B]',
-      };
-    default:
-      return {
-        bg: 'bg-white/5',
-        border: 'border-white/10',
-        text: 'text-white/60',
-      };
-  }
-};
+interface HardwareSliderProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (val: number) => void;
+  icon?: React.ReactNode;
+  unit?: string;
+  showInput?: boolean;
+}
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MAIN SCREEN ORCHESTRATOR
-// ══════════════════════════════════════════════════════════════════════════════
+const HardwareSlider = memo(
+  ({
+    label,
+    value,
+    min,
+    max,
+    step,
+    onChange,
+    icon,
+    unit,
+    showInput = true,
+  }: HardwareSliderProps) => (
+    <View className="mb-6">
+      <Text className="mb-3 text-[14px] text-white/90">{label}</Text>
+      <View className="flex-row items-center justify-between">
+        {icon ? icon : <Text className="w-8 text-sm text-white/60">{min}</Text>}
+        <View className="justify-center flex-1 mx-4">
+          <Slider
+            style={{ width: '100%', height: 40 }}
+            minimumValue={min}
+            maximumValue={max}
+            step={step}
+            value={value}
+            onValueChange={onChange}
+            minimumTrackTintColor={THEME.primary}
+            maximumTrackTintColor="#ffffff30"
+            thumbTintColor={THEME.primary}
+          />
+        </View>
+        {showInput ? (
+          <TextInput
+            value={String(value)}
+            onChangeText={(txt) => onChange(Number(txt) || min)}
+            keyboardType="number-pad"
+            className="w-16 p-2 text-sm text-center text-white border rounded-lg bg-white/5 border-white/20"
+            style={IS_WEB ? ({ outlineStyle: 'none' } as any) : {}}
+          />
+        ) : (
+          <Text className="w-8 text-sm font-bold text-right text-white">
+            {value}
+            {unit}
+          </Text>
+        )}
+      </View>
+    </View>
+  ),
+);
+HardwareSlider.displayName = 'HardwareSlider';
+
+// --- Main Screen ---
 
 export default function LocalModelsScreen() {
   const router = useRouter();
-  const { width } = Dimensions.get('window');
-  const isMobile = width < 768;
+  const isMobile = WINDOW_WIDTH < 768;
 
   const {
     isLocalServerEnabled,
     toggleServer,
     port,
     setPort,
-    allowExternalConnections,
-    toggleExternalConnections,
     computeBackend,
     setComputeBackend,
-    threads,
     gpuLayers,
     temperature,
     setHardwareState,
@@ -394,524 +510,509 @@ export default function LocalModelsScreen() {
   const [modelFilter, setModelFilter] = useState<'catalog' | 'device'>(
     'catalog',
   );
+  const [prefillTokens, setPrefillTokens] = useState<number>(256);
+  const [decodeTokens, setDecodeTokens] = useState<number>(256);
+  const [accelerator, setAccelerator] = useState<'GPU' | 'CPU'>('GPU');
+  const [deviceStats, setDeviceStats] = useState<{
+    cores: number;
+    ramGb: number;
+  }>({ cores: 8, ramGb: 8 });
 
-  /**
-   * UNIVERSAL DOWNLOAD RESOLVER
-   */
-  const handleDownload = async (model: LocalModel) => {
-    // PATH 1: MOBILE WEB (Hardware Constraints Block)
-    if (IS_MOBILE_WEB) {
-      if (typeof window !== 'undefined') {
-        window.alert(
-          'INCOMPATIBLE HARDWARE\n\nMobile web browsers enforce strict memory limits. Download the VeraxAI Native Android APK to execute models directly on local silicon.',
-        );
+  // Hardware detection
+  useEffect(() => {
+    const fetchNativeHardware = async () => {
+      if (IS_WEB) {
+        setDeviceStats({
+          cores: navigator.hardwareConcurrency || 8,
+          ramGb: 16,
+        });
+      } else {
+        try {
+          const DeviceInfo = require('react-native-device-info');
+          const totalMemoryBytes = await DeviceInfo.getTotalMemory();
+          const ramGb = Math.round(totalMemoryBytes / (1024 * 1024 * 1024));
+          setDeviceStats({ cores: 8, ramGb });
+        } catch (e) {
+          console.error('Hardware detection failed:', e);
+          setDeviceStats({ cores: 8, ramGb: 6 });
+        }
       }
-      return;
-    }
+    };
+    fetchNativeHardware();
+  }, []);
 
-    // PATH 2: DESKTOP WEB (Direct to Desktop Runner)
-    if (IS_DESKTOP_WEB) {
-      if (typeof window !== 'undefined') {
-        // Instantly routes the user to download the GGUF file for LM Studio/Llama.cpp
-        window.open(model.downloadUrl, '_blank');
-
-        // Simulates adding it to the Web UI list so the user can easily bind to it
+  const handleDownload = useCallback(
+    async (model: LocalModel) => {
+      if (IS_WEB) {
+        setDownloadProgress(model.id, 0.05);
         setTimeout(() => {
-          markDownloaded(model.id, `desktop_runner://${model.id}`);
-        }, 1000);
+          markDownloaded(model.id, `edge_routed://${model.id}`);
+          setActiveModel(model.id);
+          setDownloadProgress(model.id, 1);
+        }, 800);
+        return;
       }
-      return;
-    }
 
-    // PATH 3: NATIVE ANDROID APK (GGUF RAW STREAMING TO DEVICE SANDBOX)
-    try {
-      const docDir = (FileSystem as any).documentDirectory || 'file:///tmp/';
-      const fileUri = `${docDir}${model.fileName}`;
+      try {
+        const docDir = FileSystem.documentDirectory || 'file:///tmp/';
+        const fileUri = `${docDir}${model.fileName}`;
 
-      const downloadResumable = (FileSystem as any).createDownloadResumable(
-        model.downloadUrl,
-        fileUri,
-        {},
-        (progressData: any) => {
-          const progress =
-            progressData.totalBytesWritten /
-            progressData.totalBytesExpectedToWrite;
-          setDownloadProgress(model.id, progress);
-        },
-      );
+        const downloadResumable = FileSystem.createDownloadResumable(
+          model.downloadUrl,
+          fileUri,
+          {},
+          (progressData: any) => {
+            setDownloadProgress(
+              model.id,
+              progressData.totalBytesWritten /
+                progressData.totalBytesExpectedToWrite,
+            );
+          },
+        );
 
-      setDownloadProgress(model.id, 0.01);
-      const result = await downloadResumable.downloadAsync();
+        setDownloadProgress(model.id, 0.01);
+        const result = await downloadResumable.downloadAsync();
 
-      if (result && result.uri) {
-        markDownloaded(model.id, result.uri);
+        if (result && result.uri) {
+          markDownloaded(model.id, result.uri);
+          setActiveModel(model.id);
+        }
+      } catch (e: any) {
+        Alert.alert(
+          'Download Interrupted',
+          e.message ||
+            'Ensure you have sufficient device storage and a stable connection.',
+        );
+        clearDownloadProgress(model.id);
       }
-    } catch (e) {
-      console.error('[Binary Stream Fault]', e);
-      Alert.alert(
-        'Stream Interrupted',
-        'Device storage limit reached or network timeout.',
-      );
-      clearDownloadProgress(model.id);
-    }
-  };
-
-  /**
-   * Universal File Removal
-   */
-  const handleRemove = async (model: LocalModel) => {
-    if (!IS_WEB) {
-      const docDir = (FileSystem as any).documentDirectory || 'file:///tmp/';
-      const fileUri = `${docDir}${model.fileName}`;
-      await (FileSystem as any)
-        .deleteAsync(fileUri, { idempotent: true })
-        .catch(() => {});
-    }
-    removeModel(model.id);
-  };
-
-  const handleLoadModel = async (id: string) => {
-    setActiveModel(id);
-    if (IS_DESKTOP_WEB) {
-      window.alert(
-        `Desktop Link Established.\nVeraxAI is now routing LLM requests to your local runner on Port ${port}.`,
-      );
-    } else {
-      Alert.alert(
-        'Neural Link Established',
-        `Model bound to ${computeBackend.toUpperCase()} pipeline on port ${port}.`,
-      );
-    }
-  };
-
-  const handleReturn = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(dashboard)');
-    }
-  };
-
-  const isModelDownloaded = (model: LocalModel) =>
-    Array.isArray(downloadedModels)
-      ? downloadedModels.includes(model.id)
-      : false;
-  const displayedModels = AVAILABLE_MODELS.filter((m) =>
-    modelFilter === 'catalog' ? true : isModelDownloaded(m),
+    },
+    [
+      setDownloadProgress,
+      markDownloaded,
+      setActiveModel,
+      clearDownloadProgress,
+    ],
   );
 
-  // ─── TAB RENDERS ────────────────────────────────────────────────────────────
+  const handleRemove = useCallback(
+    async (model: LocalModel) => {
+      if (!IS_WEB) {
+        const docDir = FileSystem.documentDirectory || 'file:///tmp/';
+        const fileUri = `${docDir}${model.fileName}`;
+        try {
+          await FileSystem.deleteAsync(fileUri, { idempotent: true });
+        } catch (e) {
+          console.warn('Failed to delete model file:', e);
+        }
+      }
+      removeModel(model.id);
+    },
+    [removeModel],
+  );
+
+  const handleLoadModel = useCallback(
+    (id: string) => {
+      setActiveModel(id);
+      if (IS_WEB) {
+        const model = AVAILABLE_MODELS.find((m) => m.id === id);
+        Alert.alert(
+          'Endpoint Configured',
+          `Inference actively routing to ${model?.name || id} via local gateway. Ensure Ollama or LM Studio is running on port ${port}.`,
+        );
+      }
+    },
+    [setActiveModel, port],
+  );
+
+  const handleReturn = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(dashboard)');
+  }, [router]);
+
+  const isModelDownloaded = useCallback(
+    (modelId: string) =>
+      Array.isArray(downloadedModels) ? downloadedModels.includes(modelId) : false,
+    [downloadedModels],
+  );
+
+  const displayedModels = useMemo(
+    () =>
+      AVAILABLE_MODELS.filter((m) =>
+        modelFilter === 'catalog' ? true : isModelDownloaded(m.id),
+      ),
+    [modelFilter, isModelDownloaded],
+  );
 
   const renderModelsTab = () => (
     <FadeIn delay={100} className="w-full">
-      {IS_MOBILE_WEB ? (
-        <GlassCard className="p-4 mb-8 border-l-4 md:p-5 rounded-2xl bg-white/5 border-l-[#FF3333] border-y-white/10 border-r-white/10">
-          <View className="flex-row items-start gap-3">
-            <AlertOctagon
-              size={18}
-              color={THEME.red}
-              className="mt-0.5 shrink-0"
-            />
-            <View className="flex-1 shrink">
-              <Text className="text-[10px] font-black tracking-[2px] uppercase text-[#FF3333] mb-1">
-                Architecture Blocked
-              </Text>
-              <Text className="text-xs leading-5 text-white/70">
-                Mobile Web browsers strictly limit RAM to 2GB per tab. To
-                utilize Local Models,{' '}
-                <Text className="font-bold text-white">
-                  download the Native Android APK
-                </Text>{' '}
-                or open this dashboard on a Desktop PC to bind your local
-                runner.
-              </Text>
-            </View>
+      {IS_WEB && (
+        <GlassCard className="p-4 mb-6 border-cyan/20 bg-cyan/5">
+          <View className="flex-row items-center gap-3 mb-2">
+            <Info size={18} color={THEME.cyan} />
+            <Text className="text-xs font-bold tracking-widest text-white uppercase">Web Platform Notice</Text>
           </View>
-        </GlassCard>
-      ) : (
-        <GlassCard className="p-4 mb-8 border-l-4 md:p-5 rounded-2xl bg-white/5 border-l-[#00F0FF] border-y-white/10 border-r-white/10">
-          <View className="flex-row items-start gap-3">
-            <Info size={18} color={THEME.cyan} className="mt-0.5 shrink-0" />
-            <View className="flex-1 shrink">
-              <Text className="text-[10px] font-black tracking-[2px] uppercase text-[#00F0FF] mb-1">
-                Architect's Advisory
-              </Text>
-              <Text className="text-xs leading-5 text-white/70">
-                {IS_DESKTOP_WEB
-                  ? "Desktop Web Execution: Download the GGUF model and load it into your local desktop runner (e.g., LM Studio or Ollama). Bind your runner's active Port in the Hardware Tab."
-                  : 'For raw STT parsing, Gemma 4 E2B is highly recommended for mobile efficiency. For deep narrative analysis, Gemma 4 E4B provides the necessary reasoning depth (requires 8GB+ RAM).'}
-              </Text>
-            </View>
-          </View>
+          <Text className="text-[11px] text-white/60 leading-5">
+            You are running the Web version on a desktop browser. Direct binary execution is restricted. 
+            To use local models, run <Text className="font-bold text-cyan">Ollama</Text> or <Text className="font-bold text-cyan">LM Studio</Text> on your machine and configure the port in the Hardware tab.
+          </Text>
         </GlassCard>
       )}
 
       <View className="flex-row flex-wrap gap-3 mb-6">
-        <TouchableOpacity
-          onPress={() => setModelFilter('catalog')}
-          className={cn(
-            'px-5 py-2.5 rounded-full border',
-            modelFilter === 'catalog'
-              ? 'bg-[#8A2BE2]/20 border-[#8A2BE2]/50'
-              : 'bg-transparent border-white/10',
-          )}
-        >
-          <Text
+        {(['catalog', 'device'] as const).map((filter) => (
+          <TouchableOpacity
+            key={filter}
+            onPress={() => setModelFilter(filter)}
             className={cn(
-              'text-[10px] font-black tracking-[2px] uppercase',
-              modelFilter === 'catalog' ? 'text-[#8A2BE2]' : 'text-white/40',
+              'px-5 py-2.5 rounded-full border',
+              modelFilter === filter
+                ? 'bg-[#8A2BE2]/20 border-[#8A2BE2]/50'
+                : 'bg-transparent border-white/10',
             )}
           >
-            Catalog
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setModelFilter('device')}
-          className={cn(
-            'px-5 py-2.5 rounded-full border',
-            modelFilter === 'device'
-              ? 'bg-[#8A2BE2]/20 border-[#8A2BE2]/50'
-              : 'bg-transparent border-white/10',
-          )}
-        >
-          <Text
-            className={cn(
-              'text-[10px] font-black tracking-[2px] uppercase',
-              modelFilter === 'device' ? 'text-[#8A2BE2]' : 'text-white/40',
-            )}
-          >
-            {IS_WEB ? 'Desktop Binds' : 'Device Storage'}
-          </Text>
-        </TouchableOpacity>
+            <Text
+              className={cn(
+                'text-[10px] font-black tracking-[2px] uppercase',
+                modelFilter === filter ? 'text-[#8A2BE2]' : 'text-white/40',
+              )}
+            >
+              {filter === 'catalog'
+                ? 'Catalog'
+                : IS_WEB
+                  ? 'Configured Endpoints'
+                  : 'Device Storage'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       <View className="gap-y-4">
-        {displayedModels.map((model) => {
-          const downloaded = isModelDownloaded(model);
-          const isActive = activeModelId === model.id;
-          const currentProgress = downloadProgress[model.id];
-          const isDownloading = currentProgress !== undefined;
+        {displayedModels.map((model) => (
+          <ModelCard
+            key={model.id}
+            model={model}
+            isActive={activeModelId === model.id}
+            downloaded={isModelDownloaded(model.id)}
+            isDownloading={
+              downloadProgress[model.id] !== undefined &&
+              downloadProgress[model.id] < 1
+            }
+            progress={downloadProgress[model.id] || 0}
+            onLoad={handleLoadModel}
+            onDownload={handleDownload}
+            onRemove={handleRemove}
+          />
+        ))}
+      </View>
 
-          return (
-            <GlassCard
-              key={model.id}
-              className={cn(
-                'p-4 md:p-5 rounded-3xl border',
-                isActive
-                  ? 'border-[#32FF00]/30 bg-[#32FF00]/5'
-                  : 'border-white/5 bg-white/[0.015]',
-              )}
-            >
-              <View className="flex-row flex-wrap items-center gap-2 mb-3">
-                {model.tags.map((tag) => {
-                  const style = getTagStyle(tag);
-                  return (
-                    <View
-                      key={tag}
-                      className={cn(
-                        'px-2 py-1 border rounded',
-                        style.bg,
-                        style.border,
-                      )}
-                    >
-                      <Text
-                        className={cn(
-                          'text-[8px] font-black uppercase tracking-[1px]',
-                          style.text,
-                        )}
-                      >
-                        {tag}
-                      </Text>
-                    </View>
-                  );
-                })}
-                {isActive && (
-                  <View className="px-2 py-1 rounded bg-[#32FF00]/20 border border-[#32FF00]/30 ml-auto">
-                    <Text className="text-[8px] font-black text-[#32FF00] uppercase tracking-[1px]">
-                      Online
-                    </Text>
-                  </View>
-                )}
-              </View>
+      <GlassCard className="p-5 mt-8 border-white/5 bg-white/[0.01]">
+        <View className="flex-row items-center gap-2 mb-4">
+          <HelpCircle size={18} color={THEME.purple} />
+          <Text className="text-xs font-bold tracking-widest text-white uppercase">Gemma E2B vs E4B</Text>
+        </View>
+        
+        <View className="gap-y-4">
+          <View>
+            <Text className="text-[10px] font-black text-cyan uppercase mb-1">E2B (2 Billion Parameters)</Text>
+            <Text className="text-[11px] text-white/50 leading-4">
+              Optimized for speed (20-35 t/s). Best for simple extraction, short-form Q&A, and devices with 4-6GB RAM.
+            </Text>
+          </View>
+          <View>
+            <Text className="text-[10px] font-black text-purple uppercase mb-1">E4B (4 Billion Parameters)</Text>
+            <Text className="text-[11px] text-white/50 leading-4">
+              Superior reasoning and multi-step logic. Measurably better at complex data extraction and long context. Requires 8GB+ RAM.
+            </Text>
+          </View>
+        </View>
+      </GlassCard>
+    </FadeIn>
+  );
 
-              <Text className="mb-4 text-sm font-bold tracking-widest text-white">
-                {model.name}
-              </Text>
+  const renderHardwareTab = () => {
+    const backendLabel =
+      computeBackend === 'auto'
+        ? 'Auto'
+        : computeBackend === 'opencl'
+          ? 'OpenCL'
+          : computeBackend === 'vulkan'
+            ? 'Vulkan'
+            : computeBackend === 'metal'
+              ? 'Metal'
+              : 'CPU Only';
 
-              <View className="flex-row flex-wrap items-center gap-4 pb-4 mb-6 border-b gap-y-3 border-white/5">
-                <View className="flex-row items-center gap-1">
-                  <Database size={12} color={THEME.slate} />
-                  <Text className="text-[10px] font-mono text-white/50">
-                    {model.sizeGb} GB
-                  </Text>
-                </View>
-                <View className="flex-row items-center gap-1">
-                  <Cpu size={12} color={THEME.slate} />
-                  <Text className="text-[10px] font-mono text-white/50">
-                    Min {model.minRamGb}GB
-                  </Text>
-                </View>
-                <View className="flex-row items-center gap-1 ml-auto">
-                  <Zap size={12} color={THEME.amber} />
-                  <Text className="text-[10px] font-mono text-amber-400/80">
-                    ~{model.benchmarks.expectedTokSec} t/s
-                  </Text>
-                </View>
-              </View>
+    const safeTemp = temperature ?? 0.7;
+    const safeLayers = gpuLayers ?? 33;
 
-              {downloaded ? (
-                <View className="flex-row gap-3">
-                  <TouchableOpacity
-                    onPress={() => handleLoadModel(model.id)}
-                    disabled={isActive}
-                    activeOpacity={0.7}
-                    className={cn(
-                      'flex-1 h-12 flex-row items-center justify-center rounded-xl border',
-                      isActive
-                        ? 'bg-[#32FF00]/10 border-[#32FF00]/30'
-                        : 'bg-[#00F0FF]/10 border-[#00F0FF]/30',
-                    )}
-                  >
-                    <Play
-                      size={14}
-                      color={isActive ? THEME.green : THEME.cyan}
-                      className="mr-2"
-                    />
-                    <Text
-                      className={cn(
-                        'text-[10px] font-black tracking-[2px] uppercase shrink-0',
-                        isActive ? 'text-[#32FF00]' : 'text-[#00F0FF]',
-                      )}
-                    >
-                      {isActive
-                        ? 'Engine Active'
-                        : IS_DESKTOP_WEB
-                          ? 'Connect Runner'
-                          : 'Load Model'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => handleRemove(model)}
-                    activeOpacity={0.7}
-                    className="items-center justify-center w-12 h-12 border rounded-xl bg-rose-500/10 border-rose-500/20"
-                  >
-                    <Trash2 size={16} color={THEME.red} />
-                  </TouchableOpacity>
-                </View>
-              ) : isDownloading ? (
-                <View className="relative justify-center w-full h-12 overflow-hidden border rounded-xl bg-white/5 border-[#00F0FF]/30">
-                  <View
-                    style={{
-                      width: `${currentProgress * 100}%`,
-                      height: '100%',
-                      backgroundColor: 'rgba(0, 240, 255, 0.2)',
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                    }}
-                  />
-                  <Text className="text-center text-[10px] md:text-[11px] font-black text-[#00F0FF] uppercase tracking-[2px]">
-                    Extracting... {Math.round(currentProgress * 100)}%
-                  </Text>
-                </View>
-              ) : (
+    return (
+      <FadeIn delay={100} className="w-full pb-20 gap-y-6">
+        <View className="mb-4">
+          <Text className="mb-3 text-[14px] text-white/90">Accelerator</Text>
+          <View className="flex-row w-48 overflow-hidden border rounded-full border-white/20">
+            {(['GPU', 'CPU'] as const).map((type) => (
+              <React.Fragment key={type}>
                 <TouchableOpacity
-                  onPress={() => handleDownload(model)}
-                  disabled={IS_MOBILE_WEB}
-                  activeOpacity={0.7}
+                  onPress={() => {
+                    setAccelerator(type);
+                    if (type === 'GPU') {
+                      if (IS_WEB) {
+                        setComputeBackend('auto');
+                      } else {
+                        setComputeBackend(
+                          deviceStats.ramGb >= 8 ? 'opencl' : 'vulkan',
+                        );
+                      }
+                    } else {
+                      setComputeBackend('cpu');
+                      setHardwareState('gpuLayers', 0);
+                    }
+                  }}
                   className={cn(
-                    'flex-row items-center justify-center w-full h-12 border rounded-xl',
-                    IS_MOBILE_WEB
-                      ? 'bg-white/5 border-white/5 opacity-40'
-                      : 'bg-white/5 border-white/10',
+                    'flex-1 py-2 items-center flex-row justify-center',
+                    accelerator === type ? 'bg-[#005c99]' : 'bg-transparent',
                   )}
                 >
-                  <Download size={14} color="white" className="mr-2" />
-                  <Text className="text-[10px] font-black text-white uppercase tracking-[2px] shrink-0">
-                    {IS_DESKTOP_WEB
-                      ? 'Download for Desktop Runner'
-                      : 'Download Vector Binary'}
-                  </Text>
+                  {accelerator === type && (
+                    <Check size={14} color="white" className="mr-2" />
+                  )}
+                  <Text className="text-sm font-medium text-white">{type}</Text>
                 </TouchableOpacity>
-              )}
-            </GlassCard>
-          );
-        })}
-      </View>
-    </FadeIn>
-  );
-
-  const renderHardwareTab = () => (
-    <FadeIn delay={100} className="w-full gap-y-6">
-      {IS_WEB && (
-        <GlassCard className="p-4 mb-2 border-l-4 md:p-5 rounded-2xl bg-white/5 border-l-[#F59E0B] border-y-white/10 border-r-white/10">
-          <View className="flex-row items-start gap-3">
-            <Info size={18} color={THEME.amber} className="mt-0.5 shrink-0" />
-            <View className="flex-1 shrink">
-              <Text className="text-[10px] font-black tracking-[2px] uppercase text-[#F59E0B] mb-1">
-                API Gateway Mode
-              </Text>
-              <Text className="text-xs leading-5 text-white/70">
-                You are running the Web platform. VeraxAI will act as a frontend
-                client. Enter the port below that matches your local desktop
-                runner (e.g., LM Studio uses 1234 or 4891, Ollama uses 11434).
-              </Text>
-            </View>
-          </View>
-        </GlassCard>
-      )}
-
-      <GlassCard className="p-4 border-white/5 bg-white/[0.02] rounded-3xl md:p-6">
-        <View className="flex-row items-center justify-between mb-6">
-          <View className="flex-row items-center flex-1 gap-3 pr-4">
-            <Server size={20} color={THEME.cyan} />
-            <View className="flex-1 shrink">
-              <Text className="text-sm font-bold tracking-widest text-white uppercase">
-                API Gateway
-              </Text>
-              <Text className="text-[9px] text-white/40 tracking-[1px] uppercase mt-1">
-                Expose OpenAI-compatible endpoints
-              </Text>
-            </View>
-          </View>
-          <Switch
-            value={isLocalServerEnabled}
-            onValueChange={toggleServer}
-            trackColor={{ false: '#3F3F46', true: `${THEME.cyan}50` }}
-            thumbColor={isLocalServerEnabled ? THEME.cyan : '#f4f3f4'}
-          />
-        </View>
-
-        <View className="p-4 mb-4 border rounded-2xl bg-black/40 border-white/10 md:p-5">
-          <Text className="text-[9px] font-black text-[#00F0FF] tracking-[2px] uppercase mb-2 ml-1">
-            LOCAL PORT BINDING
-          </Text>
-          <View className="h-12 px-4 overflow-hidden border bg-black/60 border-white/10 rounded-xl">
-            <TextInput
-              value={port}
-              onChangeText={setPort}
-              keyboardType="number-pad"
-              className="flex-1 font-mono text-sm text-white"
-              editable={!isLocalServerEnabled}
-              style={IS_WEB ? ({ outlineStyle: 'none' } as any) : {}}
-            />
+                {type === 'GPU' && <View className="w-px h-full bg-white/20" />}
+              </React.Fragment>
+            ))}
           </View>
         </View>
 
-        <View className="flex-row items-center justify-between p-4 border md:p-5 rounded-2xl bg-black/40 border-white/10">
-          <View className="flex-1 pr-4">
-            <Text className="text-[10px] font-black text-white tracking-[1px] uppercase">
-              External Access
-            </Text>
-            <Text className="text-[9px] text-white/40 mt-1">
-              Bind to 0.0.0.0 instead of localhost
-            </Text>
-          </View>
-          <Switch
-            value={allowExternalConnections}
-            onValueChange={toggleExternalConnections}
-            trackColor={{ false: '#3F3F46', true: `${THEME.purple}50` }}
-            thumbColor={allowExternalConnections ? THEME.purple : '#f4f3f4'}
-          />
-        </View>
-      </GlassCard>
-
-      <GlassCard className="p-4 border-white/5 bg-white/[0.02] rounded-3xl md:p-6">
-        <View className="flex-row items-center gap-3 mb-6">
-          <Activity size={20} color={THEME.amber} />
-          <View className="flex-1 shrink">
-            <Text className="text-sm font-bold tracking-widest text-white uppercase">
-              Hardware Topology
-            </Text>
-            <Text className="text-[9px] text-white/40 tracking-[1px] uppercase mt-1">
-              Manual overrides for local silicon
-            </Text>
-          </View>
-        </View>
-
-        <View className="flex-row flex-wrap gap-3 mb-8">
-          {['auto', 'metal', 'vulkan', 'cpu'].map((backend) => (
-            <TouchableOpacity
-              key={backend}
-              onPress={() => setComputeBackend(backend as any)}
-              className={cn(
-                'flex-1 min-w-[45%] md:min-w-0 py-3 items-center rounded-xl border',
-                computeBackend === backend
-                  ? 'bg-[#FFB800]/20 border-[#FFB800]/50'
-                  : 'bg-black/40 border-white/10',
-              )}
-            >
-              <Text
-                className={cn(
-                  'text-[9px] font-black uppercase tracking-[1px]',
-                  computeBackend === backend
-                    ? 'text-[#FFB800]'
-                    : 'text-white/40',
-                )}
-              >
-                {backend}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <HardwareStepper
-          label="CPU Threads"
-          value={threads || 4}
-          min={1}
-          max={16}
-          icon={Cpu}
-          onIncrease={() => setHardwareState('threads', (threads || 4) + 1)}
-          onDecrease={() => setHardwareState('threads', (threads || 4) - 1)}
+        <HardwareSlider
+          label="Prefill tokens"
+          value={prefillTokens}
+          min={16}
+          max={4000}
+          step={1}
+          onChange={(val) => {
+            const num = Math.round(val);
+            setPrefillTokens(num);
+            setHardwareState('prefillTokens' as any, num);
+          }}
         />
 
-        <HardwareStepper
-          label="GPU Offload Layers"
-          value={gpuLayers || 33}
-          min={0}
-          max={99}
-          icon={Layers}
-          onIncrease={() =>
-            setHardwareState('gpuLayers', (gpuLayers || 33) + 1)
-          }
-          onDecrease={() =>
-            setHardwareState('gpuLayers', (gpuLayers || 33) - 1)
-          }
+        <HardwareSlider
+          label="Decode tokens"
+          value={decodeTokens}
+          min={16}
+          max={4000}
+          step={1}
+          onChange={(val) => {
+            const num = Math.round(val);
+            setDecodeTokens(num);
+            setHardwareState('decodeTokens' as any, num);
+          }}
         />
 
-        <HardwareStepper
-          label="Inference Temp"
-          value={temperature || 0.3}
+        <HardwareSlider
+          label="Temperature"
+          value={safeTemp}
           min={0.1}
           max={1.0}
-          icon={Flame}
-          onIncrease={() =>
-            setHardwareState(
-              'temperature',
-              parseFloat(((temperature || 0.3) + 0.1).toFixed(1)),
-            )
+          step={0.1}
+          onChange={(val) =>
+            setHardwareState('temperature', parseFloat(val.toFixed(1)))
           }
-          onDecrease={() =>
-            setHardwareState(
-              'temperature',
-              parseFloat(((temperature || 0.3) - 0.1).toFixed(1)),
-            )
-          }
+          icon={<Flame size={18} color="#94A3B8" className="mr-2" />}
+          showInput={false}
+          unit=""
         />
-      </GlassCard>
-    </FadeIn>
-  );
+
+        <GlassCard className="p-5 border-white/10 bg-[#12121A]/80 rounded-[28px] shadow-2xl mb-8">
+          <View className="flex-row items-center gap-2 mb-1.5">
+            <Sparkles size={18} color={THEME.primary} />
+            <Text className="text-[15px] font-bold tracking-wide text-white">
+              Compute Device
+            </Text>
+          </View>
+          <Text className="mb-5 text-xs text-white/50 ml-7">
+            Current:{' '}
+            {accelerator === 'CPU' ? 'CPU Only' : `GPU (${backendLabel})`} •{' '}
+            {safeLayers} layers
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => {
+              if (IS_WEB) {
+                setAccelerator('GPU');
+                setComputeBackend('auto');
+                setHardwareState('gpuLayers', 33);
+                Alert.alert(
+                  'Optimization Applied',
+                  'WebGPU/WASM acceleration enabled for browser inference.',
+                );
+              } else {
+                const recommendedBackend =
+                  deviceStats.ramGb >= 8 ? 'opencl' : 'vulkan';
+                setAccelerator('GPU');
+                setComputeBackend(recommendedBackend as any);
+                setHardwareState('gpuLayers', deviceStats.ramGb >= 8 ? 33 : 15);
+                Alert.alert(
+                  'Optimization Applied',
+                  `${recommendedBackend.toUpperCase()} GPU mapped to ${deviceStats.cores} cores.`,
+                );
+              }
+            }}
+            activeOpacity={0.8}
+            className="flex-row items-center justify-center w-full py-3.5 mb-4 rounded-xl bg-[#6366F1] shadow-[0_0_20px_rgba(99,102,241,0.3)]"
+          >
+            <Settings2 size={16} color="white" className="mr-2" />
+            <Text className="text-sm font-bold tracking-wide text-white">
+              Apply Recommended Settings
+            </Text>
+          </TouchableOpacity>
+
+          <View className="flex-row items-center px-4 py-3 mb-6 border rounded-xl bg-[#1a1a2e]/50 border-[#6366F1]/20">
+            <Info size={14} color={THEME.primary} className="mr-3 shrink-0" />
+            <Text className="text-[11px] font-medium leading-5 text-[#94A3B8]">
+              {IS_WEB 
+                ? "Web Platform: Inference is routed via local HTTP gateway (Ollama/LM Studio). Hardware settings here affect the local runner's configuration if supported."
+                : computeBackend === 'opencl'
+                  ? `OpenCL GPU — best for high-end SoC (${deviceStats.cores} cores detected)`
+                  : computeBackend === 'vulkan'
+                    ? `Vulkan GPU — optimal for mid-range SoC (${deviceStats.cores} cores detected)`
+                    : `CPU Fallback — stable but slow. Reduce GPU layers to prevent crashes.`}
+            </Text>
+          </View>
+
+          <View className="flex-row items-center justify-between mb-4">
+            <Text className="text-xs font-bold text-white/80">
+              Manual Override
+            </Text>
+            <ChevronUp size={16} color={THEME.slate} />
+          </View>
+
+          <View className="flex-row gap-2 mb-8">
+            {(['cpu', 'vulkan', 'opencl', 'metal'] as const).map((backend) => (
+              <TouchableOpacity
+                key={backend}
+                onPress={() => {
+                  setComputeBackend(backend);
+                  if (backend === 'cpu') {
+                    setAccelerator('CPU');
+                    setHardwareState('gpuLayers', 0);
+                  } else setAccelerator('GPU');
+                }}
+                className={cn(
+                  'flex-1 py-3.5 items-center rounded-xl border transition-all',
+                  computeBackend === backend
+                    ? 'bg-[#6366F1] border-[#6366F1]'
+                    : 'bg-[#1a1a2e] border-transparent',
+                )}
+              >
+                <Text
+                  className={cn(
+                    'text-xs font-bold tracking-wide',
+                    computeBackend === backend ? 'text-white' : 'text-white/50',
+                  )}
+                >
+                  {backend.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View className="flex-row items-center justify-between mb-5">
+            <Text className="text-sm font-medium text-white/90">
+              GPU Layers
+            </Text>
+            <View className="px-3 py-1.5 border rounded-lg bg-black/40 border-white/5">
+              <Text className="text-xs font-bold text-white">{safeLayers}</Text>
+            </View>
+          </View>
+
+          <View className="justify-center flex-1 mx-2 mb-6">
+            <Slider
+              style={{ width: '100%', height: 40 }}
+              minimumValue={0}
+              maximumValue={99}
+              step={1}
+              value={safeLayers}
+              onValueChange={(val) =>
+                setHardwareState('gpuLayers', Math.round(val))
+              }
+              minimumTrackTintColor={THEME.primary}
+              maximumTrackTintColor="#ffffff30"
+              thumbTintColor={THEME.primary}
+              disabled={accelerator === 'CPU'}
+            />
+          </View>
+        </GlassCard>
+
+        <View className="mb-10">
+          <Text className="mb-2 text-[13px] font-bold text-white/90 ml-1 tracking-wide">
+            Local API Server
+          </Text>
+          <Text className="text-[11px] text-[#94A3B8] mb-4 ml-1">
+            {IS_WEB 
+              ? "Configure the port for your local inference gateway (Ollama/LM Studio)."
+              : "Expose the loaded model to OpenAI-compatible local clients."}
+          </Text>
+
+          <GlassCard className="p-5 border-white/5 bg-[#12121A]/80 rounded-[24px]">
+            <View className="flex-row items-center justify-between mb-5">
+              <View className="flex-row items-center flex-1 gap-4 pr-4">
+                <View className="p-2.5 bg-[#1a1a2e] rounded-xl">
+                  <Server size={18} color="#94A3B8" />
+                </View>
+                <View className="flex-1 shrink">
+                  <Text className="text-sm font-bold tracking-wide text-white">
+                    {IS_WEB ? "Gateway Endpoint" : "API Gateway Link"}
+                  </Text>
+                  <Text className="text-[10px] text-white/40 mt-1 font-mono">
+                    http://127.0.0.1:{port}/v1
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={isLocalServerEnabled}
+                onValueChange={toggleServer}
+                trackColor={{ false: '#3F3F46', true: THEME.primary }}
+                thumbColor={'#ffffff'}
+              />
+            </View>
+
+            <View className="flex-row items-center px-4 overflow-hidden border h-11 bg-black/60 border-white/10 rounded-xl">
+              <Text className="mr-3 text-xs font-bold text-white/50">PORT</Text>
+              <TextInput
+                value={port}
+                onChangeText={setPort}
+                keyboardType="number-pad"
+                className="flex-1 font-mono text-sm text-white"
+                editable={!isLocalServerEnabled}
+                style={IS_WEB ? ({ outlineStyle: 'none' } as any) : {}}
+              />
+            </View>
+            
+            {IS_WEB && (
+              <TouchableOpacity 
+                onPress={() => Linking.openURL('https://ollama.com/')}
+                className="flex-row items-center justify-center gap-2 mt-4"
+              >
+                <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">GET OLLAMA</Text>
+                <ExternalLink size={10} color={THEME.cyan} />
+              </TouchableOpacity>
+            )}
+          </GlassCard>
+        </View>
+      </FadeIn>
+    );
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
       <AmbientArchitecture />
-
       <SafeAreaView style={{ flex: 1, zIndex: 1 }} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1 }}
         >
+          {/* Header */}
           <View className="z-50 flex-row items-center justify-between w-full max-w-3xl px-4 pt-4 mx-auto md:px-8">
             <TouchableOpacity
               onPress={handleReturn}
@@ -928,7 +1029,12 @@ export default function LocalModelsScreen() {
 
           <ScrollView
             showsVerticalScrollIndicator={false}
+            // FIX: keyboardShouldPersistTaps="handled" prevents ScrollView from 
+            // aggressively hijacking touches intended for children (Sliders/Buttons)
             keyboardShouldPersistTaps="handled"
+            // FIX: On Web, prevent the ScrollView from becoming a responder when 
+            // interacting with sliders by using scrollEnabled logic if needed, 
+            // but primarily handled via persistTaps.
             contentContainerStyle={{
               flexGrow: 1,
               maxWidth: 800,
@@ -942,63 +1048,43 @@ export default function LocalModelsScreen() {
               className="flex-row w-full mt-2 mb-8 border-b md:mt-4 border-white/10"
               style={{ zIndex: 10 }}
             >
-              <TouchableOpacity
-                onPress={() => setActiveTab('models')}
-                activeOpacity={0.7}
-                className={cn(
-                  'flex-1 items-center pb-4 border-b-2',
-                  activeTab === 'models'
-                    ? 'border-[#00F0FF]'
-                    : 'border-transparent',
-                )}
-              >
-                <Database
-                  size={16}
-                  color={activeTab === 'models' ? THEME.cyan : THEME.slate}
-                  className="mb-2"
-                />
-                <Text
+              {(['models', 'hardware'] as const).map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => setActiveTab(tab)}
+                  activeOpacity={0.7}
                   className={cn(
-                    'text-[9px] font-black uppercase tracking-[2px]',
-                    activeTab === 'models'
-                      ? 'text-[#00F0FF]'
-                      : 'text-slate-500',
+                    'flex-1 items-center pb-4 border-b-2',
+                    activeTab === tab
+                      ? 'border-[#00F0FF]'
+                      : 'border-transparent',
                   )}
                 >
-                  Models
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => setActiveTab('hardware')}
-                activeOpacity={0.7}
-                className={cn(
-                  'flex-1 items-center pb-4 border-b-2',
-                  activeTab === 'hardware'
-                    ? 'border-[#00F0FF]'
-                    : 'border-transparent',
-                )}
-              >
-                <Settings2
-                  size={16}
-                  color={activeTab === 'hardware' ? THEME.cyan : THEME.slate}
-                  className="mb-2"
-                />
-                <Text
-                  className={cn(
-                    'text-[9px] font-black uppercase tracking-[2px]',
-                    activeTab === 'hardware'
-                      ? 'text-[#00F0FF]'
-                      : 'text-slate-500',
+                  {tab === 'models' ? (
+                    <Database
+                      size={16}
+                      color={activeTab === tab ? THEME.cyan : THEME.slate}
+                      className="mb-2"
+                    />
+                  ) : (
+                    <Settings2
+                      size={16}
+                      color={activeTab === tab ? THEME.cyan : THEME.slate}
+                      className="mb-2"
+                    />
                   )}
-                >
-                  Hardware
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    className={cn(
+                      'text-[9px] font-black uppercase tracking-[2px]',
+                      activeTab === tab ? 'text-[#00F0FF]' : 'text-slate-500',
+                    )}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-
-            {activeTab === 'models' && renderModelsTab()}
-            {activeTab === 'hardware' && renderHardwareTab()}
+            {activeTab === 'models' ? renderModelsTab() : renderHardwareTab()}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>

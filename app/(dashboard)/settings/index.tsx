@@ -36,6 +36,8 @@ import {
   Terminal,
   ArrowBigLeftDash,
   LucideIcon,
+  Brain,
+  BadgeInfo,
 } from 'lucide-react-native';
 
 // ─── STATE & UI COMPONENTS ───────────────────────────────────────────────────
@@ -70,7 +72,7 @@ const THEME = {
   green: '#048766',
   red: '#FF3333',
   orange: '#de8304',
-  slate: '#94A3B8',
+  slate: '#032982',
   amber: '#F59E0B',
 } as const;
 
@@ -528,10 +530,10 @@ export default function SettingsHubScreen() {
         title: 'AI MODELS',
         desc: 'Gemma 4, LOCAL LLM',
         color: 'pink',
-        iconHex: THEME.pink,
-        icon: LifeBuoy,
+        iconHex: THEME.amber,
+        icon: Brain,
         customBg: `${THEME.amber}08`,
-        customBorder: `${THEME.pink}25`,
+        customBorder: `${THEME.amber}25`,
         routeOverride: '/settings/models' as Href,
       },
       {
@@ -544,6 +546,17 @@ export default function SettingsHubScreen() {
         customBg: `${THEME.green}08`,
         customBorder: `${THEME.green}25`,
         routeOverride: '/settings/support' as Href,
+      },
+      {
+        id: 'about',
+        title: 'VeraxAI Pipeline',
+        desc: 'Simulator VeraxAI Pipeline',
+        color: 'green',
+        iconHex: THEME.slate,
+        icon: BadgeInfo,
+        customBg: `${THEME.slate}08`,
+        customBorder: `${THEME.slate}25`,
+        routeOverride: '/settings/about' as Href,
       },
     ];
 
@@ -612,7 +625,10 @@ export default function SettingsHubScreen() {
               activeOpacity={0.7}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
-              <ArrowBigLeftDash size={18} color={THEME.cyan} />
+              <ArrowBigLeftDash size={20} color={THEME.cyan} />
+              <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase hidden md:flex">
+                RETURN
+              </Text>
             </TouchableOpacity>
           </View>
 

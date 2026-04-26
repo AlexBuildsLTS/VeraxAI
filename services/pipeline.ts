@@ -1,11 +1,20 @@
 /**
  * services/pipeline.ts
- * Pipeline Orchestration Service
+ * Upgraded Pipeline Orchestration Service (2026 Enterprise Tier)
+ * ══════════════════════════════════════════════════════════════════════════════
+ * PROTOCOLS:
+ * 1. LOCAL-FIRST ROUTING: Checks useLocalAIStore to detect downloaded models.
+ * 2. NATIVE EXECUTION: Routes prompts to localInference.ts for on-device processing.
+ * 3. NO REGRESSION: 100% preservation of Batch processing, Chunking, and Retry logic.
+ * 4. DB SYNC: Syncs local inference results back to ai_insights table.
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 
 import { supabase } from '../lib/supabase/client';
 import { Database } from '../types/database/database.types';
 import { parseVideoUrl } from '../utils/videoParser';
+import { useLocalAIStore } from '../store/useLocalAIStore';
+import { runLocalInference } from './localInference';
 
 type VideoInsert = Database['public']['Tables']['videos']['Insert'];
 type VideoStatus = Database['public']['Enums']['video_status'];
@@ -57,7 +66,7 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 
 export class PipelineService {
     /**
-     * Process a single video — background/headless path.
+     * Process a single video — Dynamically routes between Local SoC and Edge Cloud.
      */
     static async processSingleVideo(
         url: string,
@@ -74,6 +83,7 @@ export class PipelineService {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.user) throw new Error('UNAUTHORIZED: Valid session required.');
 
+            // 1. Initialize DB Record
             const { data: videoRecord, error: dbError } = await supabase
                 .from('videos')
                 .insert({
@@ -88,6 +98,37 @@ export class PipelineService {
 
             if (dbError || !videoRecord) throw new Error(`DB_SYNC_ERROR: ${dbError?.message}`);
 
+            // 2. Local-First Execution Logic
+            const localState = useLocalAIStore.getState();
+            const isLocalReady = localState.activeModelId && 
+                                localState.downloadedModels.includes(localState.activeModelId);
+
+            if (isLocalReady && clientTranscript) {
+                console.log(`[Pipeline] Routing to Local Hardware: ${localState.activeModelId}`);
+                try {
+                    // Executes inference using exact user slider parameters (Temp, Threads, Layers)
+                    const result = await runLocalInference(
+                        `Summarize this transcript: ${clientTranscript}`,
+                        (token) => console.log(`[Local:Stream] ${token}`)
+                    );
+
+                    // Sync result to Supabase AI Insights table
+                    await supabase.from('ai_insights').insert({
+                        video_id: videoRecord.id,
+                        summary: result,
+                        ai_model: localState.activeModelId!,
+                        language
+                    });
+
+                    // Mark completion in DB
+                    await supabase.from('videos').update({ status: 'completed' }).eq('id', videoRecord.id);
+                    return { success: true, videoId: videoRecord.id };
+                } catch (localErr) {
+                    console.warn('[Pipeline] Native Engine faulted. Falling back to Edge Cloud.', localErr);
+                }
+            }
+
+            // 3. Fallback: Supabase Edge Function
             await withRetry(async () => {
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/process-video`, {
                     method: 'POST',
@@ -121,7 +162,7 @@ export class PipelineService {
     }
 
     /**
-     * High-volume batch orchestrator.
+     * Batch job orchestrator — Restored without regression.
      */
     static async submitBatch(
         urls: string[],
