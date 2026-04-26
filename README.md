@@ -10,6 +10,12 @@
 
 ---
 
+> [!TIP]
+> **Interactive Pipeline Simulation Available**
+> You can visualize the entire VeraxAI Hybrid Intelligence Pipeline in action. Open the `STRUCTURE.md` file and scroll to the bottom to find the **Live Orchestrator Simulation**. This interactive tool allows you to test different extraction tiers and synthesis engines in real-time.
+
+---
+
 ## 🌐 Platform Overview
 
 **VeraxAI** is a premium, enterprise-grade transcription and audio-intelligence platform engineered for high-throughput compliance teams and content creators. It delivers lightning-fast, 95%+ accurate video-to-text conversion across 30+ languages.

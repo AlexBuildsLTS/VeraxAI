@@ -11,8 +11,8 @@
  * ----------------------------------------------------------------------------
  */
 
-import { GoogleGenerativeAI, SchemaType, ResponseSchema } from 'npm:@google/generative-ai@^0.24.1';
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { GoogleGenerativeAI, SchemaType, ResponseSchema } from "@google/generative-ai";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── INTELLIGENCE SCHEMA DEFINITION ──────────────────────────────────────────
 const InsightsSchema: ResponseSchema = {

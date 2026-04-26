@@ -1,23 +1,14 @@
-/**
- * store/useVideoStore.ts
- * Ironclad State Management & Pipeline Orchestration (2026 Enterprise)
- * ----------------------------------------------------------------------------
- * FEATURES:
- * 1. STRICT SYNC: Fully mapped to your updated database.types.ts schema.
- * 2. PROXY TIMEOUT SHIELDS: Client-side extractors are wrapped in a 12s timeout race.
- * 3. DEEPGRAM FALLBACK ALIGNMENT: Passes null transcript if scraper fails, triggering backend Deepgram.
- * 4. TYPE SAFE: React Native environment-safe timeouts (no NodeJS types).
- */
-
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase/client';
 import { Database } from '../types/database/database.types';
-
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
 import { parseVideoUrl } from '../utils/videoParser';
 import { fetchClientCaptions } from '../utils/clientCaptions';
 import { ContentDifficulty, ProcessVideoRequest } from '../types/api';
+import { useLocalAIStore } from './useLocalAIStore';
+import { runLocalInference } from '../services/localInference';
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
 
 type VideoRow = Database['public']['Tables']['videos']['Row'];
 type VideoStatus = Database['public']['Enums']['video_status'];
@@ -34,6 +25,10 @@ interface ProcessingOptions {
   difficulty: ContentDifficulty;
 }
 
+interface ExtendedProcessRequest extends ProcessVideoRequest {
+  skip_ai?: boolean;
+}
+
 interface VideoState {
   videos: VideoRow[];
   activeVideoId: string | null;
@@ -45,7 +40,6 @@ interface VideoState {
   jobStartTime: number | null;
   jobEndTime: number | null;
 
-  // Actions
   setActiveVideoId: (id: string | null) => void;
   setError: (error: string | null) => void;
   fetchUserVideos: () => Promise<void>;
@@ -59,8 +53,6 @@ interface VideoState {
   clearActiveVideo: () => void;
 }
 
-// ─── UTILITY: STRICT PROMISE TIMEOUT ────────────────────────────────────────
-// Using ReturnType<typeof setTimeout> fixes the NodeJS.Timeout React Native error
 const withTimeout = <T>(promise: Promise<T>, ms: number, fallbackName: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -165,7 +157,6 @@ export const useVideoStore = create<VideoState>((set, get) => ({
 
       recordEvent('DB_PROVISIONING', 'info', `Target Media ID: ${parsed.videoId}`);
 
-      // 1. Establish the Database Record to track progress
       const { data: videoRecord, error: dbError } = await supabase
         .from('videos')
         .insert({
@@ -185,13 +176,19 @@ export const useVideoStore = create<VideoState>((set, get) => ({
       targetDbId = videoRecord.id;
       set((state) => ({ activeVideoId: targetDbId, videos: [videoRecord, ...state.videos] }));
 
-      // ─── CLIENT EXTRACTION (FAST-PATH) ───
+      const localState = useLocalAIStore.getState();
+      const activeModel = localState.activeModelId;
+      const isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
+
+      if (isLocalModelReady) {
+        recordEvent('HYBRID_MODE_ENGAGED', 'info', `Local Node Ready: ${activeModel}. Instructing Edge to skip Cloud AI.`);
+      }
+
       recordEvent('FAST_PATH_INIT', 'info', 'Attempting client-side native extraction...');
 
       let clientTranscript: string | null = null;
 
       try {
-        // Strict 12s timeout for caption scraping. Backend will fetch audio if this fails.
         clientTranscript = await withTimeout(
           fetchClientCaptions(parsed.videoId, parsed.platform),
           12000,
@@ -207,17 +204,16 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         recordEvent('FAST_PATH_FAIL', 'warn', 'Proxy timed out. Seamlessly escalating to Verbum Edge.');
       }
 
-      // ─── EDGE DELEGATION ───
       recordEvent('SERVER_HANDOFF', 'info', 'Relaying command payload to Edge Processing Node...');
 
-      // Enforce the exact ProcessVideoRequest type expected by your API
-      const requestPayload: ProcessVideoRequest = {
+      const requestPayload: ExtendedProcessRequest = {
         video_id: targetDbId,
         video_url: parsed.normalizedUrl,
         language: options.language,
         difficulty: options.difficulty,
         transcript_text: clientTranscript,
-        audio_url: null // The backend will use audio.ts to resolve this if clientTranscript is null
+        audio_url: null,
+        skip_ai: isLocalModelReady
       };
 
       const edgeResponse = await fetch(
@@ -244,9 +240,41 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         throw new Error(result.error || 'The remote Edge Node encountered a fatal processing error.');
       }
 
-      recordEvent('PIPELINE_FINALIZED', 'success', 'Assets compiled and stored in vault.');
-      set({ jobEndTime: Date.now() });
+      if (result.is_local_handoff && activeModel) {
+        recordEvent('LOCAL_EXECUTION_INIT', 'info', 'Edge extraction complete. Executing prompt locally...');
 
+        try {
+          const localSummary = await runLocalInference(
+            result.prompt,
+            (token) => console.log(`[Local:Stream] ${token}`)
+          );
+
+          const { error: insightError } = await supabase.from('ai_insights').upsert({
+            video_id: targetDbId,
+            summary: localSummary,
+            language: options.language,
+            ai_model: activeModel,
+            processed_at: new Date().toISOString()
+          });
+
+          if (insightError) throw new Error(`LOCAL_SYNC_FAIL: ${insightError.message}`);
+
+          await supabase.from('videos').update({
+            status: 'completed',
+            processing_completed_at: new Date().toISOString()
+          }).eq('id', targetDbId);
+
+          recordEvent('PIPELINE_FINALIZED', 'success', 'Local inference complete. Vault synchronized.');
+
+        } catch (localErr: unknown) {
+          const msg = localErr instanceof Error ? localErr.message : String(localErr);
+          throw new Error(`LOCAL_HARDWARE_FAULT: ${msg}`);
+        }
+      } else {
+        recordEvent('PIPELINE_FINALIZED', 'success', 'Assets compiled and stored in vault.');
+      }
+
+      set({ jobEndTime: Date.now() });
       await get().fetchUserVideos();
 
     } catch (err: unknown) {

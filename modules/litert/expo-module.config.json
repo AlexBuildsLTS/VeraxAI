@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["LiteRTModule"]
+  },
+  "android": {
+    "modules": ["com.litertjs.core.LiteRTModule"]
+  }
+}

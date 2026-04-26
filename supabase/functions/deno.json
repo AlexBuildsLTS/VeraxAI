@@ -9,9 +9,13 @@
   },
   "imports": {
     "std/": "https://deno.land/std@0.168.0/",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
-    "@supabase/supabase-js/*": "https://esm.sh/@supabase/supabase-js@2/*",
-    "@google/generative-ai": "https://esm.sh/@google/generative-ai@0.21.0",
-    "@google/generative-ai/language": "https://esm.sh/@google/generative-ai@0.24.1/language"
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
+    "@google/generative-ai": "npm:@google/generative-ai@^0.24.1",
+    "@google/generative-ai/language": "https://esm.sh/@google/generative-ai@0.24.1/language",
+    "openai": "npm:openai@^4.47.1"
+  },
+  "devImports": {
+    "std/": "https://deno.land/std@0.168.0/",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2"
   }
 }
