@@ -6,7 +6,7 @@
  * 1. LOCAL-FIRST ROUTING: Checks useLocalAIStore to detect downloaded models.
  * 2. NATIVE EXECUTION: Routes prompts to localInference.ts for on-device processing.
  * 3. NO REGRESSION: 100% preservation of Batch processing, Chunking, and Retry logic.
- * 4. DB SYNC: Syncs local inference results back to ai_insights table.
+ * 4. DB SYNC: Features Elite JSON Extraction for perfect schema alignment.
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -100,27 +100,58 @@ export class PipelineService {
 
             // 2. Local-First Execution Logic
             const localState = useLocalAIStore.getState();
-            const isLocalReady = localState.activeModelId && 
-                                localState.downloadedModels.includes(localState.activeModelId);
+            const isLocalReady = localState.activeModelId &&
+                localState.downloadedModels.includes(localState.activeModelId);
 
             if (isLocalReady && clientTranscript) {
                 console.log(`[Pipeline] Routing to Local Hardware: ${localState.activeModelId}`);
                 try {
-                    // Executes inference using exact user slider parameters (Temp, Threads, Layers)
-                    const result = await runLocalInference(
-                        `Summarize this transcript: ${clientTranscript}`,
-                        (token) => console.log(`[Local:Stream] ${token}`)
+                    // STRICT SCHEMA PROMPT: Ensuring the local model knows exactly what to output.
+                    const structuredPrompt = `Analyze the following transcript. You MUST output ONLY a valid JSON object matching this exact schema:
+{
+  "summary": "A detailed paragraph summarizing the content",
+  "conclusion": "A brief 2-sentence final thought",
+  "chapters": [{"title": "String", "timestamp": "MM:SS", "description": "String"}],
+  "key_takeaways": ["Point 1", "Point 2"],
+  "seo_metadata": {"tags": ["tag1"], "description": "Meta desc"}
+}
+Do not include markdown blocks or conversational text. Output pure JSON.
+
+Transcript:
+${clientTranscript}`;
+
+                    const rawLocalOutput = await runLocalInference(
+                        structuredPrompt,
+                        (token) => { } // Suppress stream logs for background tasks to improve performance
                     );
 
-                    // Sync result to Supabase AI Insights table
+                    // ELITE JSON EXTRACTOR (Synced with useVideoStore)
+                    let parsedInsights: any;
+                    try {
+                        const firstBrace = rawLocalOutput.indexOf('{');
+                        const lastBrace = rawLocalOutput.lastIndexOf('}');
+                        if (firstBrace === -1 || lastBrace === -1) {
+                            throw new Error("No JSON object bounds found in model output.");
+                        }
+                        const cleanJsonString = rawLocalOutput.substring(firstBrace, lastBrace + 1);
+                        parsedInsights = JSON.parse(cleanJsonString);
+                    } catch (jsonErr) {
+                        console.error("Local Engine JSON Failure in Pipeline:", rawLocalOutput);
+                        throw new Error("LITERT_SCHEMA_FAULT: The local model failed to output a strictly formatted JSON object.");
+                    }
+
+                    // Strict DB Sync matching database.types.ts
                     await supabase.from('ai_insights').insert({
                         video_id: videoRecord.id,
-                        summary: result,
+                        summary: parsedInsights.summary || "Summary generation failed.",
+                        conclusion: parsedInsights.conclusion || null,
+                        chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
+                        key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
+                        seo_metadata: parsedInsights.seo_metadata || {},
                         ai_model: localState.activeModelId!,
                         language
                     });
 
-                    // Mark completion in DB
                     await supabase.from('videos').update({ status: 'completed' }).eq('id', videoRecord.id);
                     return { success: true, videoId: videoRecord.id };
                 } catch (localErr) {

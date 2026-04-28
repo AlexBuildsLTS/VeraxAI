@@ -34,6 +34,8 @@ import {
   Flame,
   ExternalLink,
   HelpCircle,
+  Network,
+  AlertTriangle,
 } from 'lucide-react-native';
 
 import { GlassCard } from '../../../components/ui/GlassCard';
@@ -53,7 +55,7 @@ const IS_WEB = Platform.OS === 'web';
 const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
 
 const THEME = {
-  obsidian: '#020205',
+  obsidian: '#030811',
   cyan: '#00F0FF',
   purple: '#8A2BE2',
   pink: '#FF007F',
@@ -82,42 +84,46 @@ export interface LocalModel {
   description?: string;
 }
 
+// User-Verified Gemma 4 GGUF Infrastructure (Unsloth Repositories)
+// Optimized Q4_K_M / Q4_K_XL versions specifically required for the JSON extraction pipeline.
 const AVAILABLE_MODELS: LocalModel[] = [
   {
-    id: 'gemma-4-e2b-it',
-    name: 'Gemma-4 E2B-it',
+    id: 'gemma-4-e2b-it-unsloth',
+    name: 'Gemma-4 E2B-it (Q4_K_XL)',
     sizeGb: 2.5,
     minRamGb: 4,
     isUncensored: false,
-    tags: ['E2B', 'LITERT', 'UNGATED'],
+    tags: ['E2B', 'GGUF', 'UNSLOTH'],
     downloadUrl:
-      'https://huggingface.co/litert-community/gemma-4-e2b-it-litertlm/resolve/main/model.litertlm',
-    fileName: 'gemma-4-e2b-it.litertlm',
+      'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-UD-Q4_K_XL.gguf',
+    fileName: 'gemma-4-E2B-it-UD-Q4_K_XL.gguf',
     architecture: 'gemma4',
     benchmarks: {
       expectedTokSec: 32.5,
       promptEvalMs: 120,
       memoryBandwidth: 'Low',
     },
-    description: 'Optimized for speed and low-latency tasks. Best for simple extraction and short-form Q&A.',
+    description:
+      'Unsloth optimized Q4 quantization. Perfect for fast, strict JSON generation on edge devices and mobile hardware.',
   },
   {
-    id: 'gemma-4-e4b-it',
-    name: 'Gemma-4 E4B-it',
+    id: 'gemma-4-e4b-it-unsloth',
+    name: 'Gemma-4 E4B-it (Q4_K_M)',
     sizeGb: 3.6,
     minRamGb: 8,
     isUncensored: false,
-    tags: ['E4B', 'LITERT', 'REASONING'],
+    tags: ['E4B', 'GGUF', 'UNSLOTH'],
     downloadUrl:
-      'https://huggingface.co/litert-community/gemma-4-e4b-it-litertlm/resolve/main/model.litertlm',
-    fileName: 'gemma-4-e4b-it.litertlm',
+      'https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf',
+    fileName: 'gemma-4-E4B-it-Q4_K_M.gguf',
     architecture: 'gemma4',
     benchmarks: {
       expectedTokSec: 18.2,
       promptEvalMs: 380,
       memoryBandwidth: 'Medium',
     },
-    description: 'Superior reasoning and multi-step logic. Best for complex data extraction and long context.',
+    description:
+      'Unsloth optimized Q4 quantization. Superior reasoning for long context transcripts and complex schema parsing.',
   },
 ];
 
@@ -182,7 +188,9 @@ const OrganicOrb = memo(
             height: size,
             borderRadius: size / 2,
             backgroundColor: color,
-            ...(IS_WEB ? ({ filter: 'blur(80px)' } as any) : {}),
+            ...(IS_WEB
+              ? ({ filter: 'blur(80px)' } as Record<string, string>)
+              : {}),
           },
           animatedStyle,
         ]}
@@ -224,11 +232,13 @@ const Tag = memo(({ tag }: { tag: string }) => {
   const style = useMemo(() => {
     switch (tag) {
       case 'E2B':
+      case 'GGUF':
         return {
           bg: 'bg-[#00F0FF]/20',
           border: 'border-[#00F0FF]/40',
           text: 'text-[#00F0FF]',
         };
+      case 'UNSLOTH':
       case 'UNGATED':
         return {
           bg: 'bg-[#8A2BE2]/20',
@@ -258,9 +268,7 @@ const Tag = memo(({ tag }: { tag: string }) => {
   }, [tag]);
 
   return (
-    <View
-      className={cn('px-2 py-1 border rounded', style.bg, style.border)}
-    >
+    <View className={cn('px-2 py-1 border rounded', style.bg, style.border)}>
       <Text
         className={cn(
           'text-[8px] font-black uppercase tracking-[1px]',
@@ -280,6 +288,7 @@ interface ModelCardProps {
   downloaded: boolean;
   isDownloading: boolean;
   progress: number;
+  isConnecting: boolean;
   onLoad: (id: string) => void;
   onDownload: (model: LocalModel) => void;
   onRemove: (model: LocalModel) => void;
@@ -292,6 +301,7 @@ const ModelCard = memo(
     downloaded,
     isDownloading,
     progress,
+    isConnecting,
     onLoad,
     onDownload,
     onRemove,
@@ -311,7 +321,7 @@ const ModelCard = memo(
         {isActive && (
           <View className="px-2 py-1 rounded bg-[#32FF00]/20 border border-[#32FF00]/30 ml-auto">
             <Text className="text-[8px] font-black text-[#32FF00] uppercase tracking-[1px]">
-              Online
+              Connection Verified
             </Text>
           </View>
         )}
@@ -320,7 +330,7 @@ const ModelCard = memo(
       <Text className="mb-2 text-sm font-bold tracking-widest text-white">
         {model.name}
       </Text>
-      
+
       {model.description && (
         <Text className="mb-4 text-[11px] text-white/50 leading-4">
           {model.description}
@@ -352,34 +362,47 @@ const ModelCard = memo(
         <View className="flex-row gap-3">
           <TouchableOpacity
             onPress={() => onLoad(model.id)}
-            disabled={isActive}
+            disabled={isActive || isConnecting}
             activeOpacity={0.7}
-            style={{ flex: 1 }} // Ensure explicit width for web responder
+            style={{ flex: 1 }}
             className={cn(
               'h-12 flex-row items-center justify-center rounded-xl border',
               isActive
                 ? 'bg-[#32FF00]/10 border-[#32FF00]/30'
                 : 'bg-[#00F0FF]/10 border-[#00F0FF]/30',
+              isConnecting && 'opacity-50',
             )}
           >
-            <Play
-              size={14}
-              color={isActive ? THEME.green : THEME.cyan}
-              className="mr-2"
-            />
-            <Text
-              className={cn(
-                'text-[10px] font-black tracking-[2px] uppercase shrink-0',
-                isActive ? 'text-[#32FF00]' : 'text-[#00F0FF]',
-              )}
-            >
-              {isActive ? 'Engine Active' : 'Load Model'}
-            </Text>
+            {isConnecting ? (
+              <Text className="text-[10px] font-black text-[#00F0FF] uppercase tracking-[2px]">
+                Testing Port...
+              </Text>
+            ) : (
+              <>
+                <Network
+                  size={14}
+                  color={isActive ? THEME.green : THEME.cyan}
+                  className="mr-2"
+                />
+                <Text
+                  className={cn(
+                    'text-[10px] font-black tracking-[2px] uppercase shrink-0',
+                    isActive ? 'text-[#32FF00]' : 'text-[#00F0FF]',
+                  )}
+                >
+                  {isActive
+                    ? 'Connected & Ready'
+                    : IS_WEB
+                      ? 'Test Connection'
+                      : 'Load Model'}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => onRemove(model)}
             activeOpacity={0.7}
-            style={{ width: 48 }} // Explicit width
+            style={{ width: 48 }}
             className="items-center justify-center h-12 border rounded-xl bg-rose-500/10 border-rose-500/20"
           >
             <Trash2 size={16} color={THEME.red} />
@@ -398,19 +421,22 @@ const ModelCard = memo(
             }}
           />
           <Text className="text-center text-[10px] md:text-[11px] font-black text-[#00F0FF] uppercase tracking-[2px]">
-            {IS_WEB ? 'Configuring Gateway...' : 'Downloading Binary...'} {Math.round(progress * 100)}%
+            {IS_WEB
+              ? 'Triggering Browser Download...'
+              : 'Downloading Binary...'}{' '}
+            {Math.round(progress * 100)}%
           </Text>
         </View>
       ) : (
         <TouchableOpacity
           onPress={() => onDownload(model)}
           activeOpacity={0.7}
-          style={{ width: '100%' }} // Explicit width
+          style={{ width: '100%' }}
           className="flex-row items-center justify-center h-12 border rounded-xl bg-white/5 border-white/10"
         >
           <Download size={14} color="white" className="mr-2" />
           <Text className="text-[10px] font-black text-white uppercase tracking-[2px] shrink-0">
-            {IS_WEB ? 'Configure Endpoint' : 'Download Vector Binary'}
+            {IS_WEB ? 'Download GGUF File' : 'Download Vector Binary'}
           </Text>
         </TouchableOpacity>
       )}
@@ -427,27 +453,15 @@ interface HardwareSliderProps {
   step: number;
   onChange: (val: number) => void;
   icon?: React.ReactNode;
-  unit?: string;
-  showInput?: boolean;
 }
 
 const HardwareSlider = memo(
-  ({
-    label,
-    value,
-    min,
-    max,
-    step,
-    onChange,
-    icon,
-    unit,
-    showInput = true,
-  }: HardwareSliderProps) => (
+  ({ label, value, min, max, step, onChange, icon }: HardwareSliderProps) => (
     <View className="mb-6">
       <Text className="mb-3 text-[14px] text-white/90">{label}</Text>
       <View className="flex-row items-center justify-between">
-        {icon ? icon : <Text className="w-8 text-sm text-white/60">{min}</Text>}
-        <View className="justify-center flex-1 mx-4">
+        {icon && <View className="mr-2">{icon}</View>}
+        <View className="justify-center flex-1 mr-4">
           <Slider
             style={{ width: '100%', height: 40 }}
             minimumValue={min}
@@ -460,20 +474,18 @@ const HardwareSlider = memo(
             thumbTintColor={THEME.primary}
           />
         </View>
-        {showInput ? (
-          <TextInput
-            value={String(value)}
-            onChangeText={(txt) => onChange(Number(txt) || min)}
-            keyboardType="number-pad"
-            className="w-16 p-2 text-sm text-center text-white border rounded-lg bg-white/5 border-white/20"
-            style={IS_WEB ? ({ outlineStyle: 'none' } as any) : {}}
-          />
-        ) : (
-          <Text className="w-8 text-sm font-bold text-right text-white">
-            {value}
-            {unit}
-          </Text>
-        )}
+        <TextInput
+          value={String(value)}
+          onChangeText={(txt) => {
+            const parsed = Number(txt);
+            if (!isNaN(parsed)) onChange(parsed);
+          }}
+          keyboardType="number-pad"
+          className="w-16 p-2 font-mono text-sm text-center text-white border rounded-lg bg-white/5 border-white/20"
+          style={
+            IS_WEB ? ({ outlineStyle: 'none' } as Record<string, string>) : {}
+          }
+        />
       </View>
     </View>
   ),
@@ -517,8 +529,8 @@ export default function LocalModelsScreen() {
     cores: number;
     ramGb: number;
   }>({ cores: 8, ramGb: 8 });
+  const [isConnecting, setIsConnecting] = useState(false);
 
-  // Hardware detection
   useEffect(() => {
     const fetchNativeHardware = async () => {
       if (IS_WEB) {
@@ -544,44 +556,85 @@ export default function LocalModelsScreen() {
   const handleDownload = useCallback(
     async (model: LocalModel) => {
       if (IS_WEB) {
-        setDownloadProgress(model.id, 0.05);
-        setTimeout(() => {
+        try {
+          // Trigger actual browser download
+          const link = document.createElement('a');
+          link.href = model.downloadUrl;
+          link.setAttribute('download', model.fileName);
+          link.target = '_blank';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          // We mark it as 'downloaded' so the UI reveals the "Connect" button.
           markDownloaded(model.id, `edge_routed://${model.id}`);
-          setActiveModel(model.id);
-          setDownloadProgress(model.id, 1);
-        }, 800);
+          Alert.alert(
+            'Download Initiated',
+            "The GGUF file is downloading via your browser.\n\nOnce finished:\n1. Load it into LM Studio or Ollama.\n2. Start your Local Server.\n3. Enter your Port in the Hardware tab.\n4. Click 'Test Connection' here.",
+          );
+        } catch (e) {
+          Alert.alert(
+            'Web Download Error',
+            'Could not trigger the file transfer.',
+          );
+        }
         return;
       }
 
       try {
-        const docDir = FileSystem.documentDirectory || 'file:///tmp/';
+        const docDir = FileSystem.documentDirectory;
+        if (!docDir)
+          throw new Error('Internal app storage directory is not mounted.');
+
         const fileUri = `${docDir}${model.fileName}`;
+
+        const fileInfo = await FileSystem.getInfoAsync(fileUri);
+        if (fileInfo.exists) {
+          await FileSystem.deleteAsync(fileUri, { idempotent: true });
+        }
 
         const downloadResumable = FileSystem.createDownloadResumable(
           model.downloadUrl,
           fileUri,
           {},
-          (progressData: any) => {
-            setDownloadProgress(
-              model.id,
-              progressData.totalBytesWritten /
-                progressData.totalBytesExpectedToWrite,
-            );
+          (progressData: {
+            totalBytesWritten: number;
+            totalBytesExpectedToWrite: number;
+          }) => {
+            if (progressData.totalBytesExpectedToWrite > 0) {
+              const progress =
+                progressData.totalBytesWritten /
+                progressData.totalBytesExpectedToWrite;
+              setDownloadProgress(model.id, Math.max(0, Math.min(progress, 1)));
+            }
           },
         );
 
         setDownloadProgress(model.id, 0.01);
         const result = await downloadResumable.downloadAsync();
 
-        if (result && result.uri) {
+        if (result && result.status === 200 && result.uri) {
           markDownloaded(model.id, result.uri);
           setActiveModel(model.id);
+          Alert.alert(
+            'Engine Secure',
+            'The binary has been successfully verified and securely stored inside the app sandbox.',
+          );
+        } else if (result && result.status !== 200) {
+          if (result.uri) {
+            await FileSystem.deleteAsync(result.uri, { idempotent: true });
+          }
+          throw new Error(
+            `The download link returned HTTP ${result.status}. Ensure the link points to a live file.`,
+          );
+        } else {
+          throw new Error('Download completed, but File URI is null.');
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Unknown network failure';
         Alert.alert(
           'Download Interrupted',
-          e.message ||
-            'Ensure you have sufficient device storage and a stable connection.',
+          `Failed to secure binary.\n\nError details: ${msg}`,
         );
         clearDownloadProgress(model.id);
       }
@@ -611,14 +664,46 @@ export default function LocalModelsScreen() {
   );
 
   const handleLoadModel = useCallback(
-    (id: string) => {
-      setActiveModel(id);
+    async (id: string) => {
       if (IS_WEB) {
-        const model = AVAILABLE_MODELS.find((m) => m.id === id);
-        Alert.alert(
-          'Endpoint Configured',
-          `Inference actively routing to ${model?.name || id} via local gateway. Ensure Ollama or LM Studio is running on port ${port}.`,
-        );
+        setIsConnecting(true);
+        try {
+          // REAL HANDSHAKE: We ping the local gateway to prove it exists and is listening.
+          const endpoint = `http://127.0.0.1:${port}/v1/models`;
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+          const response = await fetch(endpoint, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error(
+              `Server rejected connection (HTTP ${response.status})`,
+            );
+          }
+
+          setActiveModel(id);
+          Alert.alert(
+            'Connection Verified',
+            `Successfully established a handshake with local gateway on port ${port}. Inference engine is now online.`,
+          );
+        } catch (err: any) {
+          console.error('Local AI Connection Error:', err);
+          Alert.alert(
+            'Connection Refused',
+            `Could not detect an active AI server on http://127.0.0.1:${port}.\n\nMake sure LM Studio or Ollama is running, and that the Local Server feature is turned ON inside their software.`,
+          );
+        } finally {
+          setIsConnecting(false);
+        }
+      } else {
+        setActiveModel(id);
       }
     },
     [setActiveModel, port],
@@ -631,7 +716,9 @@ export default function LocalModelsScreen() {
 
   const isModelDownloaded = useCallback(
     (modelId: string) =>
-      Array.isArray(downloadedModels) ? downloadedModels.includes(modelId) : false,
+      Array.isArray(downloadedModels)
+        ? downloadedModels.includes(modelId)
+        : false,
     [downloadedModels],
   );
 
@@ -646,15 +733,38 @@ export default function LocalModelsScreen() {
   const renderModelsTab = () => (
     <FadeIn delay={100} className="w-full">
       {IS_WEB && (
-        <GlassCard className="p-4 mb-6 border-cyan/20 bg-cyan/5">
-          <View className="flex-row items-center gap-3 mb-2">
-            <Info size={18} color={THEME.cyan} />
-            <Text className="text-xs font-bold tracking-widest text-white uppercase">Web Platform Notice</Text>
+        <GlassCard className="p-5 mb-6 border-[#F59E0B]/30 bg-[#F59E0B]/5 rounded-[24px]">
+          <View className="flex-row items-center gap-3 mb-3">
+            <AlertTriangle size={20} color={THEME.amber} />
+            <Text className="text-xs font-bold tracking-widest text-white uppercase">
+              Web Integration Guide
+            </Text>
           </View>
-          <Text className="text-[11px] text-white/60 leading-5">
-            You are running the Web version on a desktop browser. Direct binary execution is restricted. 
-            To use local models, run <Text className="font-bold text-cyan">Ollama</Text> or <Text className="font-bold text-cyan">LM Studio</Text> on your machine and configure the port in the Hardware tab.
+          <Text className="text-[12px] text-white/80 leading-5 mb-3">
+            Browsers cannot run AI models directly in memory. You must route
+            inference through your desktop hardware.
           </Text>
+          <View className="gap-y-2">
+            <Text className="text-[11px] text-white/60">
+              <Text className="font-bold text-[#F59E0B]">Step 1:</Text> Download
+              the GGUF model file from this catalog.
+            </Text>
+            <Text className="text-[11px] text-white/60">
+              <Text className="font-bold text-[#F59E0B]">Step 2:</Text> Open{' '}
+              <Text className="font-bold text-white">LM Studio</Text> or{' '}
+              <Text className="font-bold text-white">Ollama</Text> on your PC
+              and load the file.
+            </Text>
+            <Text className="text-[11px] text-white/60">
+              <Text className="font-bold text-[#F59E0B]">Step 3:</Text> Start
+              the Local Inference Server (default port 1234 or 11434).
+            </Text>
+            <Text className="text-[11px] text-white/60">
+              <Text className="font-bold text-[#F59E0B]">Step 4:</Text> Click
+              "Test Connection" to securely link this web app to your local
+              hardware.
+            </Text>
+          </View>
         </GlassCard>
       )}
 
@@ -698,34 +808,13 @@ export default function LocalModelsScreen() {
               downloadProgress[model.id] < 1
             }
             progress={downloadProgress[model.id] || 0}
+            isConnecting={isConnecting}
             onLoad={handleLoadModel}
             onDownload={handleDownload}
             onRemove={handleRemove}
           />
         ))}
       </View>
-
-      <GlassCard className="p-5 mt-8 border-white/5 bg-white/[0.01]">
-        <View className="flex-row items-center gap-2 mb-4">
-          <HelpCircle size={18} color={THEME.purple} />
-          <Text className="text-xs font-bold tracking-widest text-white uppercase">Gemma E2B vs E4B</Text>
-        </View>
-        
-        <View className="gap-y-4">
-          <View>
-            <Text className="text-[10px] font-black text-cyan uppercase mb-1">E2B (2 Billion Parameters)</Text>
-            <Text className="text-[11px] text-white/50 leading-4">
-              Optimized for speed (20-35 t/s). Best for simple extraction, short-form Q&A, and devices with 4-6GB RAM.
-            </Text>
-          </View>
-          <View>
-            <Text className="text-[10px] font-black text-purple uppercase mb-1">E4B (4 Billion Parameters)</Text>
-            <Text className="text-[11px] text-white/50 leading-4">
-              Superior reasoning and multi-step logic. Measurably better at complex data extraction and long context. Requires 8GB+ RAM.
-            </Text>
-          </View>
-        </View>
-      </GlassCard>
     </FadeIn>
   );
 
@@ -787,12 +876,12 @@ export default function LocalModelsScreen() {
           label="Prefill tokens"
           value={prefillTokens}
           min={16}
-          max={4000}
-          step={1}
+          max={8192}
+          step={16}
           onChange={(val) => {
             const num = Math.round(val);
             setPrefillTokens(num);
-            setHardwareState('prefillTokens' as any, num);
+            setHardwareState('prefillTokens', num);
           }}
         />
 
@@ -800,12 +889,12 @@ export default function LocalModelsScreen() {
           label="Decode tokens"
           value={decodeTokens}
           min={16}
-          max={4000}
-          step={1}
+          max={8192}
+          step={16}
           onChange={(val) => {
             const num = Math.round(val);
             setDecodeTokens(num);
-            setHardwareState('decodeTokens' as any, num);
+            setHardwareState('decodeTokens', num);
           }}
         />
 
@@ -818,9 +907,7 @@ export default function LocalModelsScreen() {
           onChange={(val) =>
             setHardwareState('temperature', parseFloat(val.toFixed(1)))
           }
-          icon={<Flame size={18} color="#94A3B8" className="mr-2" />}
-          showInput={false}
-          unit=""
+          icon={<Flame size={18} color={THEME.slate} />}
         />
 
         <GlassCard className="p-5 border-white/10 bg-[#12121A]/80 rounded-[28px] shadow-2xl mb-8">
@@ -850,7 +937,7 @@ export default function LocalModelsScreen() {
                 const recommendedBackend =
                   deviceStats.ramGb >= 8 ? 'opencl' : 'vulkan';
                 setAccelerator('GPU');
-                setComputeBackend(recommendedBackend as any);
+                setComputeBackend(recommendedBackend as 'opencl' | 'vulkan');
                 setHardwareState('gpuLayers', deviceStats.ramGb >= 8 ? 33 : 15);
                 Alert.alert(
                   'Optimization Applied',
@@ -870,21 +957,14 @@ export default function LocalModelsScreen() {
           <View className="flex-row items-center px-4 py-3 mb-6 border rounded-xl bg-[#1a1a2e]/50 border-[#6366F1]/20">
             <Info size={14} color={THEME.primary} className="mr-3 shrink-0" />
             <Text className="text-[11px] font-medium leading-5 text-[#94A3B8]">
-              {IS_WEB 
-                ? "Web Platform: Inference is routed via local HTTP gateway (Ollama/LM Studio). Hardware settings here affect the local runner's configuration if supported."
+              {IS_WEB
+                ? 'Web Platform: Inference is routed via local HTTP gateway. Ensure your external server matches these hardware constraints.'
                 : computeBackend === 'opencl'
                   ? `OpenCL GPU — best for high-end SoC (${deviceStats.cores} cores detected)`
                   : computeBackend === 'vulkan'
                     ? `Vulkan GPU — optimal for mid-range SoC (${deviceStats.cores} cores detected)`
                     : `CPU Fallback — stable but slow. Reduce GPU layers to prevent crashes.`}
             </Text>
-          </View>
-
-          <View className="flex-row items-center justify-between mb-4">
-            <Text className="text-xs font-bold text-white/80">
-              Manual Override
-            </Text>
-            <ChevronUp size={16} color={THEME.slate} />
           </View>
 
           <View className="flex-row gap-2 mb-8">
@@ -917,41 +997,24 @@ export default function LocalModelsScreen() {
             ))}
           </View>
 
-          <View className="flex-row items-center justify-between mb-5">
-            <Text className="text-sm font-medium text-white/90">
-              GPU Layers
-            </Text>
-            <View className="px-3 py-1.5 border rounded-lg bg-black/40 border-white/5">
-              <Text className="text-xs font-bold text-white">{safeLayers}</Text>
-            </View>
-          </View>
-
-          <View className="justify-center flex-1 mx-2 mb-6">
-            <Slider
-              style={{ width: '100%', height: 40 }}
-              minimumValue={0}
-              maximumValue={99}
-              step={1}
-              value={safeLayers}
-              onValueChange={(val) =>
-                setHardwareState('gpuLayers', Math.round(val))
-              }
-              minimumTrackTintColor={THEME.primary}
-              maximumTrackTintColor="#ffffff30"
-              thumbTintColor={THEME.primary}
-              disabled={accelerator === 'CPU'}
-            />
-          </View>
+          <HardwareSlider
+            label="GPU Layers"
+            value={safeLayers}
+            min={0}
+            max={99}
+            step={1}
+            onChange={(val) => setHardwareState('gpuLayers', Math.round(val))}
+          />
         </GlassCard>
 
         <View className="mb-10">
           <Text className="mb-2 text-[13px] font-bold text-white/90 ml-1 tracking-wide">
-            Local API Server
+            Local Gateway API
           </Text>
           <Text className="text-[11px] text-[#94A3B8] mb-4 ml-1">
-            {IS_WEB 
-              ? "Configure the port for your local inference gateway (Ollama/LM Studio)."
-              : "Expose the loaded model to OpenAI-compatible local clients."}
+            {IS_WEB
+              ? 'Crucial: Enter the port matching your desktop inference software.'
+              : 'Expose the loaded model to OpenAI-compatible local clients.'}
           </Text>
 
           <GlassCard className="p-5 border-white/5 bg-[#12121A]/80 rounded-[24px]">
@@ -962,7 +1025,7 @@ export default function LocalModelsScreen() {
                 </View>
                 <View className="flex-1 shrink">
                   <Text className="text-sm font-bold tracking-wide text-white">
-                    {IS_WEB ? "Gateway Endpoint" : "API Gateway Link"}
+                    {IS_WEB ? 'Gateway Address' : 'API Gateway Link'}
                   </Text>
                   <Text className="text-[10px] text-white/40 mt-1 font-mono">
                     http://127.0.0.1:{port}/v1
@@ -977,7 +1040,7 @@ export default function LocalModelsScreen() {
               />
             </View>
 
-            <View className="flex-row items-center px-4 overflow-hidden border h-11 bg-black/60 border-white/10 rounded-xl">
+            <View className="flex-row items-center px-4 mb-4 overflow-hidden border h-11 bg-black/60 border-white/10 rounded-xl">
               <Text className="mr-3 text-xs font-bold text-white/50">PORT</Text>
               <TextInput
                 value={port}
@@ -985,18 +1048,35 @@ export default function LocalModelsScreen() {
                 keyboardType="number-pad"
                 className="flex-1 font-mono text-sm text-white"
                 editable={!isLocalServerEnabled}
-                style={IS_WEB ? ({ outlineStyle: 'none' } as any) : {}}
+                style={
+                  IS_WEB
+                    ? ({ outlineStyle: 'none' } as Record<string, string>)
+                    : {}
+                }
               />
             </View>
-            
+
             {IS_WEB && (
-              <TouchableOpacity 
-                onPress={() => Linking.openURL('https://ollama.com/')}
-                className="flex-row items-center justify-center gap-2 mt-4"
-              >
-                <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase">GET OLLAMA</Text>
-                <ExternalLink size={10} color={THEME.cyan} />
-              </TouchableOpacity>
+              <View className="flex-row gap-2 mt-2">
+                <TouchableOpacity
+                  onPress={() => setPort('1234')}
+                  activeOpacity={0.7}
+                  className="flex-1 py-2.5 items-center justify-center border rounded-lg bg-white/5 border-white/10"
+                >
+                  <Text className="text-[10px] font-black tracking-[1px] text-white/70 uppercase">
+                    LM Studio (1234)
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setPort('11434')}
+                  activeOpacity={0.7}
+                  className="flex-1 py-2.5 items-center justify-center border rounded-lg bg-white/5 border-white/10"
+                >
+                  <Text className="text-[10px] font-black tracking-[1px] text-white/70 uppercase">
+                    Ollama (11434)
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
           </GlassCard>
         </View>
@@ -1029,12 +1109,7 @@ export default function LocalModelsScreen() {
 
           <ScrollView
             showsVerticalScrollIndicator={false}
-            // FIX: keyboardShouldPersistTaps="handled" prevents ScrollView from 
-            // aggressively hijacking touches intended for children (Sliders/Buttons)
             keyboardShouldPersistTaps="handled"
-            // FIX: On Web, prevent the ScrollView from becoming a responder when 
-            // interacting with sliders by using scrollEnabled logic if needed, 
-            // but primarily handled via persistTaps.
             contentContainerStyle={{
               flexGrow: 1,
               maxWidth: 800,

@@ -143,7 +143,6 @@ export const useVideoStore = create<VideoState>((set, get) => ({
 
     try {
       recordEvent('HANDSHAKE_INIT', 'info', 'Validating secure session token...');
-
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session?.user) {
         throw new Error('AUTHENTICATION_FAILURE: Token expired. Please sign in again.');
@@ -155,26 +154,36 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         throw new Error('INCOMPATIBLE_SOURCE: Provided URL format is malformed or unsupported.');
       }
 
-      recordEvent('DB_PROVISIONING', 'info', `Target Media ID: ${parsed.videoId}`);
+      recordEvent('PARALLEL_INIT', 'info', 'Executing DB Provisioning and Native Extraction concurrently...');
 
-      const { data: videoRecord, error: dbError } = await supabase
-        .from('videos')
-        .insert({
+      // PERFORMANCE POLISH: Concurrent DB insertion & Caption fetching. 
+      // Strict 3-second timeout prevents the "Normal Way" from slowing down.
+      const [dbResult, clientTranscriptResult] = await Promise.allSettled([
+        supabase.from('videos').insert({
           user_id: session.user.id,
           platform: parsed.platform,
           youtube_url: parsed.normalizedUrl,
           youtube_video_id: parsed.videoId,
           status: 'queued',
-        })
-        .select()
-        .single();
+        }).select().single(),
+        withTimeout(fetchClientCaptions(parsed.videoId, parsed.platform), 3000, 'Caption_Proxy')
+      ]);
 
-      if (dbError || !videoRecord) {
-        throw new Error(`CRITICAL_DB_ERROR: ${dbError?.message || 'Provisioning failed.'}`);
+      if (dbResult.status === 'rejected' || !dbResult.value.data) {
+        throw new Error(`CRITICAL_DB_ERROR: ${dbResult.status === 'rejected' ? dbResult.reason : 'Provisioning failed.'}`);
       }
 
+      const videoRecord = dbResult.value.data;
       targetDbId = videoRecord.id;
       set((state) => ({ activeVideoId: targetDbId, videos: [videoRecord, ...state.videos] }));
+
+      let clientTranscript: string | null = null;
+      if (clientTranscriptResult.status === 'fulfilled' && clientTranscriptResult.value) {
+        clientTranscript = clientTranscriptResult.value;
+        recordEvent('FAST_PATH_CAPTIONS', 'success', `Secured verbatim transcript natively.`);
+      } else {
+        recordEvent('FAST_PATH_CAPTIONS', 'warn', 'Native proxy timed out. Fluidly escalating to Verbum Edge.');
+      }
 
       const localState = useLocalAIStore.getState();
       const activeModel = localState.activeModelId;
@@ -184,27 +193,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         recordEvent('HYBRID_MODE_ENGAGED', 'info', `Local Node Ready: ${activeModel}. Instructing Edge to skip Cloud AI.`);
       }
 
-      recordEvent('FAST_PATH_INIT', 'info', 'Attempting client-side native extraction...');
-
-      let clientTranscript: string | null = null;
-
-      try {
-        clientTranscript = await withTimeout(
-          fetchClientCaptions(parsed.videoId, parsed.platform),
-          12000,
-          'Caption_Proxy'
-        );
-
-        if (clientTranscript) {
-          recordEvent('FAST_PATH_CAPTIONS', 'success', `Secured verbatim transcript natively.`);
-        } else {
-          recordEvent('FAST_PATH_CAPTIONS', 'warn', 'Native captions unavailable. Escalating to Verbum Edge.');
-        }
-      } catch (e) {
-        recordEvent('FAST_PATH_FAIL', 'warn', 'Proxy timed out. Seamlessly escalating to Verbum Edge.');
-      }
-
-      recordEvent('SERVER_HANDOFF', 'info', 'Relaying command payload to Edge Processing Node...');
+      recordEvent('SERVER_HANDOFF', 'info', 'Relaying payload to Edge Processing Node...');
 
       const requestPayload: ExtendedProcessRequest = {
         video_id: targetDbId,
@@ -240,13 +229,17 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         throw new Error(result.error || 'The remote Edge Node encountered a fatal processing error.');
       }
 
+      // UX POLISH: Dedicated Local Handoff execution
       if (result.is_local_handoff && activeModel) {
         recordEvent('LOCAL_EXECUTION_INIT', 'info', 'Edge extraction complete. Executing prompt locally...');
 
         try {
           const localSummary = await runLocalInference(
             result.prompt,
-            (token) => console.log(`[Local:Stream] ${token}`)
+            (token) => {
+              // Ensure live stream logs correctly for debugging
+              // console.log(`[Local:Stream] ${token}`); 
+            }
           );
 
           const { error: insightError } = await supabase.from('ai_insights').upsert({
@@ -271,7 +264,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
           throw new Error(`LOCAL_HARDWARE_FAULT: ${msg}`);
         }
       } else {
-        recordEvent('PIPELINE_FINALIZED', 'success', 'Assets compiled and stored in vault.');
+        recordEvent('PIPELINE_FINALIZED', 'success', 'Cloud Assets compiled and stored in vault.');
       }
 
       set({ jobEndTime: Date.now() });

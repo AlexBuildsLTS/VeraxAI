@@ -549,8 +549,8 @@ export default function SettingsHubScreen() {
       },
       {
         id: 'about',
-        title: 'VeraxAI Pipeline',
-        desc: 'Simulator VeraxAI Pipeline',
+        title: 'ABOUT',
+        desc: 'Simulator Of VeraxAI Pipeline',
         color: 'green',
         iconHex: THEME.slate,
         icon: BadgeInfo,

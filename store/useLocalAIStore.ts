@@ -1,12 +1,6 @@
 /**
  * store/useLocalAIStore.ts
  * Enterprise State Manager for On-Device LLM Processing
- * ----------------------------------------------------------------------------
- * ARCHITECTURE:
- * 1. FULL HARDWARE EXPOSURE: Threads, GPU Layers, and Temp explicitly typed.
- * 2. NETWORKING: External binding state tracked for desktop-class execution.
- * 3. PERSISTENCE: Ensures hardware choices AND active model state survive app 
- * navigations and restarts.
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -27,6 +21,7 @@ export interface LocalModel {
         promptEvalMs: number;
         memoryBandwidth: string;
     };
+    description?: string;
 }
 
 interface LocalAIState {
@@ -118,8 +113,6 @@ export const useLocalAIStore = create<LocalAIState>()(
             name: 'verax-local-ai-storage',
             storage: createJSONStorage(() => AsyncStorage),
             partialize: (state) => ({
-                // CRITICAL FIX: activeModelId and isLocalServerEnabled MUST be persisted 
-                // so the app remembers the Local Node is active when switching screens.
                 isLocalServerEnabled: state.isLocalServerEnabled,
                 activeModelId: state.activeModelId,
                 port: state.port,
@@ -130,7 +123,7 @@ export const useLocalAIStore = create<LocalAIState>()(
                 temperature: state.temperature,
                 prefillTokens: state.prefillTokens,
                 decodeTokens: state.decodeTokens,
-                downloadedModels: state.downloadedModels,
+                downloadedModels: Array.isArray(state.downloadedModels) ? state.downloadedModels : [],
             }),
         }
     )
