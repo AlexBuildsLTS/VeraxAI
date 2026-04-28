@@ -1152,7 +1152,7 @@ export default function ApiKeysDashboard() {
                   <View className="flex-row items-center mb-8 gap-x-3">
                     <ShieldCheck size={24} color={THEME.green} />
                     <Text className="text-sm font-black tracking-widest text-white uppercase md:text-base">
-                      Cascading Fallback Matrix
+                      SYSTEM FALLBACK API KEYS
                     </Text>
                   </View>
 

@@ -1,103 +1,112 @@
 import { Platform } from 'react-native';
 import { useLocalAIStore } from '../store/useLocalAIStore';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 /**
- * Interface for LiteRT Engine instance
+ * ----------------------------------------------------------------------------
+ * NATIVE ENGINE: llama.rn (llama.cpp for React Native)
+ * ----------------------------------------------------------------------------
  */
-interface LiteRTEngine {
-    generateResponse?: (prompt: string, callback: (text: string) => void) => Promise<string>;
-    generate?: (prompt: string, callback: (text: string) => void) => Promise<string>;
-    chat?: (prompt: string, callback: (text: string) => void) => Promise<string>;
-}
-
-/**
- * Interface for LiteRT Core module
- */
-interface LiteRTCore {
-    createFromOptions?: (options: any) => Promise<LiteRTEngine>;
-    create?: (options: any) => Promise<LiteRTEngine>;
-    init?: (options: any) => Promise<LiteRTEngine>;
-    LlmInference?: LiteRTCore;
-    default?: { LlmInference: LiteRTCore };
-}
-
-// Dynamically require LiteRT to bypass module resolution issues in Metro/TypeScript
-let LlmInference: LiteRTCore | null = null;
+let LlamaContext: any = null;
 if (Platform.OS !== 'web') {
     try {
-        // @ts-ignore
-        const litert = require('@litertjs/core');
-        LlmInference = litert.LlmInference || litert.default?.LlmInference || litert;
+        const { initLlama } = require('llama.rn');
+        LlamaContext = initLlama;
     } catch (e) {
-        console.warn("[LiteRT] Core module bindings not found. Native inference will be unavailable.");
+        console.warn("[Local AI] llama.rn module not found. Ensure the native module is linked.");
     }
 }
 
-// Singleton engine instance and tracking
-let litertEngine: LiteRTEngine | null = null;
-let lastInitializedModelId: string | null = null;
+let activeLlamaContext: any = null;
+let lastContextModelId: string | null = null;
 
-/**
- * Formats the prompt for the Gemma model family
- */
+// Gemma 4 specific prompt wrapping to enforce JSON constraints
 const formatGemmaPrompt = (prompt: string): string => {
-    return `<bos><start_of_turn>user\nYou are a Data Extraction Specialist. Output ONLY valid JSON matching the requested schema. Zero hallucinations.\n\n${prompt}<end_of_turn>\n<start_of_turn>model\n`;
+    return `<bos><start_of_turn>user\nYou are an elite Data Extraction Specialist. Extract strict JSON based on the provided instructions.\n\n${prompt}<end_of_turn>\n<start_of_turn>model\n`;
 };
 
-/**
- * Native implementation of LiteRT inference
- */
 const runNativeInference = async (
     prompt: string,
     modelId: string,
-    options: { temperature: number; decodeTokens: number },
+    options: { temperature: number; decodeTokens: number; gpuLayers: number },
     onChunk?: (token: string) => void
 ): Promise<string> => {
+    // PRODUCTION SAFEGUARD 2: Wake Lock
+    // Prevents Android battery manager from suspending the app during 2-minute GPU burns.
+    await activateKeepAwakeAsync();
+
     try {
-        // @ts-ignore
         const FileSystem = require('expo-file-system/legacy');
         const docDir = FileSystem.documentDirectory || 'file:///tmp/';
-        let modelPath = `${docDir}${modelId}.litertlm`.replace('file://', '');
 
-        // Re-initialize if model changed or engine is missing
-        if (!litertEngine || lastInitializedModelId !== modelId) {
-            if (!LlmInference) {
-                throw new Error("LITERT_MISSING_BINDINGS: Native JSI bindings not found.");
+        let fileName = 'google_gemma-4-E2B-it-bf16.gguf';
+        if (modelId === 'gemma-4-e4b-it-unsloth') fileName = 'gemma-4-E4B-it-Q4_K_M.gguf';
+        if (modelId === 'gemma-4-e2b-it-unsloth') fileName = 'gemma-4-E2B-it-UD-Q4_K_XL.gguf';
+
+        let modelPath = `${docDir}${fileName}`.replace('file://', '');
+
+        if (!LlamaContext) {
+            throw new Error("LLAMA_NATIVE_MISSING: The llama.rn native module is not initialized.");
+        }
+
+        // Initialize or Reuse Hardware Context
+        if (!activeLlamaContext || lastContextModelId !== modelId) {
+            if (activeLlamaContext) {
+                console.log(`[Local AI] Releasing previous hardware context for ${lastContextModelId}`);
+                await activeLlamaContext.release();
             }
 
-            const createFunc = LlmInference.createFromOptions || LlmInference.create || LlmInference.init;
-            if (!createFunc) {
-                throw new Error("LITERT_INIT_FAULT: Initialization function not found in core module.");
-            }
+            console.log(`[Local AI] Booting llama.rn engine for model: ${modelId}`);
 
-            console.log(`[LiteRT] Initializing engine for model: ${modelId}`);
-            litertEngine = await createFunc({
-                modelPath,
-                maxTokens: options.decodeTokens,
-                temperature: options.temperature,
-                topK: 40
+            // Critical Safeguard: Enforce sane context window limits to prevent OOM crashes on Android
+            activeLlamaContext = await LlamaContext({
+                contextSize: 4096, // Safe threshold for mobile RAM
+                model: modelPath,
+                n_gpu_layers: options.gpuLayers,
+                use_mlock: true, // Forces model into RAM to prevent disk swapping lag
             });
-            lastInitializedModelId = modelId;
+            lastContextModelId = modelId;
         }
 
         const formattedPrompt = formatGemmaPrompt(prompt);
-        const generateFunc = litertEngine!.generateResponse || litertEngine!.generate || litertEngine!.chat;
-        
-        if (!generateFunc) {
-            throw new Error("LITERT_EXECUTION_FAULT: Generation method not found on engine instance.");
-        }
+        let fullText = "";
 
-        return await generateFunc.call(litertEngine, formattedPrompt, (partialText: string) => {
-            onChunk?.(partialText);
+        // Enforce a minimum decode token limit to ensure the JSON object doesn't get cut off prematurely
+        const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
+
+        return new Promise((resolve, reject) => {
+            activeLlamaContext.completion(
+                {
+                    prompt: formattedPrompt,
+                    n_predict: safeDecodeLimit,
+                    temperature: options.temperature,
+                    top_k: 40,
+                    top_p: 0.95
+                },
+                (data: { token: string }) => {
+                    fullText += data.token;
+                    if (onChunk) onChunk(data.token);
+                }
+            ).then(() => {
+                resolve(fullText);
+            }).catch((err: any) => {
+                reject(err);
+            });
         });
+
     } catch (e: any) {
-        console.error("[LiteRT Native Error]", e);
-        throw new Error(`LITERT_NATIVE_FAILURE: ${e.message}`);
+        console.error("[Local AI Native Error]", e);
+        throw new Error(`NATIVE_INFERENCE_FAILURE: ${e.message}`);
+    } finally {
+        // PRODUCTION SAFEGUARD 2: Wake Lock Cleanup
+        deactivateKeepAwake();
     }
 };
 
 /**
- * Web implementation using local HTTP gateway (e.g. LM Studio, Ollama)
+ * ----------------------------------------------------------------------------
+ * WEB ENGINE: Local HTTP Gateway (LM Studio / Ollama)
+ * ----------------------------------------------------------------------------
  */
 const runWebInference = async (
     prompt: string,
@@ -108,6 +117,8 @@ const runWebInference = async (
     const endpoint = `http://127.0.0.1:${options.port}/v1/chat/completions`;
 
     try {
+        const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
+
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -115,7 +126,7 @@ const runWebInference = async (
                 model: modelId,
                 messages: [{ role: 'user', content: prompt }],
                 temperature: options.temperature,
-                max_tokens: options.decodeTokens,
+                max_tokens: safeDecodeLimit,
                 stream: true,
             }),
         });
@@ -127,6 +138,7 @@ const runWebInference = async (
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let fullText = "";
+        let buffer = "";
 
         if (!reader) return "";
 
@@ -134,12 +146,14 @@ const runWebInference = async (
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n').filter(line => line.trim() !== '');
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || "";
 
             for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6);
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                    const data = trimmed.slice(6);
                     if (data === '[DONE]') break;
 
                     try {
@@ -150,8 +164,7 @@ const runWebInference = async (
                             onChunk?.(content);
                         }
                     } catch (e) {
-                        // Ignore partial JSON chunks, they will be handled in the next iteration if needed
-                        // or if the stream is properly formatted, this shouldn't happen often.
+                        // Silently catch buffer fragmentation
                     }
                 }
             }
@@ -164,17 +177,36 @@ const runWebInference = async (
 
 /**
  * Main entry point for local AI inference
+ * Dynamically routes to Web HTTP fetch or Native Llama.cpp binding
  */
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
-    const { activeModelId, temperature, port, decodeTokens } = useLocalAIStore.getState();
+    const { activeModelId, temperature, port, decodeTokens, gpuLayers } = useLocalAIStore.getState();
 
     if (!activeModelId) {
         throw new Error("INFERENCE_FAULT: No active model selected in settings.");
     }
 
     if (Platform.OS !== 'web') {
-        return runNativeInference(prompt, activeModelId, { temperature, decodeTokens }, onChunk);
+        return runNativeInference(prompt, activeModelId, { temperature, decodeTokens, gpuLayers }, onChunk);
     }
 
     return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
 };
+
+/**
+ * PRODUCTION SAFEGUARD 3: Memory Leak Prevention
+ * Exposes a method to force-release the llama.rn context if the user aborts
+ * the generation or unmounts the screen, preventing zombie RAM lockups.
+ */
+export const abortNativeInference = async () => {
+    if (activeLlamaContext && Platform.OS !== 'web') {
+        console.log(`[Local AI] Force-aborting context. Freeing RAM...`);
+        try {
+            await activeLlamaContext.release();
+            activeLlamaContext = null;
+            lastContextModelId = null;
+        } catch (e) {
+            console.error("[Local AI] Failed to release context during abort.", e);
+        }
+    }
+}
