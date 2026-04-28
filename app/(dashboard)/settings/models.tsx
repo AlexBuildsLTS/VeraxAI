@@ -692,17 +692,22 @@ export default function LocalModelsScreen() {
 
   useEffect(() => {
     if (showLogs) {
-      logsHeight.value = withSpring(160, { damping: 15 });
+      logsHeight.value = withSpring(250, { damping: 15 });
     } else {
       logsHeight.value = withTiming(0, { duration: 200 });
     }
   }, [showLogs]);
 
-  const animatedLogStyle = useAnimatedStyle(() => ({
-    height: logsHeight.value,
-    opacity: logsHeight.value > 0 ? 1 : 0,
-    overflow: 'hidden',
-  }));
+  const animatedLogStyle = useAnimatedStyle(() => {
+    const progress = Math.min(Math.max(logsHeight.value / 250, 0), 1);
+    return {
+      height: logsHeight.value,
+      opacity: logsHeight.value > 0 ? 1 : 0,
+      overflow: 'hidden',
+      marginTop: progress * 8,
+      marginBottom: progress * 40,
+    };
+  });
 
   useEffect(() => {
     if (scrollViewRef.current && showLogs) {
@@ -1513,8 +1518,11 @@ export default function LocalModelsScreen() {
 
             {activeTab === 'models' ? renderModelsTab() : renderHardwareTab()}
 
-            <Animated.View style={animatedLogStyle}>
-              <GlassCard className="mt-2 mb-10 p-4 border-[#32FF00]/20 bg-black/60 rounded-2xl">
+            <Animated.View style={[animatedLogStyle, { width: '100%' }]}>
+              <GlassCard 
+                className="p-4 border-[#32FF00]/20 bg-black/60 rounded-2xl flex-1" 
+                style={{ flex: 1, height: '100%' }}
+              >
                 <View className="flex-row items-center justify-between mb-3">
                   <View className="flex-row items-center gap-2">
                     <TerminalSquare size={14} color={THEME.green} />

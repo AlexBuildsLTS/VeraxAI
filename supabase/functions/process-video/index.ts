@@ -20,7 +20,7 @@ import { createAdminClient } from '../_shared/supabaseAdmin.ts';
 import { getCaptions } from './captions.ts';
 import { getAudioUrl } from './audio.ts';
 import { transcribeAudio } from './deepgram.ts';
-import { generateInsights, buildAgentPrompt } from './insights.ts';
+import { generateInsights } from './insights.ts';
 import { extractYouTubeId, diffMs, sanitizeForDb, estimateReadingTime } from './utils.ts';
 import { Database } from '../../../types/database/database.types.ts';
 
@@ -160,18 +160,16 @@ serve(async (req: Request) => {
 
     // ── TIER 4A: LOCAL AI HANDOFF CIRCUIT BREAKER ─────────────────────────────
     if (skip_ai) {
-      console.log(`[Pipeline] skip_ai flag detected. Halting cloud processing and returning structured payload.`);
+      console.log(`[Pipeline] skip_ai flag detected! Aborting Cloud Gemini. Returning raw transcript to local device.`);
+
+      // Tell the UI we are moving into the AI processing phase
       await broadcastStatus('ai_processing');
 
-      // Directly consumes finalTranscript, language, and difficulty
-      const { systemInstruction, userMessage } = buildAgentPrompt(finalTranscript, language, difficulty);
-
+      // Return EXACTLY what your React Native app (pipeline.ts) is waiting for
       return new Response(JSON.stringify({
         success: true,
         is_local_handoff: true,
-        transcript: finalTranscript,
-        system_instruction: systemInstruction,
-        user_message: userMessage
+        transcript: finalTranscript
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
 

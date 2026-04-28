@@ -156,8 +156,6 @@ export const useVideoStore = create<VideoState>((set, get) => ({
 
       recordEvent('PARALLEL_INIT', 'info', 'Executing DB Provisioning and Native Extraction concurrently...');
 
-      // PERFORMANCE POLISH: Concurrent DB insertion & Caption fetching. 
-      // Strict 3-second timeout prevents the "Normal Way" from slowing down.
       const [dbResult, clientTranscriptResult] = await Promise.allSettled([
         supabase.from('videos').insert({
           user_id: session.user.id,
@@ -185,12 +183,15 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         recordEvent('FAST_PATH_CAPTIONS', 'warn', 'Native proxy timed out. Fluidly escalating to Verbum Edge.');
       }
 
+      // --- TRANSPARENCY & ROUTING LOGIC ---
       const localState = useLocalAIStore.getState();
       const activeModel = localState.activeModelId;
       const isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
       if (isLocalModelReady) {
-        recordEvent('HYBRID_MODE_ENGAGED', 'info', `Local Node Ready: ${activeModel}. Instructing Edge to skip Cloud AI.`);
+        recordEvent('HYBRID_MODE_ENGAGED', 'success', `Local Engine active (${activeModel}). Will route extraction locally to save API tokens.`);
+      } else {
+        recordEvent('CLOUD_MODE_ENGAGED', 'info', `No Local Engine detected. Routing extraction to Premium Cloud API.`);
       }
 
       recordEvent('SERVER_HANDOFF', 'info', 'Relaying payload to Edge Processing Node...');
@@ -202,7 +203,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         difficulty: options.difficulty,
         transcript_text: clientTranscript,
         audio_url: null,
-        skip_ai: isLocalModelReady
+        skip_ai: isLocalModelReady // Tells the Edge function to STOP after Deepgram and return the text.
       };
 
       const edgeResponse = await fetch(
@@ -229,28 +230,63 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         throw new Error(result.error || 'The remote Edge Node encountered a fatal processing error.');
       }
 
-      // UX POLISH: Dedicated Local Handoff execution
+      // --- LOCAL HANDOFF: The device takes over processing ---
       if (result.is_local_handoff && activeModel) {
-        recordEvent('LOCAL_EXECUTION_INIT', 'info', 'Edge extraction complete. Executing prompt locally...');
+        recordEvent('LOCAL_EXECUTION_INIT', 'info', 'Edge extraction complete. Booting Gemma Engine locally...');
 
         try {
-          const localSummary = await runLocalInference(
-            result.prompt,
+          // PERFECT SYNC: We combine the system_instruction and user_message exactly as the Edge function returns them
+          const structuredPrompt = `${result.system_instruction}\n\n${result.user_message}`;
+
+          const rawLocalOutput = await runLocalInference(
+            structuredPrompt,
             (token) => {
-              // Ensure live stream logs correctly for debugging
-              // console.log(`[Local:Stream] ${token}`); 
+              // Intentionally left blank to save background thread performance
             }
           );
 
+          recordEvent('LOCAL_EXECUTION_DONE', 'success', 'Local generation complete. Validating JSON schema...');
+
+          // ELITE JSON EXTRACTOR
+          let parsedInsights: any;
+          try {
+            const firstBrace = rawLocalOutput.indexOf('{');
+            const lastBrace = rawLocalOutput.lastIndexOf('}');
+            if (firstBrace === -1 || lastBrace === -1) {
+              throw new Error("No JSON object bounds found in model output.");
+            }
+            const cleanJsonString = rawLocalOutput.substring(firstBrace, lastBrace + 1);
+            parsedInsights = JSON.parse(cleanJsonString);
+          } catch (jsonErr) {
+            console.error("Local Engine JSON Failure:", rawLocalOutput);
+            throw new Error("The local model failed to output a strictly formatted JSON object.");
+          }
+
+          // Flawless DB Sync
           const { error: insightError } = await supabase.from('ai_insights').upsert({
             video_id: targetDbId,
-            summary: localSummary,
+            summary: parsedInsights.summary || "Summary generation failed.",
+            conclusion: parsedInsights.conclusion || null,
+            chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
+            key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
+            seo_metadata: parsedInsights.seo_metadata || {},
+            ai_model: `Local: ${activeModel}`,
             language: options.language,
-            ai_model: activeModel,
             processed_at: new Date().toISOString()
           });
 
           if (insightError) throw new Error(`LOCAL_SYNC_FAIL: ${insightError.message}`);
+
+          // TELEMETRY: Log 0 tokens used since it ran locally to save costs
+          await supabase.from('usage_logs').insert({
+            user_id: session.user.id,
+            video_id: targetDbId,
+            action: 'ai_insights_generated',
+            ai_model: `Local: ${activeModel}`,
+            tokens_consumed: 0,
+            duration_seconds: Math.floor((Date.now() - get().jobStartTime!) / 1000),
+            metadata: { api_key_name: 'Local_SoC_Execution' }
+          });
 
           await supabase.from('videos').update({
             status: 'completed',
@@ -264,6 +300,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
           throw new Error(`LOCAL_HARDWARE_FAULT: ${msg}`);
         }
       } else {
+        // Cloud executed it flawlessly
         recordEvent('PIPELINE_FINALIZED', 'success', 'Cloud Assets compiled and stored in vault.');
       }
 

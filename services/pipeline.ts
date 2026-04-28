@@ -32,6 +32,9 @@ export interface PipelineResult {
 interface EdgeResponse {
     success: boolean;
     error?: string;
+    is_local_handoff?: boolean;
+    transcript?: string;
+    prompt?: string;
 }
 
 // ─── UTILITY: EXPONENTIAL BACKOFF RETRY ─────────────────────────────────────
@@ -98,15 +101,15 @@ export class PipelineService {
 
             if (dbError || !videoRecord) throw new Error(`DB_SYNC_ERROR: ${dbError?.message}`);
 
-            // 2. Local-First Execution Logic
+            // 2. Assess Routing Context
             const localState = useLocalAIStore.getState();
-            const isLocalReady = localState.activeModelId &&
-                localState.downloadedModels.includes(localState.activeModelId);
+            const activeModel = localState.activeModelId;
+            const isLocalReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
+            // FAST-PATH: If we already have the transcript natively AND local AI is ready, skip the Edge entirely!
             if (isLocalReady && clientTranscript) {
-                console.log(`[Pipeline] Routing to Local Hardware: ${localState.activeModelId}`);
+                console.log(`[Pipeline] Fast-Path: Routing native transcript directly to Local Hardware: ${activeModel}`);
                 try {
-                    // STRICT SCHEMA PROMPT: Ensuring the local model knows exactly what to output.
                     const structuredPrompt = `Analyze the following transcript. You MUST output ONLY a valid JSON object matching this exact schema:
 {
   "summary": "A detailed paragraph summarizing the content",
@@ -120,12 +123,8 @@ Do not include markdown blocks or conversational text. Output pure JSON.
 Transcript:
 ${clientTranscript}`;
 
-                    const rawLocalOutput = await runLocalInference(
-                        structuredPrompt,
-                        (token) => { } // Suppress stream logs for background tasks to improve performance
-                    );
+                    const rawLocalOutput = await runLocalInference(structuredPrompt);
 
-                    // ELITE JSON EXTRACTOR (Synced with useVideoStore)
                     let parsedInsights: any;
                     try {
                         const firstBrace = rawLocalOutput.indexOf('{');
@@ -140,7 +139,6 @@ ${clientTranscript}`;
                         throw new Error("LITERT_SCHEMA_FAULT: The local model failed to output a strictly formatted JSON object.");
                     }
 
-                    // Strict DB Sync matching database.types.ts
                     await supabase.from('ai_insights').insert({
                         video_id: videoRecord.id,
                         summary: parsedInsights.summary || "Summary generation failed.",
@@ -148,18 +146,20 @@ ${clientTranscript}`;
                         chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
                         key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
                         seo_metadata: parsedInsights.seo_metadata || {},
-                        ai_model: localState.activeModelId!,
-                        language
+                        ai_model: `Local: ${activeModel}`,
+                        language,
+                        processed_at: new Date().toISOString()
                     });
 
-                    await supabase.from('videos').update({ status: 'completed' }).eq('id', videoRecord.id);
+                    await supabase.from('videos').update({ status: 'completed', processing_completed_at: new Date().toISOString() }).eq('id', videoRecord.id);
                     return { success: true, videoId: videoRecord.id };
                 } catch (localErr) {
-                    console.warn('[Pipeline] Native Engine faulted. Falling back to Edge Cloud.', localErr);
+                    console.warn('[Pipeline] Native Engine faulted on Fast-Path. Falling back to Edge Cloud.', localErr);
+                    // Do not return; let it fall through to the Edge function below
                 }
             }
 
-            // 3. Fallback: Supabase Edge Function
+            // 3. Normal Path: Supabase Edge Function (Handles extraction + optional Cloud AI)
             await withRetry(async () => {
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/process-video`, {
                     method: 'POST',
@@ -175,6 +175,7 @@ ${clientTranscript}`;
                         language,
                         difficulty,
                         transcript_text: clientTranscript,
+                        skip_ai: isLocalReady // Tell Edge to just grab the audio/transcript and give it back
                     }),
                 });
 
@@ -182,6 +183,50 @@ ${clientTranscript}`;
 
                 const data = (await response.json()) as EdgeResponse;
                 if (!data.success) throw new Error(`EDGE_EXECUTION_ERROR: ${data.error ?? 'Unknown'}`);
+
+                // 4. Edge Handoff Path: Edge got the transcript, now run it locally
+                if (data.is_local_handoff && activeModel) {
+                    console.log(`[Pipeline] Edge Handoff: Executing prompt locally...`);
+                    const structuredPrompt = `Analyze the following transcript. You MUST output ONLY a valid JSON object matching this exact schema:
+{
+  "summary": "A detailed paragraph summarizing the content",
+  "conclusion": "A brief 2-sentence final thought",
+  "chapters": [{"title": "String", "timestamp": "MM:SS", "description": "String"}],
+  "key_takeaways": ["Point 1", "Point 2"],
+  "seo_metadata": {"tags": ["tag1"], "description": "Meta desc"}
+}
+Do not include markdown blocks or conversational text. Output pure JSON.
+
+Transcript:
+${data.transcript || data.prompt || clientTranscript}`;
+
+                    const rawLocalOutput = await runLocalInference(structuredPrompt);
+
+                    let parsedInsights: any;
+                    try {
+                        const firstBrace = rawLocalOutput.indexOf('{');
+                        const lastBrace = rawLocalOutput.lastIndexOf('}');
+                        if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON bounds found.");
+                        parsedInsights = JSON.parse(rawLocalOutput.substring(firstBrace, lastBrace + 1));
+                    } catch (jsonErr) {
+                        throw new Error("LITERT_SCHEMA_FAULT: The local model failed to output a strictly formatted JSON object.");
+                    }
+
+                    await supabase.from('ai_insights').insert({
+                        video_id: videoRecord.id,
+                        summary: parsedInsights.summary || "Summary generation failed.",
+                        conclusion: parsedInsights.conclusion || null,
+                        chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
+                        key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
+                        seo_metadata: parsedInsights.seo_metadata || {},
+                        ai_model: `Local: ${activeModel}`,
+                        language,
+                        processed_at: new Date().toISOString()
+                    });
+
+                    await supabase.from('videos').update({ status: 'completed', processing_completed_at: new Date().toISOString() }).eq('id', videoRecord.id);
+                }
+
             });
 
             return { success: true, videoId: videoRecord.id };
