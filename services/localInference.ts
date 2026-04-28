@@ -31,8 +31,6 @@ const runNativeInference = async (
     options: { temperature: number; decodeTokens: number; gpuLayers: number },
     onChunk?: (token: string) => void
 ): Promise<string> => {
-    // PRODUCTION SAFEGUARD 2: Wake Lock
-    // Prevents Android battery manager from suspending the app during 2-minute GPU burns.
     await activateKeepAwakeAsync();
 
     try {
@@ -58,12 +56,11 @@ const runNativeInference = async (
 
             console.log(`[Local AI] Booting llama.rn engine for model: ${modelId}`);
 
-            // Critical Safeguard: Enforce sane context window limits to prevent OOM crashes on Android
+            // CRITICAL FIX: Removed use_mlock: true which was crashing Android Native.
             activeLlamaContext = await LlamaContext({
                 contextSize: 4096, // Safe threshold for mobile RAM
                 model: modelPath,
                 n_gpu_layers: options.gpuLayers,
-                use_mlock: true, // Forces model into RAM to prevent disk swapping lag
             });
             lastContextModelId = modelId;
         }
@@ -71,7 +68,6 @@ const runNativeInference = async (
         const formattedPrompt = formatGemmaPrompt(prompt);
         let fullText = "";
 
-        // Enforce a minimum decode token limit to ensure the JSON object doesn't get cut off prematurely
         const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
 
         return new Promise((resolve, reject) => {
@@ -98,7 +94,6 @@ const runNativeInference = async (
         console.error("[Local AI Native Error]", e);
         throw new Error(`NATIVE_INFERENCE_FAILURE: ${e.message}`);
     } finally {
-        // PRODUCTION SAFEGUARD 2: Wake Lock Cleanup
         deactivateKeepAwake();
     }
 };
