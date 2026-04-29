@@ -5,11 +5,11 @@
  * DESIGN PRINCIPLES:
  * - UNIVERSAL COMPATIBILITY: Uses `expo-crypto` to guarantee UUID generation.
  * - ANTI-CRASH GUARANTEE: mutationFn NEVER throws. Resolves safely.
- * - QUALITY GATE: Client captions require 50+ words to bypass Edge scraping.
+ * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. If the transcript
+ *   tokens fit the user's 'Prefill Context' slider, it processes locally.
+ * - SMART ROUTING: If transcript exceeds the user's slider, safely routes to Cloud.
  * - ATOMIC DB WRITES: Failure states are pushed to Supabase BEFORE local cache.
- * - LOCAL INTERCEPTION: Seamlessly routes to on-device hardware if activated.
- * - TELEMETRY SYNC: Accurately logs 0-token local runs to usage_logs.
- * - RESILIENT JSON PARSING: Strips markdown and hallucinations from local LLMs.
+ * - STRICT TYPING: Utilizes Database types for perfectly safe JSONB casting.
  * ----------------------------------------------------------------------------
  */
 
@@ -19,10 +19,16 @@ import { supabase } from '../../lib/supabase/client';
 import { useVideoStore } from '../../store/useVideoStore';
 import { parseVideoUrl, fetchVideoTitle } from '../../utils/videoParser';
 import { fetchClientCaptions } from '../../utils/clientCaptions';
+import { Database } from '../../types/database/database.types';
 
 // Local AI Integration
 import { useLocalAIStore } from '../../store/useLocalAIStore';
 import { runLocalInference } from '../../services/localInference';
+
+// ─── STRICT DB TYPE EXTRACTION ───────────────────────────────────────────────
+type ChaptersType = Database['public']['Tables']['ai_insights']['Insert']['chapters'];
+type TakeawaysType = Database['public']['Tables']['ai_insights']['Insert']['key_takeaways'];
+type SeoMetaType = Database['public']['Tables']['ai_insights']['Insert']['seo_metadata'];
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
@@ -64,13 +70,13 @@ function maskErrorMessage(rawMsg: string): string {
     if (rawMsg.includes('EDGE_HTTP_ERROR')) {
         return 'The processing server is temporarily unavailable. Please try again shortly.';
     }
-    if (rawMsg.includes('LOCAL_AI_ERROR')) {
-        return 'The local AI engine encountered an error. Please try again or disable Local AI in settings to use cloud processing.';
-    }
     if (rawMsg.includes('JSON_FORMAT_ERROR')) {
         return 'The local model generated incomplete data. Try increasing "Max Decode Tokens" in settings.';
     }
-    return 'An unexpected error occurred while processing the media.';
+    if (rawMsg.includes('LOCAL_AI_ERROR')) {
+        return 'The local AI engine encountered an error. Please try again or disable Local AI in settings.';
+    }
+    return rawMsg; // Let specific UI feedback (like slider limits) fall through directly
 }
 
 // ─── HOOK ────────────────────────────────────────────────────────────────────
@@ -143,17 +149,32 @@ export const useProcessVideo = () => {
                     // Silent: Edge handles it gracefully.
                 }
 
-                // ── 5.5. LOCAL AI ROUTING CHECK ────────────────────────────────────
+                // ── 5.5. HARDWARE-AGNOSTIC ROUTING ─────────────────────────────────
                 const localState = useLocalAIStore.getState();
                 const activeModel = localState.activeModelId;
-                const isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
+                let isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
-                if (isLocalModelReady) {
-                    videoStore.recordEvent(
-                        'LOCAL_MODE',
-                        'success',
-                        `Local AI enabled (${activeModel}). Processing transcript on-device to save API tokens.`
-                    );
+                // If we have the transcript locally already, check its exact mathematical token weight
+                if (isLocalModelReady && clientTranscript) {
+                    // 1 token ~= 3.5 chars + 150 overhead for the prompt instructions
+                    const estimatedTokens = Math.ceil(clientTranscript.length / 3.5) + 150;
+
+                    if (estimatedTokens > localState.prefillTokens) {
+                        videoStore.recordEvent(
+                            'CLOUD_MODE',
+                            'info',
+                            `Transcript (~${estimatedTokens} tokens) exceeds your configured Prefill Context (${localState.prefillTokens}). Auto-routing to Cloud API.`
+                        );
+                        isLocalModelReady = false;
+                    } else {
+                        videoStore.recordEvent(
+                            'LOCAL_MODE',
+                            'success',
+                            `Local AI enabled (${activeModel}). Processing on-device.`
+                        );
+                    }
+                } else if (isLocalModelReady) {
+                    videoStore.recordEvent('LOCAL_MODE', 'success', `Local AI ready. Waiting for Edge transcript extraction.`);
                 } else {
                     videoStore.recordEvent('CLOUD_MODE', 'info', `Routing to Cloud API for insight generation.`);
                 }
@@ -177,7 +198,7 @@ export const useProcessVideo = () => {
                             transcript_text: clientTranscript,
                             language,
                             difficulty,
-                            skip_ai: isLocalModelReady, // Intercepts Gemini in the cloud!
+                            skip_ai: isLocalModelReady, // Intercepts Gemini in the cloud if true!
                         }),
                     },
                 );
@@ -194,12 +215,27 @@ export const useProcessVideo = () => {
 
                 // ── 7. LOCAL AI EXECUTION (IF HANDOFF RECEIVED) ─────────────────────
                 if (data.is_local_handoff && activeModel) {
-                    videoStore.recordEvent('LOCAL_AI_START', 'info', 'Transcript received. Starting local AI analysis...');
+                    const rawText = data.transcript || clientTranscript || '';
+
+                    // The Edge Function returned the Deepgram transcript. We must verify token weight before passing to C++
+                    const estimatedServerTokens = Math.ceil(rawText.length / 3.5) + 150;
+
+                    if (estimatedServerTokens > localState.prefillTokens) {
+                        return {
+                            success: false,
+                            errorMsg: `Transcript too large (~${estimatedServerTokens} tokens) for your current Prefill Context limit (${localState.prefillTokens}). Increase the slider in Hardware settings or disable Local AI.`,
+                            videoId: videoUuid
+                        };
+                    }
+
+                    videoStore.recordEvent('LOCAL_AI_START', 'info', 'Transcript fits memory limit. Starting local AI analysis...');
 
                     try {
-                        // Hardened Structured Prompt: Expressly forbids Markdown
+                        // Hardened JSON-Only Prompt. 
+                        // ENTIRE rawText is passed. NO artificial truncation.
                         const structuredPrompt = `You are a strict data extraction AI. Analyze the transcript below. You MUST output ONLY a valid JSON object. 
-DO NOT wrap the output in markdown code blocks. DO NOT add conversational text. Output exactly this format:
+DO NOT wrap the output in markdown code blocks. DO NOT add conversational text. Start directly with { and end with }.
+
 {
   "summary": "A detailed paragraph summarizing the content.",
   "conclusion": "A brief 2-sentence final thought.",
@@ -209,42 +245,41 @@ DO NOT wrap the output in markdown code blocks. DO NOT add conversational text. 
 }
 
 Transcript:
-${data.transcript || clientTranscript}`;
+${rawText}`;
 
                         // Execute on Native Device Hardware
                         const rawLocalOutput = await runLocalInference(structuredPrompt, () => { });
                         videoStore.recordEvent('LOCAL_AI_SUCCESS', 'success', 'Local generation complete. Validating schema...');
 
                         // ELITE JSON SANITIZATION
-                        let parsedInsights: any;
+                        let parsedInsights: Record<string, unknown>;
                         try {
-                            // 1. Strip markdown ticks if the model rebelled and added them anyway
                             let sanitized = rawLocalOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-                            // 2. Find absolute boundaries
                             const firstBrace = sanitized.indexOf('{');
                             const lastBrace = sanitized.lastIndexOf('}');
 
                             if (firstBrace === -1 || lastBrace === -1) {
-                                throw new Error("No JSON boundaries found.");
+                                if (rawLocalOutput.length < 15) throw new Error("CONTEXT_OVERFLOW");
+                                throw new Error("JSON_FORMAT_ERROR");
                             }
 
-                            // 3. Extract purely the JSON payload
                             const cleanJsonString = sanitized.substring(firstBrace, lastBrace + 1);
                             parsedInsights = JSON.parse(cleanJsonString);
                         } catch (jsonErr) {
                             console.error("Local JSON Extraction Failure. Raw Output:", rawLocalOutput);
+                            if (jsonErr instanceof Error && jsonErr.message === 'CONTEXT_OVERFLOW') throw jsonErr;
                             throw new Error("JSON_FORMAT_ERROR");
                         }
 
-                        // Upsert directly to DB
+                        // Upsert directly to DB with STRICT DB Type Casting
                         const { error: insightError } = await supabase.from('ai_insights').upsert({
                             video_id: videoUuid,
-                            summary: parsedInsights.summary || "Summary generation failed.",
-                            conclusion: parsedInsights.conclusion || null,
-                            chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
-                            key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
-                            seo_metadata: parsedInsights.seo_metadata || {},
+                            summary: (parsedInsights.summary as string) || "Summary generation failed.",
+                            conclusion: (parsedInsights.conclusion as string) || null,
+                            chapters: (Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : []) as unknown as ChaptersType,
+                            key_takeaways: (Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : []) as unknown as TakeawaysType,
+                            seo_metadata: (parsedInsights.seo_metadata ?? null) as unknown as SeoMetaType,
                             ai_model: `Local: ${activeModel}`,
                             language,
                             processed_at: new Date().toISOString()
@@ -254,13 +289,13 @@ ${data.transcript || clientTranscript}`;
 
                         const durationSeconds = Math.floor((Date.now() - processStartTime) / 1000);
 
-                        // TELEMETRY FIX: Log to usage_logs so charts work!
+                        // TELEMETRY SYNC
                         await supabase.from('usage_logs').insert({
                             user_id: session.user.id,
                             video_id: videoUuid,
                             action: 'ai_insights_generated',
                             ai_model: `Local: ${activeModel}`,
-                            tokens_consumed: 0, // 0 Cloud Tokens Burned!
+                            tokens_consumed: 0,
                             duration_seconds: durationSeconds,
                             metadata: { local_execution: true }
                         });
@@ -299,7 +334,6 @@ ${data.transcript || clientTranscript}`;
             const rawMsg = result.errorMsg ?? 'Unknown error';
             console.log('[useProcessVideo] Pipeline failure:', rawMsg);
 
-            // Persist failed status to DB FIRST so polling/history reflects it
             if (result.videoId) {
                 await supabase
                     .from('videos')
@@ -314,10 +348,8 @@ ${data.transcript || clientTranscript}`;
                 queryClient.invalidateQueries({ queryKey: ['video_relational', result.videoId] });
             }
 
-            // Surface clean error message in the UI
             setError(maskErrorMessage(rawMsg));
 
-            // Clear the active video AFTER DB write + cache invalidation
             if (clearActiveVideo) clearActiveVideo();
         },
     });

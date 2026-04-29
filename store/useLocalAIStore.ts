@@ -1,10 +1,19 @@
 /**
  * store/useLocalAIStore.ts
  * Enterprise State Manager for On-Device LLM Processing
+ * ----------------------------------------------------------------------------
+ * DESIGN PRINCIPLES:
+ * - PERSISTENCE: Automatically saves hardware configurations to local storage.
+ * - TYPE SAFETY: Strict typing for all llama.rn hyper-parameters.
+ * - REACTIVITY: Bound directly to the UI sliders for zero-latency updates.
+ * - AUTO-FLUSH: Triggers native engine teardown on RAM-impacting changes.
+ * ----------------------------------------------------------------------------
  */
+
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 export interface LocalModel {
     id: string;
@@ -40,7 +49,7 @@ interface LocalAIState {
 
     // Model State
     activeModelId: string | null;
-    downloadedModels: string[]; // List of IDs marking readiness
+    downloadedModels: string[];
     downloadProgress: Record<string, number>;
 
     // Core Actions
@@ -60,17 +69,17 @@ interface LocalAIState {
 
 export const useLocalAIStore = create<LocalAIState>()(
     persist(
-        (set) => ({
+        (set, get) => ({
             isLocalServerEnabled: false,
             port: '4891',
             allowExternalConnections: false,
 
             computeBackend: 'auto',
             threads: 4,
-            gpuLayers: 33,
-            temperature: 0.3,
-            prefillTokens: 256,
-            decodeTokens: 256,
+            gpuLayers: 25,
+            temperature: 0.2,
+            prefillTokens: 4096, // User controlled limit
+            decodeTokens: 2048,
 
             activeModelId: null,
             downloadedModels: [],
@@ -81,7 +90,25 @@ export const useLocalAIStore = create<LocalAIState>()(
             toggleExternalConnections: (enabled) => set({ allowExternalConnections: enabled }),
             setComputeBackend: (backend) => set({ computeBackend: backend }),
 
-            setHardwareState: (key, value) => set((state) => ({ ...state, [key]: value })),
+            setHardwareState: async (key, value) => {
+                set((state) => ({ ...state, [key]: value }));
+
+                // HARDWARE SYNC: If RAM-impacting limits change, actively flush the native engine
+                // so it is forced to re-allocate exactly to user specs on the next run.
+                if (key === 'prefillTokens' || key === 'decodeTokens' || key === 'gpuLayers') {
+                    if (Platform.OS !== 'web') {
+                        try {
+                            const { releaseNativeEngine } = require('../services/localInference');
+                            if (releaseNativeEngine) {
+                                await releaseNativeEngine();
+                                console.log(`[Local AI Store] Flushed native engine due to ${key} reconfiguration.`);
+                            }
+                        } catch (e) {
+                            // Non-fatal, module might not be loaded yet
+                        }
+                    }
+                }
+            },
 
             setActiveModel: (id) => set({ activeModelId: id }),
 

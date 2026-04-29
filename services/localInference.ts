@@ -1,12 +1,19 @@
+/**
+ * services/localInference.ts
+ * Native Llama.rn Bridge & Hardware Watchdog
+ * ----------------------------------------------------------------------------
+ * DESIGN PRINCIPLES:
+ * - HARDWARE AGNOSTIC: Allocates RAM exactly based on user store preferences.
+ * - STRICT CONTEXT MATH: n_ctx = prefillTokens + decodeTokens.
+ * - PREDICTIVE SHIELD: Throws CONTEXT_OVERFLOW if prompt exceeds prefill limit,
+ *   preventing silent OS-level C++ crashes.
+ * ----------------------------------------------------------------------------
+ */
+
 import { Platform } from 'react-native';
 import { useLocalAIStore } from '../store/useLocalAIStore';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
-/**
- * ----------------------------------------------------------------------------
- * NATIVE ENGINE: llama.rn (llama.cpp for React Native)
- * ----------------------------------------------------------------------------
- */
 let LlamaContext: any = null;
 if (Platform.OS !== 'web') {
     try {
@@ -17,23 +24,53 @@ if (Platform.OS !== 'web') {
     }
 }
 
+// ─── SINGLETON ENGINE TRACKING ───────────────────────────────────────────────
 let activeLlamaContext: any = null;
-let lastContextModelId: string | null = null;
+let activeModelId: string | null = null;
+let activeContextSize: number = 0;
+let activeGpuLayers: number = 0;
 
-// Gemma 4 specific prompt wrapping to enforce JSON constraints
 const formatGemmaPrompt = (prompt: string): string => {
-    return `<bos><start_of_turn>user\nYou are an elite Data Extraction Specialist. Extract strict JSON based on the provided instructions.\n\n${prompt}<end_of_turn>\n<start_of_turn>model\n`;
+    return `<bos><start_of_turn>user\nYou are an elite Data Extraction Specialist. Extract strict JSON based on the provided instructions. DO NOT use markdown code blocks.\n\n${prompt}<end_of_turn>\n<start_of_turn>model\n`;
 };
 
-const runNativeInference = async (
-    prompt: string,
-    modelId: string,
-    options: { temperature: number; decodeTokens: number; gpuLayers: number },
-    onChunk?: (token: string) => void
-): Promise<string> => {
-    await activateKeepAwakeAsync();
+/**
+ * PRODUCTION SAFEGUARD: Memory Leak Prevention & Reconfiguration
+ */
+export const releaseNativeEngine = async () => {
+    if (activeLlamaContext && Platform.OS !== 'web') {
+        console.log(`[Local AI] Force-aborting context. Freeing RAM...`);
+        try {
+            await activeLlamaContext.release();
+            activeLlamaContext = null;
+            activeModelId = null;
+            activeContextSize = 0;
+        } catch (e) {
+            console.error("[Local AI] Failed to release context during abort.", e);
+        }
+    }
+};
 
-    try {
+/**
+ * Instantiates the hardware context directly tied to UI sliders.
+ */
+export const configureNativeEngine = async (
+    modelId: string,
+    options: { prefillTokens: number; decodeTokens: number; gpuLayers: number }
+) => {
+    // 1. Calculate Total Required RAM block (n_ctx must fit both prompt and generated output)
+    const requiredContextSize = options.prefillTokens + options.decodeTokens;
+
+    const isModelMatch = activeModelId === modelId;
+    const isContextMatch = activeContextSize === requiredContextSize;
+    const isGpuMatch = activeGpuLayers === options.gpuLayers;
+
+    // If engine is missing OR the user changed sliders, reboot the engine into new RAM footprint.
+    if (!activeLlamaContext || !isModelMatch || !isContextMatch || !isGpuMatch) {
+        await releaseNativeEngine();
+
+        console.log(`[Local AI] Booting llama.rn engine for model: ${modelId} | Allocated Context: ${requiredContextSize} tokens`);
+
         const FileSystem = require('expo-file-system/legacy');
         const docDir = FileSystem.documentDirectory || 'file:///tmp/';
 
@@ -41,33 +78,51 @@ const runNativeInference = async (
         if (modelId === 'gemma-4-e4b-it-unsloth') fileName = 'gemma-4-E4B-it-Q4_K_M.gguf';
         if (modelId === 'gemma-4-e2b-it-unsloth') fileName = 'gemma-4-E2B-it-UD-Q4_K_XL.gguf';
 
-        let modelPath = `${docDir}${fileName}`.replace('file://', '');
+        const modelPath = `${docDir}${fileName}`.replace('file://', '');
 
         if (!LlamaContext) {
             throw new Error("LLAMA_NATIVE_MISSING: The llama.rn native module is not initialized.");
         }
 
-        // Initialize or Reuse Hardware Context
-        if (!activeLlamaContext || lastContextModelId !== modelId) {
-            if (activeLlamaContext) {
-                console.log(`[Local AI] Releasing previous hardware context for ${lastContextModelId}`);
-                await activeLlamaContext.release();
-            }
+        activeLlamaContext = await LlamaContext({
+            contextSize: requiredContextSize,
+            model: modelPath,
+            n_gpu_layers: options.gpuLayers,
+        });
 
-            console.log(`[Local AI] Booting llama.rn engine for model: ${modelId}`);
+        activeModelId = modelId;
+        activeContextSize = requiredContextSize;
+        activeGpuLayers = options.gpuLayers;
+    }
+};
 
-            // CRITICAL FIX: Removed use_mlock: true which was crashing Android Native.
-            activeLlamaContext = await LlamaContext({
-                contextSize: 4096, // Safe threshold for mobile RAM
-                model: modelPath,
-                n_gpu_layers: options.gpuLayers,
-            });
-            lastContextModelId = modelId;
+/**
+ * ----------------------------------------------------------------------------
+ * NATIVE ENGINE: llama.rn (llama.cpp for React Native)
+ * ----------------------------------------------------------------------------
+ */
+const runNativeInference = async (
+    prompt: string,
+    modelId: string,
+    options: { temperature: number; prefillTokens: number; decodeTokens: number; gpuLayers: number },
+    onChunk?: (token: string) => void
+): Promise<string> => {
+    await activateKeepAwakeAsync();
+
+    try {
+        const formattedPrompt = formatGemmaPrompt(prompt);
+
+        // Predictive Hardware Shield: Stop it before C++ crashes if the prompt exceeds the Prefill Slider
+        // Math: 1 token is roughly 3.5 characters.
+        const estimatedTokens = Math.ceil(formattedPrompt.length / 3.5);
+        if (estimatedTokens > options.prefillTokens) {
+            throw new Error("CONTEXT_OVERFLOW");
         }
 
-        const formattedPrompt = formatGemmaPrompt(prompt);
-        let fullText = "";
+        // Ensure hardware is configured to match the user's sliders
+        await configureNativeEngine(modelId, options);
 
+        let fullText = "";
         const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
 
         return new Promise((resolve, reject) => {
@@ -92,6 +147,7 @@ const runNativeInference = async (
 
     } catch (e: any) {
         console.error("[Local AI Native Error]", e);
+        if (e.message === 'CONTEXT_OVERFLOW') throw e;
         throw new Error(`NATIVE_INFERENCE_FAILURE: ${e.message}`);
     } finally {
         deactivateKeepAwake();
@@ -172,36 +228,21 @@ const runWebInference = async (
 
 /**
  * Main entry point for local AI inference
- * Dynamically routes to Web HTTP fetch or Native Llama.cpp binding
  */
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
-    const { activeModelId, temperature, port, decodeTokens, gpuLayers } = useLocalAIStore.getState();
+    const { activeModelId, temperature, port, prefillTokens, decodeTokens, gpuLayers } = useLocalAIStore.getState();
 
     if (!activeModelId) {
         throw new Error("INFERENCE_FAULT: No active model selected in settings.");
     }
 
     if (Platform.OS !== 'web') {
-        return runNativeInference(prompt, activeModelId, { temperature, decodeTokens, gpuLayers }, onChunk);
+        return runNativeInference(prompt, activeModelId, { temperature, prefillTokens, decodeTokens, gpuLayers }, onChunk);
     }
 
     return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
 };
 
-/**
- * PRODUCTION SAFEGUARD 3: Memory Leak Prevention
- * Exposes a method to force-release the llama.rn context if the user aborts
- * the generation or unmounts the screen, preventing zombie RAM lockups.
- */
 export const abortNativeInference = async () => {
-    if (activeLlamaContext && Platform.OS !== 'web') {
-        console.log(`[Local AI] Force-aborting context. Freeing RAM...`);
-        try {
-            await activeLlamaContext.release();
-            activeLlamaContext = null;
-            lastContextModelId = null;
-        } catch (e) {
-            console.error("[Local AI] Failed to release context during abort.", e);
-        }
-    }
-}
+    await releaseNativeEngine();
+};
