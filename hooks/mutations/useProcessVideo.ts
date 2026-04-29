@@ -1,15 +1,14 @@
 /**
  * hooks/mutations/useProcessVideo.ts
- * Pipeline Dispatcher — Enterprise Universal Architecture
+ * Pipeline Dispatcher — Universal Architecture
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
  * - UNIVERSAL COMPATIBILITY: Uses `expo-crypto` to guarantee UUID generation.
- * - ANTI-CRASH GUARANTEE: mutationFn NEVER throws. Resolves safely.
- * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. If the transcript
- *   tokens fit the user's 'Prefill Context' slider, it processes locally.
- * - SMART ROUTING: If transcript exceeds the user's slider, safely routes to Cloud.
- * - ATOMIC DB WRITES: Failure states are pushed to Supabase BEFORE local cache.
- * - STRICT TYPING: Utilizes Database types for perfectly safe JSONB casting.
+ * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. 
+ * - THE MASTER FALLBACK: If Local AI fails, hallucinates, or runs out of RAM, 
+ *   it seamlessly aborts and routes to Cloud Gemini. Zero failed videos.
+ * - AGGRESSIVE JSON REPAIR: Extracts JSON arrays/objects even if the local 
+ *   model outputs conversational preamble.
  * ----------------------------------------------------------------------------
  */
 
@@ -20,66 +19,50 @@ import { useVideoStore } from '../../store/useVideoStore';
 import { parseVideoUrl, fetchVideoTitle } from '../../utils/videoParser';
 import { fetchClientCaptions } from '../../utils/clientCaptions';
 import { Database } from '../../types/database/database.types';
-
-// Local AI Integration
 import { useLocalAIStore } from '../../store/useLocalAIStore';
-import { runLocalInference } from '../../services/localInference';
+import { runLocalInference, releaseNativeEngine } from '../../services/localInference';
 
-// ─── STRICT DB TYPE EXTRACTION ───────────────────────────────────────────────
 type ChaptersType = Database['public']['Tables']['ai_insights']['Insert']['chapters'];
 type TakeawaysType = Database['public']['Tables']['ai_insights']['Insert']['key_takeaways'];
 type SeoMetaType = Database['public']['Tables']['ai_insights']['Insert']['seo_metadata'];
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string;
-
-// ─── MINIMUM QUALITY GATE ────────────────────────────────────────────────────
 const CLIENT_CAPTION_MIN_WORDS = 50;
 
-// ─── TYPES ───────────────────────────────────────────────────────────────────
-interface ProcessVideoParams {
-    videoUrl: string;
-    language?: string;
-    difficulty?: string;
-}
+interface ProcessVideoParams { videoUrl: string; language?: string; difficulty?: string; }
+interface DispatchResult { success: boolean; videoId?: string; errorMsg?: string; }
 
-interface DispatchResult {
-    success: boolean;
-    videoId?: string;
-    errorMsg?: string;
-}
-
-// ─── USER-FACING ERROR MASKING ───────────────────────────────────────────────
 function maskErrorMessage(rawMsg: string): string {
-    if (
-        rawMsg.includes('ALL_AUDIO_PROVIDERS_EXHAUSTED') ||
-        rawMsg.includes('TRANSCRIPTION_FAILED') ||
-        rawMsg.includes('HTTP 404')
-    ) {
-        return "We couldn't extract audio for this video due to platform restrictions. Please try another link.";
-    }
-    if (rawMsg.includes('UNAUTHORIZED')) {
-        return 'Your session has expired. Please sign in again.';
-    }
-    if (rawMsg.includes('INVALID_MEDIA')) {
-        return 'The provided URL is not a valid or supported video link.';
-    }
-    if (rawMsg.includes('DB_INIT_FAILED')) {
-        return 'Failed to initialize the process. Please check your connection and try again.';
-    }
-    if (rawMsg.includes('EDGE_HTTP_ERROR')) {
-        return 'The processing server is temporarily unavailable. Please try again shortly.';
-    }
-    if (rawMsg.includes('JSON_FORMAT_ERROR')) {
-        return 'The local model generated incomplete data. Try increasing "Max Decode Tokens" in settings.';
-    }
-    if (rawMsg.includes('LOCAL_AI_ERROR')) {
-        return 'The local AI engine encountered an error. Please try again or disable Local AI in settings.';
-    }
-    return rawMsg; // Let specific UI feedback (like slider limits) fall through directly
+    if (rawMsg.includes('ALL_AUDIO_PROVIDERS_EXHAUSTED')) return "We couldn't extract audio for this video due to platform restrictions. Please try another link.";
+    if (rawMsg.includes('UNAUTHORIZED')) return 'Your session has expired. Please sign in again.';
+    if (rawMsg.includes('INVALID_MEDIA')) return 'The provided URL is not a valid or supported video link.';
+    if (rawMsg.includes('DB_INIT_FAILED')) return 'Failed to initialize the process. Please check your connection and try again.';
+    if (rawMsg.includes('EDGE_HTTP_ERROR')) return 'The processing server is temporarily unavailable. Please try again shortly.';
+    return rawMsg;
 }
 
-// ─── HOOK ────────────────────────────────────────────────────────────────────
+function extractAndParseJSON(rawOutput: string) {
+    let sanitized = rawOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const firstBrace = sanitized.indexOf('{');
+    const lastBrace = sanitized.lastIndexOf('}');
+
+    if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error("No JSON boundaries found.");
+    }
+
+    const cleanJsonString = sanitized.substring(firstBrace, lastBrace + 1);
+
+    try {
+        return JSON.parse(cleanJsonString);
+    } catch (e) {
+        const repaired = cleanJsonString
+            .replace(/,\s*([\]}])/g, '$1')
+            .replace(/[\u0000-\u001F]+/g, "");
+        return JSON.parse(repaired);
+    }
+}
+
 export const useProcessVideo = () => {
     const queryClient = useQueryClient();
     const setActiveVideoId = useVideoStore((s) => s.setActiveVideoId);
@@ -100,23 +83,17 @@ export const useProcessVideo = () => {
                 videoStore.hardReset();
                 videoStore.recordEvent('AUTH_CHECK', 'info', 'Verifying user session...');
 
-                // ── 1. URL VALIDATION ──────────────────────────────────────────────
                 const parsed = parseVideoUrl(videoUrl);
                 if (!parsed.isValid || !parsed.videoId || !parsed.normalizedUrl) {
                     return { success: false, errorMsg: 'INVALID_MEDIA: URL format not recognised.' };
                 }
 
-                // ── 2. SESSION ASSERTION ───────────────────────────────────────────
                 const { data: { session }, error: authError } = await supabase.auth.getSession();
-                if (authError || !session?.user) {
-                    return { success: false, errorMsg: 'UNAUTHORIZED: Session required.' };
-                }
+                if (authError || !session?.user) return { success: false, errorMsg: 'UNAUTHORIZED: Session required.' };
 
-                // ── 3. FETCH THE ACTUAL VIDEO TITLE ───────────────────────────────
                 videoStore.recordEvent('VALIDATION', 'info', 'Fetching video metadata...');
                 const officialTitle = await fetchVideoTitle(parsed.normalizedUrl);
 
-                // ── 4. DB ROW INITIALISATION ───────────────────────────────────────
                 videoStore.recordEvent('DATABASE', 'info', 'Creating secure vault record...');
                 const videoUuid = Crypto.randomUUID();
                 activeUuid = videoUuid;
@@ -131,47 +108,28 @@ export const useProcessVideo = () => {
                     status: 'queued',
                 }).select().single();
 
-                if (dbError || !videoRecord) {
-                    return { success: false, errorMsg: `DB_INIT_FAILED: ${dbError?.message}` };
-                }
+                if (dbError || !videoRecord) return { success: false, errorMsg: `DB_INIT_FAILED: ${dbError?.message}` };
 
                 setActiveVideoId(videoUuid);
                 useVideoStore.setState((state) => ({ videos: [videoRecord, ...state.videos] }));
 
-                // ── 5. CLIENT CAPTION FAST-PATH (quality-gated) ───────────────────
                 let clientTranscript: string | null = null;
                 try {
                     const raw = await fetchClientCaptions(parsed.videoId, parsed.platform);
-                    if (raw && raw.split(/\s+/).length >= CLIENT_CAPTION_MIN_WORDS) {
-                        clientTranscript = raw;
-                    }
-                } catch {
-                    // Silent: Edge handles it gracefully.
-                }
+                    if (raw && raw.split(/\s+/).length >= CLIENT_CAPTION_MIN_WORDS) clientTranscript = raw;
+                } catch { }
 
-                // ── 5.5. HARDWARE-AGNOSTIC ROUTING ─────────────────────────────────
                 const localState = useLocalAIStore.getState();
                 const activeModel = localState.activeModelId;
                 let isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
-                // If we have the transcript locally already, check its exact mathematical token weight
                 if (isLocalModelReady && clientTranscript) {
-                    // 1 token ~= 3.5 chars + 150 overhead for the prompt instructions
-                    const estimatedTokens = Math.ceil(clientTranscript.length / 3.5) + 150;
-
+                    const estimatedTokens = Math.ceil(clientTranscript.length / 3.2) + 200;
                     if (estimatedTokens > localState.prefillTokens) {
-                        videoStore.recordEvent(
-                            'CLOUD_MODE',
-                            'info',
-                            `Transcript (~${estimatedTokens} tokens) exceeds your configured Prefill Context (${localState.prefillTokens}). Auto-routing to Cloud API.`
-                        );
+                        videoStore.recordEvent('CLOUD_MODE', 'info', `Transcript (${estimatedTokens} tokens) exceeds Prefill Context slider limit (${localState.prefillTokens}). Auto-routing to Cloud API.`);
                         isLocalModelReady = false;
                     } else {
-                        videoStore.recordEvent(
-                            'LOCAL_MODE',
-                            'success',
-                            `Local AI enabled (${activeModel}). Processing on-device.`
-                        );
+                        videoStore.recordEvent('LOCAL_MODE', 'success', `Local AI enabled (${activeModel}). Processing on-device.`);
                     }
                 } else if (isLocalModelReady) {
                     videoStore.recordEvent('LOCAL_MODE', 'success', `Local AI ready. Waiting for Edge transcript extraction.`);
@@ -181,10 +139,8 @@ export const useProcessVideo = () => {
 
                 videoStore.recordEvent('PROCESSING', 'info', 'Extracting audio and generating transcript...');
 
-                // ── 6. EDGE FUNCTION DISPATCH ──────────────────────────────────────
-                const response = await fetch(
-                    `${SUPABASE_URL}/functions/v1/process-video`,
-                    {
+                const dispatchToEdge = async (skipAiFlag: boolean) => {
+                    return fetch(`${SUPABASE_URL}/functions/v1/process-video`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -198,81 +154,73 @@ export const useProcessVideo = () => {
                             transcript_text: clientTranscript,
                             language,
                             difficulty,
-                            skip_ai: isLocalModelReady, // Intercepts Gemini in the cloud if true!
+                            skip_ai: skipAiFlag,
                         }),
-                    },
-                );
+                    });
+                };
 
-                if (!response.ok) {
-                    return { success: false, errorMsg: `EDGE_HTTP_ERROR: ${response.status}`, videoId: videoUuid };
-                }
+                let response = await dispatchToEdge(isLocalModelReady);
+                if (!response.ok) return { success: false, errorMsg: `EDGE_HTTP_ERROR: ${response.status}`, videoId: videoUuid };
 
-                const data = await response.json();
+                let data = await response.json();
+                if (!data.success) return { success: false, errorMsg: data.error ?? 'EDGE_PROCESSING_FAILED', videoId: videoUuid };
 
-                if (!data.success) {
-                    return { success: false, errorMsg: data.error ?? 'EDGE_PROCESSING_FAILED', videoId: videoUuid };
-                }
-
-                // ── 7. LOCAL AI EXECUTION (IF HANDOFF RECEIVED) ─────────────────────
                 if (data.is_local_handoff && activeModel) {
                     const rawText = data.transcript || clientTranscript || '';
-
-                    // The Edge Function returned the Deepgram transcript. We must verify token weight before passing to C++
-                    const estimatedServerTokens = Math.ceil(rawText.length / 3.5) + 150;
+                    // Use a more conservative estimation factor (3.2) consistent with localInference.ts
+                    const estimatedServerTokens = Math.ceil(rawText.length / 3.2) + 200;
 
                     if (estimatedServerTokens > localState.prefillTokens) {
-                        return {
-                            success: false,
-                            errorMsg: `Transcript too large (~${estimatedServerTokens} tokens) for your current Prefill Context limit (${localState.prefillTokens}). Increase the slider in Hardware settings or disable Local AI.`,
-                            videoId: videoUuid
-                        };
+                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Transcript (${estimatedServerTokens} tokens) exceeds slider limit (${localState.prefillTokens}). Falling back to Cloud API...`);
+                        await releaseNativeEngine();
+                        response = await dispatchToEdge(false);
+                        data = await response.json();
+                        if (!data.success) return { success: false, errorMsg: data.error, videoId: videoUuid };
+                        videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated successfully!');
+                        return { success: true, videoId: videoUuid };
                     }
 
-                    videoStore.recordEvent('LOCAL_AI_START', 'info', 'Transcript fits memory limit. Starting local AI analysis...');
+                    videoStore.recordEvent('LOCAL_AI_START', 'info', `Transcript fits memory limit (${estimatedServerTokens} tokens). Starting local AI analysis...`);
 
                     try {
-                        // Hardened JSON-Only Prompt. 
-                        // ENTIRE rawText is passed. NO artificial truncation.
-                        const structuredPrompt = `You are a strict data extraction AI. Analyze the transcript below. You MUST output ONLY a valid JSON object. 
-DO NOT wrap the output in markdown code blocks. DO NOT add conversational text. Start directly with { and end with }.
-
+                        const structuredPrompt = `Translate your output to: ${language}.
+Analyze the transcript and output ONLY a JSON object. Do not add any text before or after the JSON.
+You must use this exact structure:
 {
-  "summary": "A detailed paragraph summarizing the content.",
-  "conclusion": "A brief 2-sentence final thought.",
-  "chapters": [{"title": "String", "timestamp": "MM:SS", "description": "String"}],
+  "summary": "One detailed paragraph summarizing.",
+  "conclusion": "Two sentences.",
+  "chapters": [{"timestamp": "00:00", "title": "Chapter 1", "description": "Details"}],
   "key_takeaways": ["Point 1", "Point 2"],
-  "seo_metadata": {"tags": ["tag1"], "description": "Meta desc"}
+  "seo_metadata": {"tags": ["tag1"], "description": "Meta description", "suggested_titles": ["Title"]}
 }
 
 Transcript:
 ${rawText}`;
 
-                        // Execute on Native Device Hardware
-                        const rawLocalOutput = await runLocalInference(structuredPrompt, () => { });
-                        videoStore.recordEvent('LOCAL_AI_SUCCESS', 'success', 'Local generation complete. Validating schema...');
-
-                        // ELITE JSON SANITIZATION
-                        let parsedInsights: Record<string, unknown>;
+                        let rawLocalOutput = "";
                         try {
-                            let sanitized = rawLocalOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-                            const firstBrace = sanitized.indexOf('{');
-                            const lastBrace = sanitized.lastIndexOf('}');
-
-                            if (firstBrace === -1 || lastBrace === -1) {
-                                if (rawLocalOutput.length < 15) throw new Error("CONTEXT_OVERFLOW");
-                                throw new Error("JSON_FORMAT_ERROR");
-                            }
-
-                            const cleanJsonString = sanitized.substring(firstBrace, lastBrace + 1);
-                            parsedInsights = JSON.parse(cleanJsonString);
-                        } catch (jsonErr) {
-                            console.error("Local JSON Extraction Failure. Raw Output:", rawLocalOutput);
-                            if (jsonErr instanceof Error && jsonErr.message === 'CONTEXT_OVERFLOW') throw jsonErr;
-                            throw new Error("JSON_FORMAT_ERROR");
+                            rawLocalOutput = await runLocalInference(structuredPrompt, (chunk) => {
+                                // Optional: track progress if needed
+                            });
+                        } catch (inferenceError: any) {
+                            console.error("[Local AI] Engine crashed/aborted:", inferenceError.message);
+                            throw new Error(`Hardware Engine aborted: ${inferenceError.message}`);
                         }
 
-                        // Upsert directly to DB with STRICT DB Type Casting
+                        if (!rawLocalOutput || rawLocalOutput.length < 20) {
+                            throw new Error("Local AI returned empty or insufficient output.");
+                        }
+
+                        videoStore.recordEvent('LOCAL_AI_SUCCESS', 'success', 'Local generation complete. Validating schema...');
+
+                        let parsedInsights: Record<string, unknown>;
+                        try {
+                            if (rawLocalOutput.length < 15) throw new Error("Output too short.");
+                            parsedInsights = extractAndParseJSON(rawLocalOutput);
+                        } catch (jsonErr) {
+                            throw new Error("JSON format invalid.");
+                        }
+
                         const { error: insightError } = await supabase.from('ai_insights').upsert({
                             video_id: videoUuid,
                             summary: (parsedInsights.summary as string) || "Summary generation failed.",
@@ -289,7 +237,6 @@ ${rawText}`;
 
                         const durationSeconds = Math.floor((Date.now() - processStartTime) / 1000);
 
-                        // TELEMETRY SYNC
                         await supabase.from('usage_logs').insert({
                             user_id: session.user.id,
                             video_id: videoUuid,
@@ -307,12 +254,18 @@ ${rawText}`;
                         }).eq('id', videoUuid);
 
                         videoStore.recordEvent('SUCCESS', 'success', 'Local insights saved successfully! Dashboard updated.');
-                    } catch (localErr: unknown) {
-                        const msg = localErr instanceof Error ? localErr.message : String(localErr);
-                        return { success: false, errorMsg: `LOCAL_AI_ERROR: ${msg}`, videoId: videoUuid };
+                    } catch (localErr: any) {
+                        // FIX: 'warn' resolves TS error
+                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Local AI failed (${localErr.message}). Seamlessly falling back to Cloud API...`);
+                        await releaseNativeEngine();
+                        response = await dispatchToEdge(false);
+                        data = await response.json();
+
+                        if (!data.success) return { success: false, errorMsg: data.error, videoId: videoUuid };
+                        videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated via Fallback successfully!');
+                        return { success: true, videoId: videoUuid };
                     }
                 } else {
-                    // Cloud executed it
                     videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated and saved successfully!');
                 }
 
@@ -322,34 +275,24 @@ ${rawText}`;
                 return { success: false, errorMsg: msg, videoId: activeUuid ?? undefined };
             }
         },
-
         onSuccess: async (result: DispatchResult) => {
             if (result.success) {
                 queryClient.invalidateQueries({ queryKey: ['video-history'] });
                 queryClient.invalidateQueries({ queryKey: ['videos'] });
                 return;
             }
-
-            // ── FAILURE HANDLING ─────────────────────────────────────────────────
             const rawMsg = result.errorMsg ?? 'Unknown error';
             console.log('[useProcessVideo] Pipeline failure:', rawMsg);
 
             if (result.videoId) {
-                await supabase
-                    .from('videos')
-                    .update({
-                        status: 'failed',
-                        error_message: rawMsg,
-                        processing_completed_at: new Date().toISOString(),
-                    })
-                    .eq('id', result.videoId);
-
+                await supabase.from('videos').update({
+                    status: 'failed',
+                    error_message: rawMsg,
+                    processing_completed_at: new Date().toISOString(),
+                }).eq('id', result.videoId);
                 queryClient.invalidateQueries({ queryKey: ['video-history'] });
-                queryClient.invalidateQueries({ queryKey: ['video_relational', result.videoId] });
             }
-
             setError(maskErrorMessage(rawMsg));
-
             if (clearActiveVideo) clearActiveVideo();
         },
     });

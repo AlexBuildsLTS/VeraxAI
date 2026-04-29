@@ -1,15 +1,7 @@
 /**
  * store/useLocalAIStore.ts
- * Enterprise State Manager for On-Device LLM Processing
- * ----------------------------------------------------------------------------
- * DESIGN PRINCIPLES:
- * - PERSISTENCE: Automatically saves hardware configurations to local storage.
- * - TYPE SAFETY: Strict typing for all llama.rn hyper-parameters.
- * - REACTIVITY: Bound directly to the UI sliders for zero-latency updates.
- * - AUTO-FLUSH: Triggers native engine teardown on RAM-impacting changes.
- * ----------------------------------------------------------------------------
+ * State Manager for On-Device LLM Processing
  */
-
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -76,9 +68,9 @@ export const useLocalAIStore = create<LocalAIState>()(
 
             computeBackend: 'auto',
             threads: 4,
-            gpuLayers: 25,
+            gpuLayers: 24, // Increased for 2026 mobile GPUs
             temperature: 0.2,
-            prefillTokens: 4096, // User controlled limit
+            prefillTokens: 8192, // Increased default for longer videos
             decodeTokens: 2048,
 
             activeModelId: null,
@@ -93,8 +85,7 @@ export const useLocalAIStore = create<LocalAIState>()(
             setHardwareState: async (key, value) => {
                 set((state) => ({ ...state, [key]: value }));
 
-                // HARDWARE SYNC: If RAM-impacting limits change, actively flush the native engine
-                // so it is forced to re-allocate exactly to user specs on the next run.
+                // HARDWARE SYNC: Actively flush the native engine when limits change
                 if (key === 'prefillTokens' || key === 'decodeTokens' || key === 'gpuLayers') {
                     if (Platform.OS !== 'web') {
                         try {

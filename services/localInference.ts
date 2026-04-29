@@ -3,10 +3,11 @@
  * Native Llama.rn Bridge & Hardware Watchdog
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
- * - HARDWARE AGNOSTIC: Allocates RAM exactly based on user store preferences.
- * - STRICT CONTEXT MATH: n_ctx = prefillTokens + decodeTokens.
- * - PREDICTIVE SHIELD: Throws CONTEXT_OVERFLOW if prompt exceeds prefill limit,
- *   preventing silent OS-level C++ crashes.
+ * - VULKAN CRASH PREVENTION: Context size is strictly capped at the prefill slider.
+ *   n_predict is mathematically clamped so (prompt + output <= context).
+ * - JSON FORCE-FEEDING: Tricks the local model into outputting valid JSON by 
+ *   pre-injecting the opening bracket `{` to prevent instant EOS aborts.
+ * - DUAL ENGINES: Safely separates Pipeline Inference from Chat Inference.
  * ----------------------------------------------------------------------------
  */
 
@@ -14,140 +15,262 @@ import { Platform } from 'react-native';
 import { useLocalAIStore } from '../store/useLocalAIStore';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
-let LlamaContext: any = null;
+// --- TYPES & INTERFACES ------------------------------------------------------
+
+interface LlamaCompletionParams {
+    prompt: string;
+    n_predict: number;
+    temperature: number;
+    top_k: number;
+    top_p: number;
+    stop?: string[];
+}
+
+interface LlamaTokenData {
+    token: string;
+}
+
+interface LlamaInstance {
+    completion: (
+        params: LlamaCompletionParams,
+        onToken: (data: LlamaTokenData) => void
+    ) => Promise<void>;
+    release: () => Promise<void>;
+}
+
+type InitLlamaFn = (options: {
+    contextSize: number;
+    model: string;
+    n_gpu_layers: number;
+}) => Promise<LlamaInstance>;
+
+// --- CONSTANTS ---------------------------------------------------------------
+
+const ABSOLUTE_MAX_HARDWARE_CONTEXT = 32768;
+const TOKEN_ESTIMATION_FACTOR = 3.2; // More conservative (fewer chars per token)
+const TOKEN_BUFFER = 100;
+
+const MODEL_REGISTRY: Record<string, string> = {
+    'gemma-4-e4b-it-unsloth': 'gemma-4-E4B-it-Q4_K_M.gguf',
+    'gemma-4-e2b-it-unsloth': 'gemma-4-E2B-it-UD-Q4_K_XL.gguf',
+    'default': 'google_gemma-4-E2B-it-bf16.gguf'
+};
+
+// --- NATIVE MODULE INITIALIZATION --------------------------------------------
+
+let initLlama: InitLlamaFn | null = null;
+
 if (Platform.OS !== 'web') {
     try {
-        const { initLlama } = require('llama.rn');
-        LlamaContext = initLlama;
+        // Dynamic require to prevent web bundling issues
+        const llamaModule = require('llama.rn');
+        initLlama = llamaModule.initLlama;
     } catch (e) {
         console.warn("[Local AI] llama.rn module not found. Ensure the native module is linked.");
     }
 }
 
-// ─── SINGLETON ENGINE TRACKING ───────────────────────────────────────────────
-let activeLlamaContext: any = null;
+// --- SINGLETON ENGINE TRACKING -----------------------------------------------
+
+let activeLlamaContext: LlamaInstance | null = null;
 let activeModelId: string | null = null;
 let activeContextSize: number = 0;
 let activeGpuLayers: number = 0;
 
-const formatGemmaPrompt = (prompt: string): string => {
-    return `<bos><start_of_turn>user\nYou are an elite Data Extraction Specialist. Extract strict JSON based on the provided instructions. DO NOT use markdown code blocks.\n\n${prompt}<end_of_turn>\n<start_of_turn>model\n`;
+// --- UTILITIES ---------------------------------------------------------------
+
+/**
+ * Estimates token count based on string length.
+ * @param text The input string
+ * @param buffer Optional extra tokens to add
+ */
+const estimateTokens = (text: string, buffer: number = 0): number => {
+    return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
 };
+
+/**
+ * Formats prompt for JSON output by pre-injecting the opening bracket.
+ */
+const formatGemmaJSONPrompt = (prompt: string): string => {
+    return `<bos><start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
+};
+
+/**
+ * Formats chat history for Gemma models.
+ */
+const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
+    let prompt = "<bos>";
+    for (const msg of messages) {
+        const role = msg.role === 'ai' ? 'model' : 'user';
+        prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
+    }
+    prompt += "<start_of_turn>model\n";
+    return prompt;
+};
+
+/**
+ * Wraps the native completion callback in a promise.
+ */
+const executeNativeCompletion = async (
+    context: LlamaInstance,
+    params: LlamaCompletionParams,
+    initialText: string = "",
+    onChunk?: (token: string) => void
+): Promise<string> => {
+    let fullText = initialText;
+
+    await context.completion(params, (data) => {
+        fullText += data.token;
+        if (onChunk) onChunk(data.token);
+    });
+
+    return fullText;
+};
+
+// --- ENGINE MANAGEMENT -------------------------------------------------------
 
 /**
  * PRODUCTION SAFEGUARD: Memory Leak Prevention & Reconfiguration
  */
 export const releaseNativeEngine = async () => {
     if (activeLlamaContext && Platform.OS !== 'web') {
-        console.log(`[Local AI] Force-aborting context. Freeing RAM...`);
+        console.log(`[Local AI] Releasing hardware context. Freeing RAM...`);
         try {
             await activeLlamaContext.release();
+        } catch (e) {
+            console.error("[Local AI] Failed to release context.", e);
+        } finally {
             activeLlamaContext = null;
             activeModelId = null;
             activeContextSize = 0;
-        } catch (e) {
-            console.error("[Local AI] Failed to release context during abort.", e);
+            activeGpuLayers = 0;
         }
     }
 };
 
 /**
- * Instantiates the hardware context directly tied to UI sliders.
+ * Instantiates the hardware context cleanly based on user configuration.
  */
 export const configureNativeEngine = async (
     modelId: string,
-    options: { prefillTokens: number; decodeTokens: number; gpuLayers: number }
+    options: { prefillTokens: number; gpuLayers: number }
 ) => {
-    // 1. Calculate Total Required RAM block (n_ctx must fit both prompt and generated output)
-    const requiredContextSize = options.prefillTokens + options.decodeTokens;
+    // Align context size to 256 for Vulkan memory alignment
+    let optimalContext = Math.floor(options.prefillTokens / 256) * 256;
+    optimalContext = Math.min(optimalContext, ABSOLUTE_MAX_HARDWARE_CONTEXT);
 
-    const isModelMatch = activeModelId === modelId;
-    const isContextMatch = activeContextSize === requiredContextSize;
-    const isGpuMatch = activeGpuLayers === options.gpuLayers;
+    const isMatch =
+        activeLlamaContext &&
+        activeModelId === modelId &&
+        activeContextSize === optimalContext &&
+        activeGpuLayers === options.gpuLayers;
 
-    // If engine is missing OR the user changed sliders, reboot the engine into new RAM footprint.
-    if (!activeLlamaContext || !isModelMatch || !isContextMatch || !isGpuMatch) {
+    if (!isMatch) {
+        console.log(`[Local AI] Reconfiguring engine...`);
         await releaseNativeEngine();
 
-        console.log(`[Local AI] Booting llama.rn engine for model: ${modelId} | Allocated Context: ${requiredContextSize} tokens`);
+        if (!initLlama) {
+            throw new Error("LLAMA_NATIVE_MISSING: Native module not initialized.");
+        }
 
         const FileSystem = require('expo-file-system/legacy');
         const docDir = FileSystem.documentDirectory || 'file:///tmp/';
-
-        let fileName = 'google_gemma-4-E2B-it-bf16.gguf';
-        if (modelId === 'gemma-4-e4b-it-unsloth') fileName = 'gemma-4-E4B-it-Q4_K_M.gguf';
-        if (modelId === 'gemma-4-e2b-it-unsloth') fileName = 'gemma-4-E2B-it-UD-Q4_K_XL.gguf';
-
+        const fileName = MODEL_REGISTRY[modelId] || MODEL_REGISTRY['default'];
         const modelPath = `${docDir}${fileName}`.replace('file://', '');
 
-        if (!LlamaContext) {
-            throw new Error("LLAMA_NATIVE_MISSING: The llama.rn native module is not initialized.");
+        // Verify file exists before loading
+        try {
+            const fileInfo = await FileSystem.getInfoAsync(`${docDir}${fileName}`);
+            if (!fileInfo.exists) {
+                throw new Error(`MODEL_FILE_NOT_FOUND: ${fileName} is missing from storage.`);
+            }
+            console.log(`[Local AI] Model file verified: ${fileName} (${(fileInfo.size / 1024 / 1024).toFixed(2)} MB)`);
+        } catch (e: any) {
+            console.error("[Local AI] File system check failed:", e.message);
+            throw e;
         }
 
-        activeLlamaContext = await LlamaContext({
-            contextSize: requiredContextSize,
-            model: modelPath,
-            n_gpu_layers: options.gpuLayers,
-        });
+        console.log(`[Local AI] Booting engine | Model: ${modelId} | Context: ${optimalContext} | GPU: ${options.gpuLayers}`);
+
+        try {
+            activeLlamaContext = await initLlama({
+                contextSize: optimalContext,
+                model: modelPath,
+                n_gpu_layers: options.gpuLayers,
+            });
+            console.log(`[Local AI] Engine booted successfully.`);
+        } catch (e: any) {
+            console.error("[Local AI] Failed to boot native engine:", e.message);
+            throw new Error(`ENGINE_BOOT_FAILED: ${e.message}`);
+        }
 
         activeModelId = modelId;
-        activeContextSize = requiredContextSize;
+        activeContextSize = optimalContext;
         activeGpuLayers = options.gpuLayers;
     }
 };
 
+// --- INFERENCE ENGINES -------------------------------------------------------
+
 /**
- * ----------------------------------------------------------------------------
- * NATIVE ENGINE: llama.rn (llama.cpp for React Native)
- * ----------------------------------------------------------------------------
+ * ENGINE 1: PIPELINE INFERENCE (STRICT JSON)
  */
-const runNativeInference = async (
-    prompt: string,
-    modelId: string,
-    options: { temperature: number; prefillTokens: number; decodeTokens: number; gpuLayers: number },
-    onChunk?: (token: string) => void
-): Promise<string> => {
+export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
+    const state = useLocalAIStore.getState();
+    const { activeModelId, temperature, port, prefillTokens, decodeTokens, gpuLayers } = state;
+
+    if (!activeModelId) throw new Error("INFERENCE_FAULT: No active model selected.");
+
+    if (Platform.OS === 'web') {
+        return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
+    }
+
     await activateKeepAwakeAsync();
+    console.log(`[Local AI] Starting pipeline inference. Prefill: ${prefillTokens}, Decode: ${decodeTokens}`);
 
     try {
-        const formattedPrompt = formatGemmaPrompt(prompt);
+        const formattedPrompt = formatGemmaJSONPrompt(prompt);
+        const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
-        // Predictive Hardware Shield: Stop it before C++ crashes if the prompt exceeds the Prefill Slider
-        // Math: 1 token is roughly 3.5 characters.
-        const estimatedTokens = Math.ceil(formattedPrompt.length / 3.5);
-        if (estimatedTokens > options.prefillTokens) {
-            throw new Error("CONTEXT_OVERFLOW");
+        console.log(`[Local AI] Estimated prompt tokens: ${estimatedPromptTokens}`);
+
+        if (estimatedPromptTokens >= prefillTokens) {
+            console.warn(`[Local AI] Prompt too large: ${estimatedPromptTokens} vs ${prefillTokens}`);
+            throw new Error("CONTEXT_OVERFLOW_SLIDER: Prompt exceeds prefill limit.");
         }
 
-        // Ensure hardware is configured to match the user's sliders
-        await configureNativeEngine(modelId, options);
+        await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
 
-        let fullText = "";
-        const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
+        // VULKAN CRASH PREVENTION: Clamp output to remaining context
+        const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
+        if (safeDecodeLimit < 20) {
+            console.warn(`[Local AI] Insufficient space for output: ${safeDecodeLimit} tokens remaining.`);
+            throw new Error("CONTEXT_OVERFLOW_SLIDER: Insufficient space for output.");
+        }
 
-        return new Promise((resolve, reject) => {
-            activeLlamaContext.completion(
-                {
-                    prompt: formattedPrompt,
-                    n_predict: safeDecodeLimit,
-                    temperature: options.temperature,
-                    top_k: 40,
-                    top_p: 0.95
-                },
-                (data: { token: string }) => {
-                    fullText += data.token;
-                    if (onChunk) onChunk(data.token);
-                }
-            ).then(() => {
-                resolve(fullText);
-            }).catch((err: any) => {
-                reject(err);
-            });
-        });
+        if (!activeLlamaContext) throw new Error("ENGINE_NOT_READY");
 
+        console.log(`[Local AI] Executing completion (limit: ${safeDecodeLimit})...`);
+
+        const result = await executeNativeCompletion(
+            activeLlamaContext,
+            {
+                prompt: formattedPrompt,
+                n_predict: safeDecodeLimit,
+                temperature: temperature,
+                top_k: 40,
+                top_p: 0.95,
+                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"]
+            },
+            "{", // Pre-populated bracket
+            onChunk
+        );
+
+        console.log(`[Local AI] Inference complete. Output length: ${result.length}`);
+        return result;
     } catch (e: any) {
         console.error("[Local AI Native Error]", e);
-        if (e.message === 'CONTEXT_OVERFLOW') throw e;
+        if (e.message.includes('CONTEXT_OVERFLOW_SLIDER')) throw e;
         throw new Error(`NATIVE_INFERENCE_FAILURE: ${e.message}`);
     } finally {
         deactivateKeepAwake();
@@ -155,9 +278,56 @@ const runNativeInference = async (
 };
 
 /**
- * ----------------------------------------------------------------------------
+ * ENGINE 2: CHAT SANDBOX INFERENCE (CONVERSATIONAL)
+ */
+export const runLocalChatInference = async (
+    messages: { role: 'user' | 'ai'; content: string }[],
+    onChunk?: (token: string) => void
+): Promise<string> => {
+    const state = useLocalAIStore.getState();
+    const { activeModelId, temperature, prefillTokens, decodeTokens, gpuLayers } = state;
+
+    if (!activeModelId) throw new Error("No active model selected.");
+    if (Platform.OS === 'web') throw new Error("Chat sandbox is native-only.");
+
+    await activateKeepAwakeAsync();
+    try {
+        const formattedPrompt = formatGemmaChatHistory(messages);
+        const estimatedPromptTokens = estimateTokens(formattedPrompt);
+
+        if (estimatedPromptTokens >= prefillTokens) {
+            throw new Error(`Conversation too long (${estimatedPromptTokens} tokens).`);
+        }
+
+        await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
+
+        const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
+        if (safeDecodeLimit < 10) throw new Error("Conversation maxed out. Clear chat.");
+
+        if (!activeLlamaContext) throw new Error("ENGINE_NOT_READY");
+
+        return await executeNativeCompletion(
+            activeLlamaContext,
+            {
+                prompt: formattedPrompt,
+                n_predict: safeDecodeLimit,
+                temperature: Math.max(0.4, temperature),
+                top_k: 40,
+                top_p: 0.95
+            },
+            "",
+            onChunk
+        );
+    } catch (e: any) {
+        console.error("[Local Chat Error]", e);
+        throw e;
+    } finally {
+        deactivateKeepAwake();
+    }
+};
+
+/**
  * WEB ENGINE: Local HTTP Gateway (LM Studio / Ollama)
- * ----------------------------------------------------------------------------
  */
 const runWebInference = async (
     prompt: string,
@@ -168,8 +338,6 @@ const runWebInference = async (
     const endpoint = `http://127.0.0.1:${options.port}/v1/chat/completions`;
 
     try {
-        const safeDecodeLimit = Math.max(options.decodeTokens, 1024);
-
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -177,21 +345,19 @@ const runWebInference = async (
                 model: modelId,
                 messages: [{ role: 'user', content: prompt }],
                 temperature: options.temperature,
-                max_tokens: safeDecodeLimit,
+                max_tokens: Math.max(options.decodeTokens, 1024),
                 stream: true,
             }),
         });
 
-        if (!response.ok) {
-            throw new Error(`GATEWAY_ERROR: HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`GATEWAY_ERROR: HTTP ${response.status}`);
 
         const reader = response.body?.getReader();
+        if (!reader) return "";
+
         const decoder = new TextDecoder();
         let fullText = "";
         let buffer = "";
-
-        if (!reader) return "";
 
         while (true) {
             const { done, value } = await reader.read();
@@ -203,20 +369,20 @@ const runWebInference = async (
 
             for (const line of lines) {
                 const trimmed = line.trim();
-                if (trimmed.startsWith('data: ')) {
-                    const data = trimmed.slice(6);
-                    if (data === '[DONE]') break;
+                if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
-                    try {
-                        const parsed = JSON.parse(data);
-                        const content = parsed.choices[0]?.delta?.content || '';
-                        if (content) {
-                            fullText += content;
-                            onChunk?.(content);
-                        }
-                    } catch (e) {
-                        // Silently catch buffer fragmentation
+                const dataStr = trimmed.slice(6);
+                if (dataStr === '[DONE]') break;
+
+                try {
+                    const json = JSON.parse(dataStr);
+                    const content = json.choices[0]?.delta?.content || '';
+                    if (content) {
+                        fullText += content;
+                        onChunk?.(content);
                     }
+                } catch (e) {
+                    // Ignore malformed chunks
                 }
             }
         }
@@ -224,23 +390,6 @@ const runWebInference = async (
     } catch (e: any) {
         throw new Error(`GATEWAY_UNREACHABLE: Failed to connect to local runner on port ${options.port}.`);
     }
-};
-
-/**
- * Main entry point for local AI inference
- */
-export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
-    const { activeModelId, temperature, port, prefillTokens, decodeTokens, gpuLayers } = useLocalAIStore.getState();
-
-    if (!activeModelId) {
-        throw new Error("INFERENCE_FAULT: No active model selected in settings.");
-    }
-
-    if (Platform.OS !== 'web') {
-        return runNativeInference(prompt, activeModelId, { temperature, prefillTokens, decodeTokens, gpuLayers }, onChunk);
-    }
-
-    return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
 };
 
 export const abortNativeInference = async () => {
