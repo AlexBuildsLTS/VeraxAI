@@ -2,7 +2,7 @@
  * components/ui/ProfileDropdown.tsx
  * VeraxAI — User Profile Menu (dropdown)
  * ══════════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE 
+ * ARCHITECTURE
  * REANIMATED PHYSICS: Menu enters with a fluid, spring-physics drop-down animation
  * Native scrollbar hiding for Web, maintaining fluid wheel/touch scroll
  * ══════════════════════════════════════════════════════════════════════════════
@@ -34,6 +34,8 @@ import {
   Info,
   Spline,
   Shield,
+  Cpu,
+  User,
 } from 'lucide-react-native';
 
 // ─── STRICT THEME CONSTANTS ──────────────────────────────────────────────────
@@ -310,15 +312,19 @@ export const ProfileDropdown = () => {
               keyboardShouldPersistTaps="always"
             >
               <DropdownItem
+                icon={User}
+                label="PROFILE"
+                onPress={() => handleNavigation('/settings/profile')}
+              />
+              <DropdownItem
+                icon={Cpu}
+                label="LLM MODELS"
+                onPress={() => handleNavigation('/settings/models')}
+              />
+              <DropdownItem
                 icon={DatabaseBackup}
                 label="SETTINGS"
                 onPress={() => handleNavigation('/settings')}
-              />
-
-              <DropdownItem
-                icon={ShieldPlus}
-                label="SUPPORT"
-                onPress={() => handleNavigation('/settings/support')}
               />
 
               {profile?.role === 'admin' && (
