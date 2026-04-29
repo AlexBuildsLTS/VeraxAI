@@ -1,3 +1,15 @@
+/**
+ * app/(dashboard)/settings/models.tsx
+ * Hardware Interface & Local Model Management
+ * ----------------------------------------------------------------------------
+ * DESIGN PRINCIPLES:
+ * - MATHEMATICAL AUTO-SCALER: Dynamic VRAM allocation based on device RAM
+ * - UX PARITY: Animated diagnostic logs and graceful state transitions
+ * - LIQUID NEON: Adheres to the glassmorphism design system
+ * - INTEGRATED SANDBOX: Direct access to local AI chat
+ * ----------------------------------------------------------------------------
+ */
+
 import React, {
   useState,
   memo,
@@ -19,11 +31,9 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { router, useRouter } from 'expo-router';
 
 // THE ULTIMATE TS-ERROR KILLER: We import legacy, but cast it to 'any' internally.
-// This completely bypasses the broken Expo SDK 52/55 TypeScript definitions while
-// retaining 100% native functionality for documentDirectory and createDownloadResumable.
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 const FS: any = FileSystemLegacy;
 
@@ -40,16 +50,15 @@ import {
   Settings2,
   Database,
   Sparkles,
-  ChevronUp,
   Check,
   Flame,
-  Network,
   AlertTriangle,
   TerminalSquare,
   Activity,
   Globe,
   Info,
-  Power, // Added for the Eject/Unload Model feature
+  Power,
+  MessageSquare,
 } from 'lucide-react-native';
 
 import { GlassCard } from '../../../components/ui/GlassCard';
@@ -57,7 +66,6 @@ import { FadeIn } from '../../../components/animations/FadeIn';
 import { useLocalAIStore } from '../../../store/useLocalAIStore';
 import { cn } from '../../../lib/utils';
 import { runLocalInference } from '../../../services/localInference';
-
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -65,8 +73,6 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-
-// --- Constants & Types ---
 
 const IS_WEB = Platform.OS === 'web';
 const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
@@ -143,7 +149,6 @@ const AVAILABLE_MODELS: LocalModel[] = [
 ];
 
 // --- Sub-components ---
-
 interface OrganicOrbProps {
   color: string;
   size: number;
@@ -169,12 +174,10 @@ const OrganicOrb = memo(
     opacityBase,
   }: OrganicOrbProps) => {
     const time = useSharedValue(0);
-
     useFrameCallback((frameInfo) => {
       if (frameInfo.timeSincePreviousFrame === null) return;
       time.value += frameInfo.timeSincePreviousFrame / 1000;
     });
-
     const animatedStyle = useAnimatedStyle(() => {
       const xOffset =
         Math.sin(time.value * speedX + phaseOffsetX) * (WINDOW_WIDTH * 0.3);
@@ -190,7 +193,6 @@ const OrganicOrb = memo(
         opacity: opacityBase + Math.sin(time.value * 0.5) * 0.02,
       };
     });
-
     return (
       <Animated.View
         pointerEvents="none"
@@ -281,7 +283,6 @@ const Tag = memo(({ tag }: { tag: string }) => {
         };
     }
   }, [tag]);
-
   return (
     <View className={cn('px-2 py-1 border rounded', style.bg, style.border)}>
       <Text
@@ -297,7 +298,6 @@ const Tag = memo(({ tag }: { tag: string }) => {
 });
 Tag.displayName = 'Tag';
 
-// --- SLEEK CUSTOM GLASS TOAST (REPLACES UGLY OS ALERTS) ---
 export type ToastType = 'success' | 'error' | 'info';
 export interface ToastState {
   visible: boolean;
@@ -308,7 +308,6 @@ export interface ToastState {
 
 const GlassToast = memo(({ toast }: { toast: ToastState | null }) => {
   if (!toast || !toast.visible) return null;
-
   const iconColor =
     toast.type === 'success'
       ? THEME.green
@@ -321,7 +320,6 @@ const GlassToast = memo(({ toast }: { toast: ToastState | null }) => {
       : toast.type === 'error'
         ? AlertTriangle
         : Info;
-
   return (
     <View
       style={{
@@ -338,10 +336,10 @@ const GlassToast = memo(({ toast }: { toast: ToastState | null }) => {
             <Icon size={20} color={iconColor} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text className="text-white font-bold text-sm mb-1">
+            <Text className="mb-1 text-sm font-bold text-white">
               {toast.title}
             </Text>
-            <Text className="text-white/70 text-xs leading-4">
+            <Text className="text-xs leading-4 text-white/70">
               {toast.message}
             </Text>
           </View>
@@ -351,8 +349,6 @@ const GlassToast = memo(({ toast }: { toast: ToastState | null }) => {
   );
 });
 GlassToast.displayName = 'GlassToast';
-
-// --- Main Components ---
 
 interface ModelCardProps {
   model: LocalModel;
@@ -404,17 +400,14 @@ const ModelCard = memo(
           </View>
         )}
       </View>
-
       <Text className="mb-2 text-sm font-bold tracking-widest text-white">
         {model.name}
       </Text>
-
       {model.description && (
         <Text className="mb-4 text-[11px] text-white/50 leading-4">
           {model.description}
         </Text>
       )}
-
       <View className="flex-row flex-wrap items-center gap-4 pb-4 mb-6 border-b gap-y-3 border-white/5">
         <View className="flex-row items-center gap-1">
           <Database size={12} color={THEME.slate} />
@@ -435,8 +428,6 @@ const ModelCard = memo(
           </Text>
         </View>
       </View>
-
-      {/* UX PARITY: Graceful Load, Unload, and Test States */}
       {downloaded ? (
         <View className="flex-row gap-3">
           {!isActive ? (
@@ -477,7 +468,6 @@ const ModelCard = memo(
             </TouchableOpacity>
           ) : (
             <>
-              {/* TEST ENDPOINT BUTTON */}
               <TouchableOpacity
                 onPress={onTestEngine}
                 disabled={isTesting}
@@ -498,8 +488,6 @@ const ModelCard = memo(
                   {isTesting ? 'Running Test...' : 'Test Endpoint'}
                 </Text>
               </TouchableOpacity>
-
-              {/* EJECT / UNLOAD BUTTON */}
               <TouchableOpacity
                 onPress={onUnload}
                 activeOpacity={0.7}
@@ -514,8 +502,6 @@ const ModelCard = memo(
               </TouchableOpacity>
             </>
           )}
-
-          {/* TRASH / DELETE BUTTON (Only shown when NOT active) */}
           {!isActive && (
             <TouchableOpacity
               onPress={() => onRemove(model)}
@@ -605,7 +591,7 @@ const HardwareSlider = memo(
             if (!isNaN(parsed)) onChange(parsed);
           }}
           keyboardType="number-pad"
-          className="w-16 p-2 text-sm font-mono text-center text-white border rounded-lg bg-white/5 border-white/20"
+          className="w-16 p-2 font-mono text-sm text-center text-white border rounded-lg bg-white/5 border-white/20"
           style={
             IS_WEB ? ({ outlineStyle: 'none' } as Record<string, string>) : {}
           }
@@ -621,7 +607,6 @@ export default function LocalModelsScreen() {
   const isMobile = WINDOW_WIDTH < 768;
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Destructure Zustand store perfectly
   const {
     isLocalServerEnabled,
     toggleServer,
@@ -650,8 +635,6 @@ export default function LocalModelsScreen() {
   const [modelFilter, setModelFilter] = useState<'catalog' | 'device'>(
     'catalog',
   );
-
-  const [accelerator, setAccelerator] = useState<'GPU' | 'CPU'>('GPU');
   const [deviceStats, setDeviceStats] = useState<{
     cores: number;
     ramGb: number;
@@ -666,8 +649,6 @@ export default function LocalModelsScreen() {
     `[SYSTEM] Environment: ${IS_WEB ? 'Vercel Web Gateway' : 'Android Native (llama.rn)'}`,
   ]);
   const logsHeight = useSharedValue(0);
-
-  // --- Sleek Notification State ---
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const showToast = useCallback(
@@ -710,15 +691,12 @@ export default function LocalModelsScreen() {
   });
 
   useEffect(() => {
-    if (scrollViewRef.current && showLogs) {
+    if (scrollViewRef.current && showLogs)
       scrollViewRef.current.scrollToEnd({ animated: true });
-    }
   }, [appLogs, showLogs]);
 
-  // HARDWARE SANITIZATION PROTOCOL
   useEffect(() => {
     if (!IS_WEB && Platform.OS === 'android') {
-      // Ensure Android strictly defaults to valid backend if an iOS/Web state was synced
       if (
         computeBackend !== 'cpu' &&
         computeBackend !== 'vulkan' &&
@@ -734,7 +712,7 @@ export default function LocalModelsScreen() {
       if (IS_WEB) {
         setDeviceStats({
           cores: navigator.hardwareConcurrency || 8,
-          ramGb: 16,
+          ramGb: 32,
           name: 'Desktop Browser',
         });
         pushLog(`[SYSTEM] Initialized Web Gateway Interface.`);
@@ -747,7 +725,7 @@ export default function LocalModelsScreen() {
           setDeviceStats({ cores: 8, ramGb, name: deviceName });
           pushLog(`[HARDWARE] Detected ${deviceName} with ~${ramGb}GB RAM.`);
         } catch (e) {
-          setDeviceStats({ cores: 8, ramGb: 6, name: 'Android Device' });
+          setDeviceStats({ cores: 8, ramGb: 8, name: 'Android Device' });
         }
       }
     };
@@ -766,12 +744,11 @@ export default function LocalModelsScreen() {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-
           markDownloaded(model.id, `edge_routed://${model.id}`);
           pushLog(`[NETWORK] Browser download triggered successfully.`);
           showToast(
             'Download Triggered',
-            'Check your browser downloads. Once finished, load it in LM Studio/Ollama.',
+            'Check your browser downloads.',
             'success',
           );
         } catch (e) {
@@ -784,50 +761,30 @@ export default function LocalModelsScreen() {
         }
         return;
       }
-
       try {
         try {
-          // SAFE STORAGE CHECK BYPASSING TYPESCRIPT ERRORS
           if (FS.Storage?.getDiskInfoAsync) {
             const diskInfo = await FS.Storage.getDiskInfoAsync();
             const requiredBytes = model.sizeGb * 1024 * 1024 * 1024;
-            if (diskInfo.freeCapacity < requiredBytes) {
+            if (diskInfo.freeCapacity < requiredBytes)
               showToast(
                 'Low Storage Warning',
-                `You need ~${model.sizeGb}GB. Attempting download regardless...`,
+                `You need ~${model.sizeGb}GB. Attempting download...`,
                 'info',
               );
-            }
-          } else if (FS.getFreeDiskStorageAsync) {
-            const freeSpace = await FS.getFreeDiskStorageAsync();
-            const requiredBytes = model.sizeGb * 1024 * 1024 * 1024;
-            if (freeSpace < requiredBytes) {
-              showToast(
-                'Low Storage Warning',
-                `You need ~${model.sizeGb}GB. Attempting download regardless...`,
-                'info',
-              );
-            }
           }
-        } catch (storageErr) {
-          // Soft fail - ignore if permissions block the check
-        }
-
+        } catch (storageErr) {}
         await activateKeepAwakeAsync();
         pushLog(`[SYSTEM] Wake lock engaged for massive file transfer.`);
-
         const docDir = FS.documentDirectory;
         if (!docDir)
           throw new Error('Internal app storage directory is not mounted.');
-
         const fileUri = `${docDir}${model.fileName}`;
         const fileInfo = await FS.getInfoAsync(fileUri);
-
         if (fileInfo.exists) {
           pushLog(`[STORAGE] Wiping previous corrupt fragments...`);
           await FS.deleteAsync(fileUri, { idempotent: true });
         }
-
         const downloadResumable = FS.createDownloadResumable(
           model.downloadUrl,
           fileUri,
@@ -841,11 +798,9 @@ export default function LocalModelsScreen() {
             }
           },
         );
-
         setDownloadProgress(model.id, 0.01);
         pushLog(`[NETWORK] Streaming binary via HTTP 200...`);
         const result = await downloadResumable.downloadAsync();
-
         if (result && result.status === 200 && result.uri) {
           markDownloaded(model.id, result.uri);
           pushLog(
@@ -853,7 +808,7 @@ export default function LocalModelsScreen() {
           );
           showToast(
             'Engine Secured',
-            'Download complete. Click Load Model to configure environment.',
+            'Download complete. Click Load Model.',
             'success',
           );
         } else {
@@ -891,11 +846,9 @@ export default function LocalModelsScreen() {
     try {
       if (!IS_WEB) {
         const {
-          abortNativeInference,
+          releaseNativeEngine,
         } = require('../../../services/localInference');
-        if (abortNativeInference) {
-          await abortNativeInference();
-        }
+        if (releaseNativeEngine) await releaseNativeEngine();
       }
       setActiveModel(null as unknown as string);
       pushLog(`[SUCCESS] RAM freed successfully.`);
@@ -920,11 +873,10 @@ export default function LocalModelsScreen() {
           pushLog(`[STORAGE] Freed ${model.sizeGb}GB from device storage.`);
           showToast(
             'Storage Cleared',
-            `Successfully removed ${model.name} from internal storage.`,
+            `Successfully removed ${model.name}.`,
             'success',
           );
         } catch (e) {
-          console.warn('Failed to delete model file:', e);
           pushLog(`[ERROR] Deletion failed.`);
           showToast(
             'Deletion Error',
@@ -941,28 +893,22 @@ export default function LocalModelsScreen() {
   const handleLoadModel = useCallback(
     async (id: string) => {
       setIsConnecting(true);
-
       if (IS_WEB) {
         pushLog(`[NETWORK] Pinging local gateway at 127.0.0.1:${port}...`);
         try {
           const endpoint = `http://127.0.0.1:${port}/v1/models`;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
-
           const response = await fetch(endpoint, {
             method: 'GET',
             headers: { Accept: 'application/json' },
             signal: controller.signal,
           });
-
           clearTimeout(timeoutId);
-
-          if (!response.ok) {
+          if (!response.ok)
             throw new Error(
               `Server rejected connection (HTTP ${response.status})`,
             );
-          }
-
           setActiveModel(id);
           pushLog(
             `[SUCCESS] Handshake established. Cloud inference routed to Local port ${port}.`,
@@ -984,9 +930,6 @@ export default function LocalModelsScreen() {
         }
       } else {
         pushLog(`[SYSTEM] Configuring Engine Environment for ${id}...`);
-        // We set the active state instantly so the UI reflects "Ready".
-        // The *actual* massive RAM allocation happens natively on the very first
-        // inference call (Test Endpoint), matching llama.cpp's lazy-load architecture exactly.
         setActiveModel(id);
         setIsConnecting(false);
         pushLog(
@@ -1008,7 +951,6 @@ export default function LocalModelsScreen() {
     pushLog(
       `[DIAGNOSTICS] Executing test prompt to evaluate hardware throughput...`,
     );
-
     try {
       const startTime = Date.now();
       await runLocalInference(
@@ -1028,7 +970,15 @@ export default function LocalModelsScreen() {
       );
     } catch (e: any) {
       pushLog(`[ERROR] Diagnostics failed: ${e.message}`);
-      showToast('Diagnostics Failed', e.message, 'error');
+      if (e.message.includes('OOM') || e.message.includes('allocate')) {
+        showToast(
+          'Memory Error',
+          'GPU VRAM exhausted. Lower GPU layers and try again.',
+          'error',
+        );
+      } else {
+        showToast('Diagnostics Failed', e.message, 'error');
+      }
     } finally {
       setIsTesting(false);
     }
@@ -1052,7 +1002,7 @@ export default function LocalModelsScreen() {
       pushLog(`[SUCCESS] Gateway is active and responding.`);
       showToast(
         'Gateway Online',
-        `LM Studio / Ollama is broadcasting successfully on port ${port}.`,
+        `LM Studio / Ollama is broadcasting successfully.`,
         'success',
       );
     } catch (err: any) {
@@ -1077,7 +1027,6 @@ export default function LocalModelsScreen() {
         : false,
     [downloadedModels],
   );
-
   const displayedModels = useMemo(
     () =>
       AVAILABLE_MODELS.filter((m) =>
@@ -1173,17 +1122,28 @@ export default function LocalModelsScreen() {
             onUnload={handleUnloadModel}
           />
         ))}
+
+        {/* ─── CHAT SANDBOX ENTRY ────────────────────────────────────────── */}
+        <TouchableOpacity
+          onPress={() => router.push('/(dashboard)/settings/chat' as never)}
+          activeOpacity={0.8}
+          className="flex-row items-center justify-center w-full py-5 mt-4 border rounded-xl bg-[#00C6A2]/10 border-[#00C6A2]/30 shadow-[0_0_20px_rgba(0,198,162,0.15)] active:scale-95 transition-transform"
+        >
+          <MessageSquare size={18} color="#00C6A2" className="mr-3" />
+          <Text className="text-sm font-black tracking-[4px] text-[#00C6A2] uppercase">
+            Open AI Chat Sandbox
+          </Text>
+        </TouchableOpacity>
       </View>
     </FadeIn>
   );
 
   const renderHardwareTab = () => {
     const safeTemp = temperature ?? 0.2;
-    const safeLayers = gpuLayers ?? 33;
-    const prefill = prefillTokens ?? 512;
+    const safeLayers = gpuLayers ?? 20;
+    const prefill = prefillTokens ?? 4096;
     const decode = decodeTokens ?? 2048;
 
-    // STRICT RENDER FILTER: Hardcodes the options based on actual OS constraints.
     const availableBackends = IS_WEB
       ? ['auto', 'cpu']
       : Platform.OS === 'android'
@@ -1192,6 +1152,8 @@ export default function LocalModelsScreen() {
 
     return (
       <FadeIn delay={100} className="w-full pb-20 gap-y-6">
+        {/* FIX: TS Compiler bypass for route typing */}
+
         <View className="mb-2">
           <Text className="mb-2 text-[13px] font-bold text-white/90 ml-1 tracking-wide">
             Local Gateway API
@@ -1264,7 +1226,7 @@ export default function LocalModelsScreen() {
             </View>
 
             {IS_WEB && (
-              <View className="gap-y-3 mt-2">
+              <View className="mt-2 gap-y-3">
                 <View className="flex-row gap-2">
                   <TouchableOpacity
                     onPress={() => setPort('1234')}
@@ -1285,7 +1247,6 @@ export default function LocalModelsScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                {/* DEDICATED WEB GATEWAY TESTER */}
                 <TouchableOpacity
                   onPress={testWebGateway}
                   disabled={isTesting}
@@ -1322,25 +1283,39 @@ export default function LocalModelsScreen() {
             <Text className="mb-5 text-xs text-white/50 ml-7">
               Utilizing internal {deviceStats.name} compute.
             </Text>
+
+            {/* SAFE HARDWARE AGNOSTIC MATH */}
             <TouchableOpacity
               onPress={() => {
                 setComputeBackend('vulkan');
                 setHardwareState('temperature', 0.2);
-                setHardwareState('prefillTokens', 512);
-                setHardwareState('decodeTokens', 2048);
-                const recLayers =
-                  deviceStats.ramGb >= 10
-                    ? 20
-                    : deviceStats.ramGb >= 6
-                      ? 15
-                      : 8;
+
+                const availableRam = Math.max(0, deviceStats.ramGb - 3); // OS Reservation
+
+                // Extremely safe layer calculation to prevent OOM
+                const recLayers = Math.min(
+                  99,
+                  Math.max(4, Math.floor(availableRam * 4)),
+                );
+
+                let recPrefill = Math.min(
+                  8192,
+                  Math.max(1024, Math.floor(availableRam * 512)),
+                );
+                recPrefill = Math.floor(recPrefill / 128) * 128; // Align KV cache for llama.cpp
+
+                const recDecode = availableRam < 4 ? 1024 : 2048;
+
+                setHardwareState('prefillTokens', recPrefill);
+                setHardwareState('decodeTokens', recDecode);
                 setHardwareState('gpuLayers', recLayers);
+
                 pushLog(
-                  `[OPTIMIZATION] Applied Vulkan, ${recLayers} layers, Temp 0.2.`,
+                  `[OPTIMIZATION] Dynamic Calibration: Vulkan, ${recLayers} Layers, ${recPrefill} Context.`,
                 );
                 showToast(
-                  'Optimization Applied',
-                  `Hardware calibrated for ${deviceStats.ramGb}GB RAM.`,
+                  'Hardware Calibrated',
+                  `Optimized safely for ${deviceStats.ramGb}GB RAM.`,
                   'success',
                 );
               }}
@@ -1358,7 +1333,6 @@ export default function LocalModelsScreen() {
                 <TouchableOpacity
                   key={backend}
                   onPress={() => {
-                    // This bypasses TS overlap errors safely since we pre-filtered the arrays
                     setComputeBackend(backend as any);
                     if (backend === 'cpu') {
                       setHardwareState('gpuLayers', 0);
@@ -1405,21 +1379,21 @@ export default function LocalModelsScreen() {
             label="Prefill Context (Tokens)"
             value={prefill}
             min={128}
-            max={8192}
+            max={16384}
             step={128}
-            onChange={(val) => {
-              setHardwareState('prefillTokens', Math.round(val));
-            }}
+            onChange={(val) =>
+              setHardwareState('prefillTokens', Math.round(val))
+            }
           />
           <HardwareSlider
             label="Max Decode (Tokens)"
             value={decode}
             min={128}
-            max={8192}
+            max={4096}
             step={128}
-            onChange={(val) => {
-              setHardwareState('decodeTokens', Math.round(val));
-            }}
+            onChange={(val) =>
+              setHardwareState('decodeTokens', Math.round(val))
+            }
           />
           <HardwareSlider
             label="Temperature (0.2 recommended)"
@@ -1440,10 +1414,7 @@ export default function LocalModelsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: THEME.obsidian }}>
       <AmbientArchitecture />
-
-      {/* Sleek Custom Notifications Component */}
       <GlassToast toast={toast} />
-
       <SafeAreaView style={{ flex: 1, zIndex: 1 }} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1462,7 +1433,6 @@ export default function LocalModelsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -1515,12 +1485,10 @@ export default function LocalModelsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-
             {activeTab === 'models' ? renderModelsTab() : renderHardwareTab()}
-
             <Animated.View style={[animatedLogStyle, { width: '100%' }]}>
-              <GlassCard 
-                className="p-4 border-[#32FF00]/20 bg-black/60 rounded-2xl flex-1" 
+              <GlassCard
+                className="p-4 border-[#32FF00]/20 bg-black/60 rounded-2xl flex-1"
                 style={{ flex: 1, height: '100%' }}
               >
                 <View className="flex-row items-center justify-between mb-3">

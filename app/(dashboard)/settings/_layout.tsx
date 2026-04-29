@@ -32,6 +32,7 @@ export default function SettingsLayout() {
         <Stack.Screen name="security" />
         <Stack.Screen name="billing" />
         <Stack.Screen name="models" />
+        <Stack.Screen name="chat" />
         <Stack.Screen name="support" />
         <Stack.Screen name="about" />
       </Stack>
