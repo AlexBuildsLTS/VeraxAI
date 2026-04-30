@@ -6,8 +6,8 @@
  * - 128K CONTEXT UNLOCKED: Aligned ABSOLUTE_MAX_HARDWARE_CONTEXT to 131072.
  * - VULKAN CRASH PREVENTION: Context size is strictly capped at the prefill slider.
  *   n_predict is mathematically clamped so (prompt + output <= context).
- * - GEMMA 4 TEMPLATE FIX: Restored <bos> tokens. Gemma 4 strictly requires <bos>
- *   to initialize attention. Without it, the model instantly outputs <eos> (Empty Bubble).
+ * - ZERO-BOS PROMPT ALIGNMENT: Strictly removed all <bos> tags from templates 
+ *   because llama.rn auto-injects it. Double <bos> causes instant EOS.
  * - DUAL ENGINES: Safely separates Pipeline Inference from Chat Inference.
  * ----------------------------------------------------------------------------
  */
@@ -47,9 +47,8 @@ type InitLlamaFn = (options: {
 
 // --- CONSTANTS ---------------------------------------------------------------
 
-// UPGRADE: 128K Context Unlocked for E2B/E4B Models (Supports 40+ min videos)
-const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
-const TOKEN_ESTIMATION_FACTOR = 3.2;
+const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072; // 128K Context Unlocked
+const TOKEN_ESTIMATION_FACTOR = 3.2; // Conservative calculation
 const TOKEN_BUFFER = 100;
 
 const MODEL_REGISTRY: Record<string, string> = {
@@ -84,18 +83,14 @@ const estimateTokens = (text: string, buffer: number = 0): number => {
     return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
 };
 
-/**
- * FIX: Restored <bos>. Gemma 4 requires <bos> to start JSON generation cleanly.
- */
+// NO <bos> - Prevents token collisions
 const formatGemmaJSONPrompt = (prompt: string): string => {
-    return `<bos><start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
+    return `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
 };
 
-/**
- * FIX: Restored <bos>. This solves the "[Empty Response]" bug in the Chat Sandbox.
- */
+// NO <bos> - Prevents empty chat bubbles
 const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
-    let prompt = "<bos>";
+    let prompt = "";
     for (const msg of messages) {
         const role = msg.role === 'ai' ? 'model' : 'user';
         prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
@@ -104,9 +99,6 @@ const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string
     return prompt;
 };
 
-/**
- * Robust wrapper to handle streaming tokens and prevent race conditions.
- */
 const executeNativeCompletion = async (
     context: LlamaInstance,
     params: LlamaCompletionParams,
@@ -165,13 +157,18 @@ export const configureNativeEngine = async (
         const FileSystem = require('expo-file-system/legacy');
         const docDir = FileSystem.documentDirectory || 'file:///tmp/';
         const fileName = MODEL_REGISTRY[modelId] || MODEL_REGISTRY['default'];
-        const modelPath = `${docDir}${fileName}`.replace('file://', '');
+
+        // FIX: fileUri retains the file:// prefix required by Expo FileSystem.
+        // modelPath strips it for the C++ llama.rn bridge.
+        const fileUri = `${docDir}${fileName}`;
+        const modelPath = fileUri.replace('file://', '');
 
         try {
-            const fileInfo = await FileSystem.getInfoAsync(modelPath);
+            const fileInfo = await FileSystem.getInfoAsync(fileUri);
             if (!fileInfo.exists) {
                 throw new Error(`MODEL_FILE_NOT_FOUND: ${fileName} is missing from storage.`);
             }
+            console.log(`[Local AI] Model file verified: ${fileName} (${(fileInfo.size / 1024 / 1024).toFixed(2)} MB)`);
         } catch (e: any) {
             console.error("[Local AI] File system check failed:", e.message);
             throw e;
@@ -212,7 +209,6 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
     }
 
-    // Yield thread to allow telemetry logs to fire before Vulkan locks the CPU
     await new Promise(resolve => setTimeout(resolve, 1500));
     await activateKeepAwakeAsync();
 
@@ -249,7 +245,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
                 top_p: 0.95,
                 stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"]
             },
-            "{", // Pre-populated bracket to force JSON
+            "{", // Pre-populated bracket
             onChunk
         );
 
@@ -293,8 +289,8 @@ export const runLocalChatInference = async (
 
         if (!activeLlamaContext) throw new Error("ENGINE_NOT_READY");
 
-        // Uses the robust wrapper instead of inline Promise to guarantee state resolution
-        return await executeNativeCompletion(
+        // FIX: Routes through the robust wrapper to prevent Android Promise race conditions
+        const result = await executeNativeCompletion(
             activeLlamaContext,
             {
                 prompt: formattedPrompt,
@@ -302,11 +298,13 @@ export const runLocalChatInference = async (
                 temperature: Math.max(0.4, temperature),
                 top_k: 40,
                 top_p: 0.95,
-                stop: ["<end_of_turn>", "<eos>"] // Prevents hallucinating user turns
+                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"] // Aggressively stops hallucinated turns
             },
             "",
             onChunk
         );
+
+        return result;
     } catch (e: any) {
         console.error("[Local Chat Error]", e);
         throw e;
