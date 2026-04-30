@@ -7,8 +7,8 @@
  * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. 
  * - THE MASTER FALLBACK: If Local AI fails, hallucinates, or runs out of RAM, 
  *   it seamlessly aborts and routes to Cloud Gemini. Zero failed videos.
- * - AGGRESSIVE JSON REPAIR: Extracts JSON arrays/objects even if the local 
- *   model outputs conversational preamble.
+ * - AGGRESSIVE JSON REPAIR: Extracts JSON arrays/objects safely even if the 
+ *   model swallowed the opening bracket during forced generation.
  * ----------------------------------------------------------------------------
  */
 
@@ -44,6 +44,18 @@ function maskErrorMessage(rawMsg: string): string {
 
 function extractAndParseJSON(rawOutput: string) {
     let sanitized = rawOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    // AGGRESSIVE REPAIR: If the local model missed the opening bracket because we forced it 
+    // into the prompt in localInference.ts, we MUST reconstruct it here.
+    if (!sanitized.startsWith('{')) {
+        const firstProp = sanitized.indexOf('"summary"');
+        if (firstProp !== -1) {
+            sanitized = '{' + sanitized.substring(firstProp);
+        } else {
+            sanitized = '{' + sanitized;
+        }
+    }
+
     const firstBrace = sanitized.indexOf('{');
     const lastBrace = sanitized.lastIndexOf('}');
 
@@ -167,7 +179,6 @@ export const useProcessVideo = () => {
 
                 if (data.is_local_handoff && activeModel) {
                     const rawText = data.transcript || clientTranscript || '';
-                    // Use a more conservative estimation factor (3.2) consistent with localInference.ts
                     const estimatedServerTokens = Math.ceil(rawText.length / 3.2) + 200;
 
                     if (estimatedServerTokens > localState.prefillTokens) {

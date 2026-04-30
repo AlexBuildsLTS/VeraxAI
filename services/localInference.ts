@@ -3,10 +3,12 @@
  * Native Llama.rn Bridge & Hardware Watchdog
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
+ * - 128K CONTEXT UNLOCKED: Aligned ABSOLUTE_MAX_HARDWARE_CONTEXT with Gemma 4's
+ *   native capabilities for 45+ minute video transcription.
  * - VULKAN CRASH PREVENTION: Context size is strictly capped at the prefill slider.
  *   n_predict is mathematically clamped so (prompt + output <= context).
- * - JSON FORCE-FEEDING: Tricks the local model into outputting valid JSON by 
- *   pre-injecting the opening bracket `{` to prevent instant EOS aborts.
+ * - ZERO-BOS PROMPT ALIGNMENT: Strictly removed all <bos> tags from templates 
+ *   because llama.rn auto-injects it. Double <bos> causes instant EOS.
  * - DUAL ENGINES: Safely separates Pipeline Inference from Chat Inference.
  * ----------------------------------------------------------------------------
  */
@@ -46,7 +48,8 @@ type InitLlamaFn = (options: {
 
 // --- CONSTANTS ---------------------------------------------------------------
 
-const ABSOLUTE_MAX_HARDWARE_CONTEXT = 32768;
+// UPGRADE: 128K Context Unlocked for E2B/E4B Models
+const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
 const TOKEN_ESTIMATION_FACTOR = 3.2; // More conservative (fewer chars per token)
 const TOKEN_BUFFER = 100;
 
@@ -90,16 +93,18 @@ const estimateTokens = (text: string, buffer: number = 0): number => {
 
 /**
  * Formats prompt for JSON output by pre-injecting the opening bracket.
+ * BUGFIX: Removed manual <bos> to prevent token collision and instant aborts.
  */
 const formatGemmaJSONPrompt = (prompt: string): string => {
-    return `<bos><start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
+    return `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
 };
 
 /**
  * Formats chat history for Gemma models.
+ * BUGFIX: Removed manual <bos> to prevent empty bubble responses.
  */
 const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
-    let prompt = "<bos>";
+    let prompt = "";
     for (const msg of messages) {
         const role = msg.role === 'ai' ? 'model' : 'user';
         prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
@@ -225,7 +230,10 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
     }
 
+    // Yield thread to allow telemetry logs to fire before Vulkan locks the CPU
+    await new Promise(resolve => setTimeout(resolve, 1500));
     await activateKeepAwakeAsync();
+
     console.log(`[Local AI] Starting pipeline inference. Prefill: ${prefillTokens}, Decode: ${decodeTokens}`);
 
     try {
@@ -262,7 +270,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
                 top_p: 0.95,
                 stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"]
             },
-            "{", // Pre-populated bracket
+            "{", // Pre-populated bracket to force JSON
             onChunk
         );
 
@@ -313,7 +321,8 @@ export const runLocalChatInference = async (
                 n_predict: safeDecodeLimit,
                 temperature: Math.max(0.4, temperature),
                 top_k: 40,
-                top_p: 0.95
+                top_p: 0.95,
+                stop: ["<end_of_turn>", "<eos>"] // Crucial to prevent hallucinating user turns
             },
             "",
             onChunk

@@ -1284,25 +1284,26 @@ export default function LocalModelsScreen() {
               Utilizing internal {deviceStats.name} compute.
             </Text>
 
-            {/* SAFE HARDWARE AGNOSTIC MATH */}
             <TouchableOpacity
               onPress={() => {
                 setComputeBackend('vulkan');
                 setHardwareState('temperature', 0.2);
 
+                // TRUE HARDWARE AGNOSTIC MATH (128K UNLOCKED)
                 const availableRam = Math.max(0, deviceStats.ramGb - 3); // OS Reservation
 
-                // Extremely safe layer calculation to prevent OOM
+                // 4 GPU Layers per GB of Free RAM. Maxes at 99.
                 const recLayers = Math.min(
                   99,
                   Math.max(4, Math.floor(availableRam * 4)),
                 );
 
+                // 4096 Context Tokens per GB of Free RAM. Maxes at 131,072 (128K)
                 let recPrefill = Math.min(
-                  8192,
-                  Math.max(1024, Math.floor(availableRam * 512)),
+                  131072,
+                  Math.max(4096, Math.floor(availableRam * 4096)),
                 );
-                recPrefill = Math.floor(recPrefill / 128) * 128; // Align KV cache for llama.cpp
+                recPrefill = Math.floor(recPrefill / 256) * 256; // Align KV cache for Vulkan
 
                 const recDecode = availableRam < 4 ? 1024 : 2048;
 
@@ -1315,7 +1316,7 @@ export default function LocalModelsScreen() {
                 );
                 showToast(
                   'Hardware Calibrated',
-                  `Optimized safely for ${deviceStats.ramGb}GB RAM.`,
+                  `Optimized for ${deviceStats.ramGb}GB RAM (up to 128K context).`,
                   'success',
                 );
               }}
@@ -1379,7 +1380,7 @@ export default function LocalModelsScreen() {
             label="Prefill Context (Tokens)"
             value={prefill}
             min={128}
-            max={16384}
+            max={131072}
             step={128}
             onChange={(val) =>
               setHardwareState('prefillTokens', Math.round(val))
