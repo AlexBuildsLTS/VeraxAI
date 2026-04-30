@@ -92,18 +92,18 @@ const estimateTokens = (text: string, buffer: number = 0): number => {
 
 /**
  * Formats prompt for JSON output by pre-injecting the opening bracket.
- * FIX: Removed manual <bos> to prevent token collision and instant aborts.
+ * FIX: Added <bos> back to prevent token collision and instant aborts.
  */
 const formatGemmaJSONPrompt = (prompt: string): string => {
-    return `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
+    return `<bos><start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
 };
 
 /**
  * Formats chat history for Gemma models.
- * FIX: Removed manual <bos> to prevent empty bubble responses.
+ * FIX: Added <bos> back to prevent empty bubble responses.
  */
 const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
-    let prompt = "";
+    let prompt = "<bos>";
     for (const msg of messages) {
         const role = msg.role === 'ai' ? 'model' : 'user';
         prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
@@ -271,7 +271,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
                 temperature: temperature,
                 top_k: 40,
                 top_p: 0.95,
-                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"]
+                stop: ["<end_of_turn>", "<eos>"] // Removed problematic model\n and user\n stops
             },
             "{", // Pre-populated bracket to force JSON
             onChunk
@@ -325,7 +325,7 @@ export const runLocalChatInference = async (
                 temperature: Math.max(0.4, temperature),
                 top_k: 40,
                 top_p: 0.95,
-                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"] // Crucial to prevent hallucinating user turns
+                stop: ["<end_of_turn>", "<eos>"] // Removed problematic model\n and user\n stops
             },
             "",
             onChunk
