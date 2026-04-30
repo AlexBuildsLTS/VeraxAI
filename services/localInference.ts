@@ -47,7 +47,8 @@ type InitLlamaFn = (options: {
 
 // --- CONSTANTS ---------------------------------------------------------------
 
-const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072; // 128K Context Unlocked
+// UPGRADE: 128K Context Unlocked for E2B/E4B Models (Supports 40+ min videos)
+const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
 const TOKEN_ESTIMATION_FACTOR = 3.2; // Conservative calculation
 const TOKEN_BUFFER = 100;
 
@@ -63,6 +64,7 @@ let initLlama: InitLlamaFn | null = null;
 
 if (Platform.OS !== 'web') {
     try {
+        // Dynamic require to prevent web bundling issues
         const llamaModule = require('llama.rn');
         initLlama = llamaModule.initLlama;
     } catch (e) {
@@ -79,16 +81,27 @@ let activeGpuLayers: number = 0;
 
 // --- UTILITIES ---------------------------------------------------------------
 
+/**
+ * Estimates token count based on string length.
+ * @param text The input string
+ * @param buffer Optional extra tokens to add
+ */
 const estimateTokens = (text: string, buffer: number = 0): number => {
     return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
 };
 
-// NO <bos> - Prevents token collisions
+/**
+ * Formats prompt for JSON output by pre-injecting the opening bracket.
+ * FIX: Removed manual <bos> to prevent token collision and instant aborts.
+ */
 const formatGemmaJSONPrompt = (prompt: string): string => {
     return `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
 };
 
-// NO <bos> - Prevents empty chat bubbles
+/**
+ * Formats chat history for Gemma models.
+ * FIX: Removed manual <bos> to prevent empty bubble responses.
+ */
 const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
     let prompt = "";
     for (const msg of messages) {
@@ -99,6 +112,9 @@ const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string
     return prompt;
 };
 
+/**
+ * Wraps the native completion callback in a promise.
+ */
 const executeNativeCompletion = async (
     context: LlamaInstance,
     params: LlamaCompletionParams,
@@ -117,6 +133,9 @@ const executeNativeCompletion = async (
 
 // --- ENGINE MANAGEMENT -------------------------------------------------------
 
+/**
+ * PRODUCTION SAFEGUARD: Memory Leak Prevention & Reconfiguration
+ */
 export const releaseNativeEngine = async () => {
     if (activeLlamaContext && Platform.OS !== 'web') {
         console.log(`[Local AI] Releasing hardware context. Freeing RAM...`);
@@ -133,10 +152,14 @@ export const releaseNativeEngine = async () => {
     }
 };
 
+/**
+ * Instantiates the hardware context cleanly based on user configuration.
+ */
 export const configureNativeEngine = async (
     modelId: string,
     options: { prefillTokens: number; gpuLayers: number }
 ) => {
+    // Align context size to 256 for Vulkan memory alignment
     let optimalContext = Math.floor(options.prefillTokens / 256) * 256;
     optimalContext = Math.min(optimalContext, ABSOLUTE_MAX_HARDWARE_CONTEXT);
 
@@ -163,6 +186,7 @@ export const configureNativeEngine = async (
         const fileUri = `${docDir}${fileName}`;
         const modelPath = fileUri.replace('file://', '');
 
+        // Verify file exists before loading using the safe Expo URI
         try {
             const fileInfo = await FileSystem.getInfoAsync(fileUri);
             if (!fileInfo.exists) {
@@ -179,7 +203,7 @@ export const configureNativeEngine = async (
         try {
             activeLlamaContext = await initLlama({
                 contextSize: optimalContext,
-                model: modelPath,
+                model: modelPath, // Initialize C++ with the stripped path
                 n_gpu_layers: options.gpuLayers,
             });
             console.log(`[Local AI] Engine booted successfully.`);
@@ -197,7 +221,7 @@ export const configureNativeEngine = async (
 // --- INFERENCE ENGINES -------------------------------------------------------
 
 /**
- * ENGINE 1: PIPELINE INFERENCE (STRICT JSON TRANSCRIBER)
+ * ENGINE 1: PIPELINE INFERENCE (STRICT JSON)
  */
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
     const state = useLocalAIStore.getState();
@@ -209,6 +233,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         return runWebInference(prompt, activeModelId, { port, temperature, decodeTokens }, onChunk);
     }
 
+    // Yield thread to allow telemetry logs to fire before Vulkan locks the CPU
     await new Promise(resolve => setTimeout(resolve, 1500));
     await activateKeepAwakeAsync();
 
@@ -218,6 +243,8 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         const formattedPrompt = formatGemmaJSONPrompt(prompt);
         const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
+        console.log(`[Local AI] Estimated prompt tokens: ${estimatedPromptTokens}`);
+
         if (estimatedPromptTokens >= prefillTokens) {
             console.warn(`[Local AI] Prompt too large: ${estimatedPromptTokens} vs ${prefillTokens}`);
             throw new Error("CONTEXT_OVERFLOW_SLIDER: Prompt exceeds prefill limit.");
@@ -225,6 +252,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
 
         await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
 
+        // VULKAN CRASH PREVENTION: Clamp output to remaining context
         const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
         if (safeDecodeLimit < 20) {
             console.warn(`[Local AI] Insufficient space for output: ${safeDecodeLimit} tokens remaining.`);
@@ -245,7 +273,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
                 top_p: 0.95,
                 stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"]
             },
-            "{", // Pre-populated bracket
+            "{", // Pre-populated bracket to force JSON
             onChunk
         );
 
@@ -289,8 +317,7 @@ export const runLocalChatInference = async (
 
         if (!activeLlamaContext) throw new Error("ENGINE_NOT_READY");
 
-        // FIX: Routes through the robust wrapper to prevent Android Promise race conditions
-        const result = await executeNativeCompletion(
+        return await executeNativeCompletion(
             activeLlamaContext,
             {
                 prompt: formattedPrompt,
@@ -298,13 +325,11 @@ export const runLocalChatInference = async (
                 temperature: Math.max(0.4, temperature),
                 top_k: 40,
                 top_p: 0.95,
-                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"] // Aggressively stops hallucinated turns
+                stop: ["<end_of_turn>", "<eos>", "user\n", "model\n"] // Crucial to prevent hallucinating user turns
             },
             "",
             onChunk
         );
-
-        return result;
     } catch (e: any) {
         console.error("[Local Chat Error]", e);
         throw e;
@@ -369,12 +394,13 @@ const runWebInference = async (
                         onChunk?.(content);
                     }
                 } catch (e) {
+                    // Ignore malformed chunks
                 }
             }
         }
         return fullText;
     } catch (e: any) {
-        throw new Error(`GATEWAY_UNREACHABLE.`);
+        throw new Error(`GATEWAY_UNREACHABLE: Failed to connect to local runner on port ${options.port}.`);
     }
 };
 
