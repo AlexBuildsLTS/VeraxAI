@@ -1,9 +1,8 @@
 /**
- * hooks/mutations/useProcessVideo.ts
- * Pipeline Dispatcher — Universal Architecture
+ * @file hooks/mutations/useProcessVideo.ts
+ * @description Pipeline Dispatcher — Universal Architecture
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
- * - UNIVERSAL COMPATIBILITY: Uses `expo-crypto` to guarantee UUID generation.
  * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. 
  * - THE MASTER FALLBACK: If Local AI fails, hallucinates, or runs out of RAM, 
  *   it seamlessly aborts and routes to Cloud Gemini. Zero failed videos.
@@ -45,8 +44,7 @@ function maskErrorMessage(rawMsg: string): string {
 function extractAndParseJSON(rawOutput: string) {
     let sanitized = rawOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-    // AGGRESSIVE REPAIR: If the local model missed the opening bracket because we forced it 
-    // into the prompt in localInference.ts, we MUST reconstruct it here.
+    // AGGRESSIVE REPAIR: Reconstruct the opening bracket if it was swallowed
     if (!sanitized.startsWith('{')) {
         const firstProp = sanitized.indexOf('"summary"');
         if (firstProp !== -1) {
@@ -136,6 +134,7 @@ export const useProcessVideo = () => {
                 let isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
                 if (isLocalModelReady && clientTranscript) {
+                    // Safe token estimation to ensure it fits in 128k context
                     const estimatedTokens = Math.ceil(clientTranscript.length / 3.2) + 200;
                     if (estimatedTokens > localState.prefillTokens) {
                         videoStore.recordEvent('CLOUD_MODE', 'info', `Transcript (${estimatedTokens} tokens) exceeds Prefill Context slider limit (${localState.prefillTokens}). Auto-routing to Cloud API.`);
@@ -211,7 +210,7 @@ ${rawText}`;
                         let rawLocalOutput = "";
                         try {
                             rawLocalOutput = await runLocalInference(structuredPrompt, (chunk) => {
-                                // Optional: track progress if needed
+                                // Optional tracking
                             });
                         } catch (inferenceError: any) {
                             console.error("[Local AI] Engine crashed/aborted:", inferenceError.message);
@@ -226,9 +225,9 @@ ${rawText}`;
 
                         let parsedInsights: Record<string, unknown>;
                         try {
-                            if (rawLocalOutput.length < 15) throw new Error("Output too short.");
                             parsedInsights = extractAndParseJSON(rawLocalOutput);
                         } catch (jsonErr) {
+                            console.error("Local JSON Extraction Failure. Output:", rawLocalOutput);
                             throw new Error("JSON format invalid.");
                         }
 
@@ -266,7 +265,6 @@ ${rawText}`;
 
                         videoStore.recordEvent('SUCCESS', 'success', 'Local insights saved successfully! Dashboard updated.');
                     } catch (localErr: any) {
-                        // FIX: 'warn' resolves TS error
                         videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Local AI failed (${localErr.message}). Seamlessly falling back to Cloud API...`);
                         await releaseNativeEngine();
                         response = await dispatchToEdge(false);

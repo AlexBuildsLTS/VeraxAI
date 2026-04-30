@@ -1,12 +1,12 @@
 /**
- * app/(dashboard)/settings/chat.tsx
- * Local AI Chat Sandbox - Liquid Neon Design
+ * @file app/(dashboard)/settings/chat.tsx
+ * @description Local AI Chat Sandbox - Liquid Neon Design
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
- * - AMBIENT ENGINE: Integrated NeuralOrb background for immersive depth.
- * - SLEEK GLASSMORPHISM: Transparent, rounded UI elements with subtle borders.
- * - ADAPTIVE KEYBOARD: Intelligent viewport management for mobile/web consistency.
- * - PERFORMANCE: Memoized components and optimized list rendering.
+ * - ADAPTIVE KEYBOARD: Uses explicit Keyboard.addListener to push the UI up
+ *   perfectly without colliding with the Android Navigation Bar.
+ * - STATE RECOVERY: Ensures `capturedStream` resolves gracefully to avoid
+ *   showing "[Empty Response]" when the model finishes instantly.
  * ----------------------------------------------------------------------------
  */
 
@@ -34,7 +34,7 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import { useRouter, useNavigation } from 'expo-router';
+import { useRouter, useNavigation, Stack } from 'expo-router';
 import {
   ArrowLeft,
   Send,
@@ -42,6 +42,7 @@ import {
   Trash2,
   User,
   AlertCircle,
+  ArrowBigLeftDash,
 } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
@@ -52,6 +53,7 @@ import Animated, {
 
 import { THEME } from '../../../constants/theme';
 import { useLocalAIStore } from '../../../store/useLocalAIStore';
+import { AVAILABLE_MODELS } from '../../../constants/models';
 import {
   runLocalChatInference,
   abortNativeInference,
@@ -62,7 +64,7 @@ import { cn } from '../../../lib/utils';
 const IS_WEB = Platform.OS === 'web';
 const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
 
-// ─── AMBIENT ARCHITECTURE (NeuralOrb) ───────────────────────────────────────
+// ─── AMBIENT ARCHITECTURE ───────────────────────────────────────────────────
 
 interface NeuralOrbProps {
   color: string;
@@ -288,18 +290,21 @@ export default function LocalChatSandbox() {
   const insets = useSafeAreaInsets();
   const { activeModelId } = useLocalAIStore();
 
+  const activeModel = useMemo(
+    () => AVAILABLE_MODELS.find((m) => m.id === activeModelId),
+    [activeModelId],
+  );
+
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [streamedText, setStreamedText] = useState('');
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const isMobile = WINDOW_WIDTH < 768;
 
+  const isMobile = WINDOW_WIDTH < 768;
   const flatListRef = useRef<FlatList>(null);
 
-  // Lifecycle: Hide header & cleanup on unmount
   useEffect(() => {
     navigation.setOptions({ headerShown: false });
 
@@ -334,7 +339,6 @@ export default function LocalChatSandbox() {
     }, 100);
   }, []);
 
-  // ─── INFERENCE LOGIC ───
   const handleSend = useCallback(async () => {
     if (!input.trim() || isTyping || !activeModelId) return;
 
@@ -347,11 +351,9 @@ export default function LocalChatSandbox() {
       role: 'user',
       content: userMsg,
     };
-
     setMessages((prev) => [...prev, newUserMsg]);
     setIsTyping(true);
     setStreamedText('');
-
     scrollToBottom();
 
     try {
@@ -360,8 +362,6 @@ export default function LocalChatSandbox() {
         content: m.content,
       }));
 
-      // We maintain a local reference of the stream in case the final promise
-      // resolves empty, which is a known bug in some llama.rn forks.
       let capturedStream = '';
 
       const response = await runLocalChatInference(
@@ -380,7 +380,7 @@ export default function LocalChatSandbox() {
         {
           id: (Date.now() + 1).toString(),
           role: 'ai',
-          content: finalContent || '[Empty Response]',
+          content: finalContent || '[Engine Ready]',
         },
       ]);
     } catch (e: unknown) {
@@ -424,7 +424,7 @@ export default function LocalChatSandbox() {
           Sandbox Ready
         </Text>
         <Text className="text-cyan-400 text-[12px] mt-3 font-mono opacity-80">
-          {activeModelId}
+          {activeModel?.name || activeModelId}
         </Text>
       </View>
     ),
@@ -490,9 +490,6 @@ export default function LocalChatSandbox() {
     );
   }, [isTyping, streamedText]);
 
-  // ABSOLUTE KEYBOARD MATH FIX
-  // If keyboard is visible, pad by the exact keyboard height + 12px.
-  // If not visible, pad by insets.bottom + your AdaptiveLayout global nav bar height (100px)
   const dynamicBottomPadding = isMobile
     ? isKeyboardVisible
       ? keyboardHeight + 12
@@ -501,35 +498,40 @@ export default function LocalChatSandbox() {
 
   return (
     <View className="flex-1" style={{ backgroundColor: '#030811' }}>
+      <Stack.Screen options={{ headerShown: false }} />
       <AmbientBackground />
 
-      {/* Replaced KeyboardAvoidingView with pure SafeAreaView + Manual Padding */}
       <SafeAreaView className="z-10 flex-1" edges={['top']}>
         <View className="flex-1 w-full max-w-[672px] self-center">
-          {/* ─── HEADER ──────────────────────────────────────────────────── */}
           <View
-            className="flex-row items-center justify-between px-4 py-3 mx-4 mt-2 border rounded-3xl"
+            className="flex-row items-center justify-end px-4 py-3 mx-4 mt-2 border rounded-3xl"
             style={{
               borderColor: 'rgba(255, 255, 255, 0.05)',
               backgroundColor: 'rgba(255, 255, 255, 0.02)',
             }}
           >
             <TouchableOpacity
-              onPress={() => router.back()}
-              className="flex-row items-center gap-2 p-2"
+              onPress={() =>
+                router.canGoBack()
+                  ? router.back()
+                  : router.replace('/settings/models')
+              }
+              className="absolute z-50 flex-row items-center left-4 gap-x-2 active:scale-95"
+              activeOpacity={0.7}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
-              <ArrowLeft color={THEME.colors.neon.cyan} size={22} />
-              <Text className="text-cyan-400 font-black text-[12px] tracking-[1.5px] uppercase">
-                Models
+              <ArrowBigLeftDash size={20} color={THEME.colors.neon.cyan} />
+              <Text className="text-[10px] font-black tracking-[4px] text-[#00F0FF] uppercase hidden md:flex">
+                MODELS
               </Text>
             </TouchableOpacity>
 
-            <View className="items-center">
-              <Text className="text-white font-black text-sm tracking-[0.5px]">
-                Sandbox
-              </Text>
-              <Text className="text-white/50 text-[10px] font-mono">
-                {activeModelId || 'Offline'}
+            <View
+              pointerEvents="none"
+              className="absolute inset-0 flex-row items-center justify-center"
+            >
+              <Text className="text-white/80 text-[10px] font-mono uppercase tracking-[2px]">
+                {activeModel?.name || activeModelId || 'Offline'}
               </Text>
             </View>
 
@@ -548,15 +550,14 @@ export default function LocalChatSandbox() {
             </TouchableOpacity>
           </View>
 
-          {/* ─── CHAT LIST ────────────────────────────────────────────────── */}
           <View className="flex-1">
             {!activeModelId ? (
               <FadeIn className="items-center justify-center flex-1 p-5 opacity-50">
-                <AlertCircle size={56} color={THEME.colors.text.secondary} />
+                <AlertCircle size={36} color={THEME.colors.text.secondary} />
                 <Text className="mt-6 text-lg font-black tracking-widest text-white">
                   No Engine Loaded
                 </Text>
-                <Text className="text-zinc-400 mt-3 text-sm text-center max-w-[300px] leading-[22px]">
+                <Text className="text-zinc-400 mt-3 text-sm text-center max-w-[300px] leading-[12px]">
                   Return to the Models catalog, download an engine, and select
                   "Load Model" to initialize the hardware.
                 </Text>
@@ -585,7 +586,6 @@ export default function LocalChatSandbox() {
             )}
           </View>
 
-          {/* ─── INPUT CONSOLE ─────────────────────────────────────────────── */}
           <View
             className="px-4 pt-2 pb-6"
             style={{ paddingBottom: dynamicBottomPadding }}

@@ -1,14 +1,13 @@
 /**
- * services/localInference.ts
- * Native Llama.rn Bridge & Hardware Watchdog
+ * @file services/localInference.ts
+ * @description Native Llama.rn Bridge & Hardware Watchdog
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
- * - 128K CONTEXT UNLOCKED: Aligned ABSOLUTE_MAX_HARDWARE_CONTEXT with Gemma 4's
- *   native capabilities for 45+ minute video transcription.
+ * - 128K CONTEXT UNLOCKED: Aligned ABSOLUTE_MAX_HARDWARE_CONTEXT to 131072.
  * - VULKAN CRASH PREVENTION: Context size is strictly capped at the prefill slider.
  *   n_predict is mathematically clamped so (prompt + output <= context).
- * - ZERO-BOS PROMPT ALIGNMENT: Strictly removed all <bos> tags from templates 
- *   because llama.rn auto-injects it. Double <bos> causes instant EOS.
+ * - GEMMA 4 TEMPLATE FIX: Restored <bos> tokens. Gemma 4 strictly requires <bos>
+ *   to initialize attention. Without it, the model instantly outputs <eos> (Empty Bubble).
  * - DUAL ENGINES: Safely separates Pipeline Inference from Chat Inference.
  * ----------------------------------------------------------------------------
  */
@@ -48,9 +47,9 @@ type InitLlamaFn = (options: {
 
 // --- CONSTANTS ---------------------------------------------------------------
 
-// UPGRADE: 128K Context Unlocked for E2B/E4B Models
+// UPGRADE: 128K Context Unlocked for E2B/E4B Models (Supports 40+ min videos)
 const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
-const TOKEN_ESTIMATION_FACTOR = 3.2; // More conservative (fewer chars per token)
+const TOKEN_ESTIMATION_FACTOR = 3.2;
 const TOKEN_BUFFER = 100;
 
 const MODEL_REGISTRY: Record<string, string> = {
@@ -65,7 +64,6 @@ let initLlama: InitLlamaFn | null = null;
 
 if (Platform.OS !== 'web') {
     try {
-        // Dynamic require to prevent web bundling issues
         const llamaModule = require('llama.rn');
         initLlama = llamaModule.initLlama;
     } catch (e) {
@@ -82,29 +80,22 @@ let activeGpuLayers: number = 0;
 
 // --- UTILITIES ---------------------------------------------------------------
 
-/**
- * Estimates token count based on string length.
- * @param text The input string
- * @param buffer Optional extra tokens to add
- */
 const estimateTokens = (text: string, buffer: number = 0): number => {
     return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
 };
 
 /**
- * Formats prompt for JSON output by pre-injecting the opening bracket.
- * BUGFIX: Removed manual <bos> to prevent token collision and instant aborts.
+ * FIX: Restored <bos>. Gemma 4 requires <bos> to start JSON generation cleanly.
  */
 const formatGemmaJSONPrompt = (prompt: string): string => {
-    return `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
+    return `<bos><start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`;
 };
 
 /**
- * Formats chat history for Gemma models.
- * BUGFIX: Removed manual <bos> to prevent empty bubble responses.
+ * FIX: Restored <bos>. This solves the "[Empty Response]" bug in the Chat Sandbox.
  */
 const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string }[]): string => {
-    let prompt = "";
+    let prompt = "<bos>";
     for (const msg of messages) {
         const role = msg.role === 'ai' ? 'model' : 'user';
         prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
@@ -114,7 +105,7 @@ const formatGemmaChatHistory = (messages: { role: 'user' | 'ai'; content: string
 };
 
 /**
- * Wraps the native completion callback in a promise.
+ * Robust wrapper to handle streaming tokens and prevent race conditions.
  */
 const executeNativeCompletion = async (
     context: LlamaInstance,
@@ -134,9 +125,6 @@ const executeNativeCompletion = async (
 
 // --- ENGINE MANAGEMENT -------------------------------------------------------
 
-/**
- * PRODUCTION SAFEGUARD: Memory Leak Prevention & Reconfiguration
- */
 export const releaseNativeEngine = async () => {
     if (activeLlamaContext && Platform.OS !== 'web') {
         console.log(`[Local AI] Releasing hardware context. Freeing RAM...`);
@@ -153,14 +141,10 @@ export const releaseNativeEngine = async () => {
     }
 };
 
-/**
- * Instantiates the hardware context cleanly based on user configuration.
- */
 export const configureNativeEngine = async (
     modelId: string,
     options: { prefillTokens: number; gpuLayers: number }
 ) => {
-    // Align context size to 256 for Vulkan memory alignment
     let optimalContext = Math.floor(options.prefillTokens / 256) * 256;
     optimalContext = Math.min(optimalContext, ABSOLUTE_MAX_HARDWARE_CONTEXT);
 
@@ -183,13 +167,11 @@ export const configureNativeEngine = async (
         const fileName = MODEL_REGISTRY[modelId] || MODEL_REGISTRY['default'];
         const modelPath = `${docDir}${fileName}`.replace('file://', '');
 
-        // Verify file exists before loading
         try {
-            const fileInfo = await FileSystem.getInfoAsync(`${docDir}${fileName}`);
+            const fileInfo = await FileSystem.getInfoAsync(modelPath);
             if (!fileInfo.exists) {
                 throw new Error(`MODEL_FILE_NOT_FOUND: ${fileName} is missing from storage.`);
             }
-            console.log(`[Local AI] Model file verified: ${fileName} (${(fileInfo.size / 1024 / 1024).toFixed(2)} MB)`);
         } catch (e: any) {
             console.error("[Local AI] File system check failed:", e.message);
             throw e;
@@ -218,7 +200,7 @@ export const configureNativeEngine = async (
 // --- INFERENCE ENGINES -------------------------------------------------------
 
 /**
- * ENGINE 1: PIPELINE INFERENCE (STRICT JSON)
+ * ENGINE 1: PIPELINE INFERENCE (STRICT JSON TRANSCRIBER)
  */
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
     const state = useLocalAIStore.getState();
@@ -240,8 +222,6 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         const formattedPrompt = formatGemmaJSONPrompt(prompt);
         const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
-        console.log(`[Local AI] Estimated prompt tokens: ${estimatedPromptTokens}`);
-
         if (estimatedPromptTokens >= prefillTokens) {
             console.warn(`[Local AI] Prompt too large: ${estimatedPromptTokens} vs ${prefillTokens}`);
             throw new Error("CONTEXT_OVERFLOW_SLIDER: Prompt exceeds prefill limit.");
@@ -249,7 +229,6 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
 
         await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
 
-        // VULKAN CRASH PREVENTION: Clamp output to remaining context
         const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
         if (safeDecodeLimit < 20) {
             console.warn(`[Local AI] Insufficient space for output: ${safeDecodeLimit} tokens remaining.`);
@@ -314,6 +293,7 @@ export const runLocalChatInference = async (
 
         if (!activeLlamaContext) throw new Error("ENGINE_NOT_READY");
 
+        // Uses the robust wrapper instead of inline Promise to guarantee state resolution
         return await executeNativeCompletion(
             activeLlamaContext,
             {
@@ -322,7 +302,7 @@ export const runLocalChatInference = async (
                 temperature: Math.max(0.4, temperature),
                 top_k: 40,
                 top_p: 0.95,
-                stop: ["<end_of_turn>", "<eos>"] // Crucial to prevent hallucinating user turns
+                stop: ["<end_of_turn>", "<eos>"] // Prevents hallucinating user turns
             },
             "",
             onChunk
@@ -391,13 +371,12 @@ const runWebInference = async (
                         onChunk?.(content);
                     }
                 } catch (e) {
-                    // Ignore malformed chunks
                 }
             }
         }
         return fullText;
     } catch (e: any) {
-        throw new Error(`GATEWAY_UNREACHABLE: Failed to connect to local runner on port ${options.port}.`);
+        throw new Error(`GATEWAY_UNREACHABLE.`);
     }
 };
 
