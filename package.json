@@ -28,7 +28,7 @@
     "base64-arraybuffer": "^1.0.2",
     "clsx": "^2.1.0",
     "date-fns": "^3.0.0",
-    "expo": "^55.0.18",
+    "expo": "^55.0.19",
     "expo-asset": "~55.0.10",
     "expo-audio": "~55.0.12",
     "expo-auth-session": "~55.0.12",
@@ -85,6 +85,7 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@supabase/supabase-js": "^2.103.0",
+    "@types/jquery": "^4.0.0",
     "@types/node": "^25.5.0",
     "@types/react": "~19.2.10",
     "babel-plugin-transform-remove-console": "^6.9.4",

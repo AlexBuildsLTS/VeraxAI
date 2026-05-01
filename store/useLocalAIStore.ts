@@ -1,6 +1,6 @@
 /**
- * store/useLocalAIStore.ts
- * State Manager for On-Device LLM Processing
+ * @file store/useLocalAIStore.ts
+ * @description Enhanced Local Engine State Management for Gemma 4 (Post-April 22nd Update)
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -16,7 +16,7 @@ export interface LocalModel {
     tags: string[];
     downloadUrl: string;
     fileName: string;
-    architecture: 'gemma4' | 'phi3';
+    architecture: 'gemma4';
     benchmarks: {
         expectedTokSec: number;
         promptEvalMs: number;
@@ -26,12 +26,12 @@ export interface LocalModel {
 }
 
 interface LocalAIState {
-    // Networking
+    // Networking & Server
     isLocalServerEnabled: boolean;
     port: string;
     allowExternalConnections: boolean;
 
-    // Hardware Tuning
+    // Hardware & Inference Tuning
     computeBackend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu';
     threads: number;
     gpuLayers: number;
@@ -39,51 +39,87 @@ interface LocalAIState {
     prefillTokens: number;
     decodeTokens: number;
 
-    // Model State
+    // KV Cache & Performance Protocols (April 22nd Engine Update)
+    cacheTypeK: 'f16' | 'q8_0' | 'q4_0';
+    cacheTypeV: 'f16' | 'q8_0' | 'q4_0';
+    flashAttn: boolean;
+    useMmap: boolean;
+    useMlock: boolean;
+
+    // Model Lifecycle State
     activeModelId: string | null;
     downloadedModels: string[];
     downloadProgress: Record<string, number>;
 
-    // Core Actions
+    // Management Actions
     toggleServer: (enabled: boolean) => void;
     setPort: (port: string) => void;
     toggleExternalConnections: (enabled: boolean) => void;
     setComputeBackend: (backend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu') => void;
-    setHardwareState: (key: 'threads' | 'gpuLayers' | 'temperature' | 'prefillTokens' | 'decodeTokens', value: number) => void;
+    setHardwareState: (key: keyof LocalAIState, value: any) => Promise<void>;
     setActiveModel: (id: string | null) => void;
 
-    // File System Actions
+    // Storage Actions
     setDownloadProgress: (id: string, progress: number) => void;
-    markDownloaded: (id: string, uri?: string) => void;
+    markDownloaded: (id: string) => void;
     removeModel: (id: string) => void;
     clearDownloadProgress: (id: string) => void;
+    resetHardwareToDefaults: () => void;
 }
 
 export const useLocalAIStore = create<LocalAIState>()(
     persist(
-        (set) => ({
+        (set, get) => ({
+            // Networking Defaults
             isLocalServerEnabled: false,
             port: '4891',
             allowExternalConnections: false,
 
+            // Hardware Defaults for Gemma 4 Q4 Unsloth
             computeBackend: 'auto',
-            threads: 4,
-            gpuLayers: -1, // -1 Forces llama.rn to offload maximum possible layers to VRAM
-            temperature: 0.15, // Lowered for strict JSON transcription accuracy
-            prefillTokens: 8192,
+            threads: 8,
+            gpuLayers: -1,
+            temperature: 0.15,
+            prefillTokens: 16384,
             decodeTokens: 2048,
+
+            // April 22nd Performance Protocols
+            cacheTypeK: 'q8_0',
+            cacheTypeV: 'q8_0',
+            flashAttn: true,
+            useMmap: true,
+            useMlock: false,
 
             activeModelId: null,
             downloadedModels: [],
             downloadProgress: {},
 
             toggleServer: (enabled) => set({ isLocalServerEnabled: enabled }),
+
             setPort: (port) => set({ port }),
+
             toggleExternalConnections: (enabled) => set({ allowExternalConnections: enabled }),
+
             setComputeBackend: (backend) => set({ computeBackend: backend }),
 
-            setHardwareState: (key, value) => {
+            setHardwareState: async (key, value) => {
                 set((state) => ({ ...state, [key]: value }));
+
+                const criticalKeys = ['prefillTokens', 'decodeTokens', 'gpuLayers', 'cacheTypeK', 'cacheTypeV', 'flashAttn'];
+
+                if (criticalKeys.includes(key as string)) {
+                    if (Platform.OS !== 'web') {
+                        try {
+                            const { releaseNativeEngine } = require('../services/localInference');
+                            if (releaseNativeEngine) {
+                                await releaseNativeEngine();
+                                console.log(`[Local AI Store] Flush triggered by ${key} change.`);
+                            }
+                        } catch (error) {
+                            // Interface not yet mounted
+                        }
+                    }
+                }
             },
 
             setActiveModel: (id) => set({ activeModelId: id }),
@@ -111,6 +147,17 @@ export const useLocalAIStore = create<LocalAIState>()(
                 delete newProgress[id];
                 return { downloadProgress: newProgress };
             }),
+
+            resetHardwareToDefaults: () => set({
+                gpuLayers: -1,
+                threads: 8,
+                temperature: 0.15,
+                prefillTokens: 16384,
+                decodeTokens: 2048,
+                cacheTypeK: 'q8_0',
+                cacheTypeV: 'q8_0',
+                flashAttn: true
+            })
         }),
         {
             name: 'verax-local-ai-storage',
@@ -126,7 +173,12 @@ export const useLocalAIStore = create<LocalAIState>()(
                 temperature: state.temperature,
                 prefillTokens: state.prefillTokens,
                 decodeTokens: state.decodeTokens,
-                downloadedModels: Array.isArray(state.downloadedModels) ? state.downloadedModels : [],
+                cacheTypeK: state.cacheTypeK,
+                cacheTypeV: state.cacheTypeV,
+                flashAttn: state.flashAttn,
+                useMmap: state.useMmap,
+                useMlock: state.useMlock,
+                downloadedModels: state.downloadedModels,
             }),
         }
     )

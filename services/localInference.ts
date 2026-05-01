@@ -1,14 +1,18 @@
 /**
  * @file services/localInference.ts
- * @description Native Llama.rn Bridge & Hardware Watchdog
+ * @description Master Native Llama.rn Bridge & Hardware Watchdog
  * ----------------------------------------------------------------------------
+ * VERSION: 4.2.1 (Post-April 2026 Hardware Update)
+ * ARCHITECTURE: Dynamic Hardware Scaling for Gemma-4 Architecture
+ * 
  * DESIGN PRINCIPLES:
- * - 128K CONTEXT UNLOCKED: Aligned ABSOLUTE_MAX_HARDWARE_CONTEXT to 131072.
- * - VULKAN CRASH PREVENTION: Context size is strictly capped at the prefill slider.
- * - HARDWARE SAFETY: Implements safety delays for Vulkan and hardware init.
- * - DECOUPLED ARCHITECTURE: Contains standalone prompt builder to prevent 
- *   Metro Bundler from crashing on Deno Edge Function dependencies.
- * - APRIL UPDATES: Flash Attention & Q8_0 KV Cache forced for 15k+ token stability.
+ * 1. ZERO-BOS TOKENIZATION: Complies with April 21st llama.cpp engine logic
+ *    which auto-injects BOS tokens for Gemma. Prevents turn-0 stalling.
+ * 2. VRAM FENCING: Strict 16K limit on mobile Vulkan to prevent memory 
+ *    segmentation faults while allowing 128K context on high-end desktop web.
+ * 3. DECOUPLED ARCHITECTURE: Standalone prompt builder avoids Deno/Edge 
+ *    circular dependencies during Metro bundling.
+ * 4. SYNC-FLUSH: Ensures KV Cache is fully purged before hardware reallocation.
  * ----------------------------------------------------------------------------
  */
 
@@ -17,97 +21,164 @@ import { useLocalAIStore } from '../store/useLocalAIStore';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { AVAILABLE_MODELS } from '../constants/models';
 
-// --- TYPES & INTERFACES ------------------------------------------------------
+/**
+ * NATIVE BRIDGE TYPE DEFINITIONS
+ * ----------------------------------------------------------------------------
+ * These interfaces map directly to the llama.rn native implementation
+ * requirements for JSI communication.
+ */
 
-interface LlamaCompletionParams {
+export interface LlamaCompletionParams {
     prompt: string;
     n_predict: number;
     temperature: number;
     top_k: number;
     top_p: number;
     stop?: string[];
+    repeat_penalty?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    mirostat?: number;
+    mirostat_tau?: number;
+    mirostat_eta?: number;
 }
 
-interface LlamaTokenData {
+export interface LlamaTokenData {
     token: string;
+    completion_probabilities?: Array<{
+        token: string;
+        probs: number;
+    }>;
 }
 
-interface LlamaInstance {
+export interface LlamaInstance {
+    /**
+     * Executes raw inference on the native engine.
+     * Tokens are streamed back in real-time via the onToken callback.
+     */
     completion: (
         params: LlamaCompletionParams,
         onToken: (data: LlamaTokenData) => void
     ) => Promise<void>;
+
+    /**
+     * Instantly halts token generation without releasing VRAM.
+     */
     stopCompletion?: () => Promise<void>;
+
+    /**
+     * Completely releases the model and flushes VRAM/RAM back to the OS.
+     * Required before initializing a new model or context size.
+     */
     release: () => Promise<void>;
+
+    /**
+     * Tokenizes text into a raw integer array for precise context measurement.
+     */
+    tokenize: (text: string) => Promise<number[]>;
 }
 
+/**
+ * Initialization function provided by the llama.rn native module.
+ */
 type InitLlamaFn = (options: {
     contextSize: number;
     model: string;
     n_gpu_layers: number;
     flash_attn?: boolean;
-    cache_type_k?: string;
-    cache_type_v?: string;
+    cache_type_k?: 'f16' | 'q8_0' | 'q4_0';
+    cache_type_v?: 'f16' | 'q8_0' | 'q4_0';
+    threads?: number;
+    use_mmap?: boolean;
+    use_mlock?: boolean;
 }) => Promise<LlamaInstance>;
 
-// --- CONSTANTS ---------------------------------------------------------------
+/**
+ * HARDWARE FENCING CONSTANTS
+ */
+const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072; // 128K context for Web/Desktop
+const MOBILE_VRAM_SAFE_LIMIT = 16384;        // Strict 16K safety clamp for Android/iOS
+const TOKEN_ESTIMATION_FACTOR = 3.2;         // Precision factor for English/JSON
+const WATCHDOG_BUFFER = 150;                 // Token safety padding for system instructions
 
-const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072; // 128K Web
-const APK_SAFETY_CLAMP = 65536;               // 64K Android
-const TOKEN_ESTIMATION_FACTOR = 3.2;
-const TOKEN_BUFFER = 100;
-
-// --- NATIVE MODULE INITIALIZATION --------------------------------------------
-
+/**
+ * ENGINE INITIALIZATION BRIDGE
+ */
 let initLlama: InitLlamaFn | null = null;
+const OS_TARGET = String(Platform.OS);
 
-if (Platform.OS !== 'web') {
+if (OS_TARGET !== 'web') {
     try {
+        // Dynamic require ensures the Metro bundler does not include 
+        // native modules in web target builds, preventing compilation failure.
         const llamaModule = require('llama.rn');
         initLlama = llamaModule.initLlama;
     } catch (e) {
-        console.warn("[VeraxAI] Native llama.rn module not found.");
+        console.warn("[VeraxAI] Native Llama.rn bridge not found. Engine defaulting to Web Gateway.");
     }
 }
 
-// --- ENGINE STATE MANAGEMENT -------------------------------------------------
-
+/**
+ * INTERNAL ENGINE STATE SINGLETON
+ * ----------------------------------------------------------------------------
+ * Tracks the active native context to prevent multiple hardware allocations.
+ */
 interface EngineState {
     context: LlamaInstance | null;
     modelId: string | null;
     contextSize: number;
+    gpuLayers: number;
+    isInitializing: boolean;
 }
 
 const engineState: EngineState = {
     context: null,
     modelId: null,
     contextSize: 0,
+    gpuLayers: 0,
+    isInitializing: false,
 };
 
-// --- PROMPT TEMPLATES (APRIL 30TH STANDARD) ----------------------------------
-
+/**
+ * GEMMA-4 ARCHITECTURE TEMPLATES (ZERO-BOS TURN-0)
+ * ----------------------------------------------------------------------------
+ * As of the April 22nd engine updates, llama.cpp handles BOS injection.
+ * Manual injection of <start_of_turn> at index 0 causes turn-0 model stalls.
+ */
 const TEMPLATES = {
     gemma4: {
-        // STRICT: Zero-BOS. Starts with <start_of_turn>user\n and ends with <start_of_turn>model\n{
-        json: (prompt: string) => `<start_of_turn>user\n${prompt}<end_of_turn>\n<start_of_turn>model\n{`,
+        /**
+         * System-Instruction leading format for automated JSON generation.
+         */
+        json: (prompt: string) => `user\n${prompt}<end_of_turn>\n<start_of_turn>model\n`,
 
-        // STRICT: Zero-BOS conversational format
+        /**
+         * Conversational chat format. Omits turn-0 BOS for engine compliance.
+         */
         chat: (messages: { role: 'user' | 'ai'; content: string }[]) => {
             let prompt = "";
-            for (const msg of messages) {
+            for (let i = 0; i < messages.length; i++) {
+                const msg = messages[i];
                 const role = msg.role === 'ai' ? 'model' : 'user';
-                prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
+
+                if (i === 0) {
+                    // ZERO-BOS Logic for the initial sequence
+                    prompt += `${role}\n${msg.content}<end_of_turn>\n`;
+                } else {
+                    prompt += `<start_of_turn>${role}\n${msg.content}<end_of_turn>\n`;
+                }
             }
             prompt += "<start_of_turn>model\n";
             return prompt;
         },
 
-        // STRICT: Terminal tags only. Removes raw "user" and "model".
-        stop: ["<end_of_turn>", "<eos>", "<start_of_turn>"]
+        stop: ["<end_of_turn>", "<eos>", "<start_of_turn>", "model\n"]
     }
 };
 
-// --- CLIENT-SIDE PROMPT ENGINE (DECOUPLED FROM SUPABASE) ---------------------
+/**
+ * ANALYTICS & PROMPT CONSTRUCTORS
+ */
 
 function getContentCategory(transcript: string): 'short' | 'medium' | 'long' {
     const wordCount = transcript.split(/\s+/).length;
@@ -116,44 +187,46 @@ function getContentCategory(transcript: string): 'short' | 'medium' | 'long' {
     return 'long';
 }
 
-function buildPrompt(transcript: string, language: string, difficulty: string, category: 'short' | 'medium' | 'long'): string {
+/**
+ * Builds the high-fidelity prompt for executive dossier production.
+ */
+function buildPrompt(
+    transcript: string,
+    language: string,
+    difficulty: string,
+    category: 'short' | 'medium' | 'long'
+): string {
     const difficultyGuides: Record<string, string> = {
-        beginner: 'Use highly accessible, clear language. Define complex terminology simply. Emphasize clarity and approachability.',
-        standard: 'Maintain a pristine, professional executive tone. Balance analytical depth with optimal readability.',
-        advanced: 'Assume elite domain expertise. Use precise technical, academic, or industry-standard terminology. Provide nuanced, forensic-level analysis.',
+        beginner: 'Use highly accessible, clear language. Define complex terminology simply. Focus on clarity.',
+        standard: 'Maintain a pristine, professional executive tone. Balance analytical depth with readability.',
+        advanced: 'Assume elite domain expertise. Use precise technical, academic, or industry-standard terminology.',
     };
 
     const depthGuide = {
-        short: 'Write a highly concentrated 2-paragraph summary. Output exactly 1 to 3 distinct chapters mapping the core shifts.',
-        medium: 'Write an elite 3-4 paragraph executive summary. Output exactly 3 to 6 detailed chapters mapping the chronology.',
-        long: 'Write a massive, profound 4-6 paragraph executive dossier. Output exactly 5 to 8 major chronological chapters. Do not spam micro-chapters. Group large timeframes into massive, highly detailed descriptions.',
+        short: 'Concentrated 2-paragraph summary. Exactly 1 to 3 distinct chapters.',
+        medium: 'Elite 3-4 paragraph executive summary. Exactly 3 to 6 detailed chapters.',
+        long: 'Massive, profound 4-6 paragraph executive dossier. Exactly 5 to 8 major chronological chapters.',
     }[category];
 
-    return `You are VeraxAI's elite, top-tier Senior Intelligence Analyst and Linguistic Expert tasked with producing a flawless, publication-ready dossier.
+    return `You are VeraxAI's elite Senior Intelligence Analyst. Produce a flawless, publication-ready dossier.
 
-TASK: Decrypt and analyze the verbatim transcript below to produce perfectly structured, profound insights.
+TASK: Analyze the verbatim transcript below to produce perfectly structured insights.
 
 TARGET OUTPUT LANGUAGE: ${language.toUpperCase()}
 AUDIENCE CALIBRATION: ${difficulty} — ${difficultyGuides[difficulty] ?? difficultyGuides.standard}
 
-CRITICAL TRANSLATION PROTOCOL (ABSOLUTE OVERRIDE):
-1. The JSON schema structure and keys (e.g., "summary", "conclusion", "chapters", "title") MUST remain in pure English. Never translate the JSON keys.
-2. ALL string values INSIDE the JSON (the actual generated text, descriptions, takeaways, tags) MUST be translated into ${language.toUpperCase()} with native, grammatical perfection and fluency.
-3. If the target language is NOT English, under no circumstances should English text appear in the values unless it is an untranslatable proper noun.
+STRICT TRANSLATION PROTOCOL:
+1. JSON keys ("summary", "conclusion", "chapters", "title") MUST remain in English.
+2. ALL string values INSIDE the JSON MUST be translated into ${language.toUpperCase()} with native fluency.
 
-RICH FORMATTING PROTOCOL (MANDATORY):
-- You MUST utilize rich Markdown formatting INSIDE the JSON string values.
-- Use **bolding** for crucial terms, metrics, or names to make the text scannable.
-- Use Markdown lists (- item) inside chapter descriptions if explaining multi-step processes.
-
-CRITICAL COVERAGE PROTOCOL:
-- You MUST process the narrative from the absolute 00:00 mark to the FINAL WORD of the transcript. Do not stop analyzing halfway through.
+FORMATTING:
+- Use rich Markdown formatting (bolding) inside JSON strings.
 - ${depthGuide}
-- Prioritize extreme quality and analytical depth over sheer volume.
 
-STRICT RULES:
-1. OUTPUT ONLY VALID JSON. No conversational preamble. No backticks framing the output.
-2. Zero hallucinations. Extract and synthesize data strictly from the provided text.
+RULES:
+1. OUTPUT ONLY VALID JSON. No conversational preamble.
+2. Output MUST begin with '{' and end with '}'.
+3. Extract data strictly from provided text. Zero hallucinations.
 
 VERBATIM TRANSCRIPT:
 """
@@ -161,6 +234,9 @@ ${transcript}
 """`;
 }
 
+/**
+ * Wraps prompt construction and splits system instructions for agent consumption.
+ */
 export function buildAgentPrompt(transcript: string, language: string, difficulty: string) {
     const category = getContentCategory(transcript);
     const fullPrompt = buildPrompt(transcript, language, difficulty, category);
@@ -168,18 +244,21 @@ export function buildAgentPrompt(transcript: string, language: string, difficult
     const splitIndex = fullPrompt.indexOf('VERBATIM TRANSCRIPT:');
 
     if (splitIndex !== -1) {
-        const systemInstruction = fullPrompt.substring(0, splitIndex).trim();
-        const userMessage = fullPrompt.substring(splitIndex).trim();
-        return { systemInstruction, userMessage };
+        return {
+            systemInstruction: fullPrompt.substring(0, splitIndex).trim(),
+            userMessage: fullPrompt.substring(splitIndex).trim()
+        };
     }
 
     return {
-        systemInstruction: "You are VeraxAI's elite Senior Intelligence Analyst. Produce flawless JSON insights.",
+        systemInstruction: "You are VeraxAI's elite Analyst. Produce flawless JSON insights.",
         userMessage: fullPrompt
     };
 }
 
-// --- UTILITIES ---------------------------------------------------------------
+/**
+ * HARDWARE UTILITIES
+ */
 
 const estimateTokens = (text: string, buffer: number = 0): number => {
     return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
@@ -189,6 +268,10 @@ const getModelConfig = (modelId: string) => {
     return AVAILABLE_MODELS.find(m => m.id === modelId) || AVAILABLE_MODELS[0];
 };
 
+/**
+ * Aggressive JSON Stripper
+ * Removes markdown block syntax and isolates the core JSON structure.
+ */
 const extractCleanJson = (text: string): string => {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
@@ -196,9 +279,28 @@ const extractCleanJson = (text: string): string => {
     if (start !== -1 && end !== -1 && end >= start) {
         return text.substring(start, end + 1);
     }
-    return text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim() || "{}";
+
+    // Fallback if model omitted braces
+    let cleaned = text.trim();
+    const jsonMatch = "```json";
+    const backticks = "```";
+
+    if (cleaned.toLowerCase().startsWith(jsonMatch)) {
+        cleaned = cleaned.substring(jsonMatch.length);
+    } else if (cleaned.startsWith(backticks)) {
+        cleaned = cleaned.substring(backticks.length);
+    }
+
+    if (cleaned.endsWith(backticks)) {
+        cleaned = cleaned.substring(0, cleaned.length - backticks.length);
+    }
+
+    return cleaned.trim() || "{}";
 };
 
+/**
+ * Internal loop for native token stream handling.
+ */
 const executeNativeCompletion = async (
     context: LlamaInstance,
     params: LlamaCompletionParams,
@@ -215,26 +317,35 @@ const executeNativeCompletion = async (
     return fullText;
 };
 
-// --- ENGINE MANAGEMENT -------------------------------------------------------
+/**
+ * ENGINE LIFECYCLE CONTROLLERS
+ */
 
+/**
+ * Flushes the hardware context. Mandatory before any parameter reconfiguration.
+ */
 export const releaseNativeEngine = async () => {
-    if (engineState.context && Platform.OS !== 'web') {
-        console.log(`[Local AI] Releasing hardware context. Freeing RAM...`);
+    if (engineState.context && OS_TARGET !== 'web') {
+        console.log(`[Local AI] Flushing KV Cache and releasing VRAM...`);
         try {
             await engineState.context.release();
         } catch (e) {
-            console.error("[Local AI] Failed to release context.", e);
+            console.error("[Local AI] Failed to release hardware context:", e);
         } finally {
             engineState.context = null;
             engineState.modelId = null;
             engineState.contextSize = 0;
+            engineState.gpuLayers = 0;
         }
     }
 };
 
+/**
+ * Aborts the current inference stream without losing the loaded model.
+ */
 export const abortNativeInference = async () => {
-    if (engineState.context && Platform.OS !== 'web') {
-        console.log(`[Local AI] Aborting active inference...`);
+    if (engineState.context && OS_TARGET !== 'web') {
+        console.log(`[Local AI] Interrupting hardware inference stream...`);
         try {
             if (typeof engineState.context.stopCompletion === 'function') {
                 await engineState.context.stopCompletion();
@@ -242,33 +353,45 @@ export const abortNativeInference = async () => {
                 await releaseNativeEngine();
             }
         } catch (e) {
-            console.error("[Local AI] Failed to abort inference.", e);
+            console.error("[Local AI] Abort fault:", e);
         }
     }
 };
 
+/**
+ * Configures the native bridge for the target hardware environment.
+ * Implements per-device context clamping and KV-cache quantization.
+ */
 export const configureNativeEngine = async (
     modelId: string,
     options: { prefillTokens: number; gpuLayers: number }
 ) => {
-    let targetContext = Platform.OS === 'web'
-        ? ABSOLUTE_MAX_HARDWARE_CONTEXT
-        : Math.min(options.prefillTokens, APK_SAFETY_CLAMP);
+    if (engineState.isInitializing) return;
 
+    // HARDWARE FENCING: Apply safety clamp for mobile environments
+    let targetContext = OS_TARGET === 'web'
+        ? ABSOLUTE_MAX_HARDWARE_CONTEXT
+        : Math.min(options.prefillTokens, MOBILE_VRAM_SAFE_LIMIT);
+
+    // Context Alignment for memory page optimization
     const optimalContext = Math.floor(targetContext / 256) * 256;
 
     const isMatch =
         engineState.context &&
         engineState.modelId === modelId &&
-        engineState.contextSize === optimalContext;
+        engineState.contextSize === optimalContext &&
+        engineState.gpuLayers === options.gpuLayers;
 
     if (isMatch) return;
 
-    console.log(`[Local AI] Reconfiguring engine...`);
+    engineState.isInitializing = true;
+    console.log(`[Local AI] Re-Syncing hardware state for ${modelId}...`);
+
     await releaseNativeEngine();
 
     if (!initLlama) {
-        throw new Error("LLAMA_NATIVE_MISSING: Native module not initialized.");
+        engineState.isInitializing = false;
+        throw new Error("NATIVE_LLAMA_MISSING: Hardware module not initialized.");
     }
 
     const FileSystem = require('expo-file-system/legacy');
@@ -282,47 +405,60 @@ export const configureNativeEngine = async (
     try {
         const fileInfo = await FileSystem.getInfoAsync(fileUri);
         if (!fileInfo.exists) {
-            throw new Error(`MODEL_FILE_NOT_FOUND: ${fileName} is missing from storage.`);
+            engineState.isInitializing = false;
+            throw new Error(`MODEL_NOT_FOUND: ${fileName} is missing from device storage.`);
         }
     } catch (e: any) {
-        console.error("[Local AI] File system check failed:", e.message);
+        engineState.isInitializing = false;
         throw e;
     }
 
-    console.log(`[Local AI] Booting engine | Model: ${modelId} | Context: ${optimalContext} | GPU Layers: ${options.gpuLayers}`);
+    console.log(`[Local AI] Booting Engine | KV: q8_0 | Context: ${optimalContext} | GPU: ${options.gpuLayers}`);
 
     try {
+        // VRAM optimized initialization
         engineState.context = await initLlama({
             contextSize: optimalContext,
             model: modelPath,
             n_gpu_layers: options.gpuLayers,
-            flash_attn: true, // Critical for 15k+ token context window on mobile
-            cache_type_k: 'q8_0', // Compress KV memory to prevent OOM crashes
+            flash_attn: true,
+            cache_type_k: 'q8_0',
             cache_type_v: 'q8_0',
+            use_mmap: true,
+            threads: 8
         });
 
         engineState.modelId = modelId;
         engineState.contextSize = optimalContext;
-        console.log(`[Local AI] Engine booted successfully.`);
+        engineState.gpuLayers = options.gpuLayers;
+        console.log(`[Local AI] Native Engine Online and Secure.`);
     } catch (e: any) {
         console.error("[Local AI] Failed to boot native engine:", e.message);
-        throw new Error(`ENGINE_BOOT_FAILED: ${e.message}`);
+        throw new Error(`HARDWARE_BOOT_FAILED: ${e.message}`);
+    } finally {
+        engineState.isInitializing = false;
     }
 };
 
-// --- INFERENCE ENGINES -------------------------------------------------------
+/**
+ * HIGH-THROUGHPUT INFERENCE ENGINES
+ */
 
+/**
+ * Standard Inference for Transcript Analysis
+ */
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
     const state = useLocalAIStore.getState();
     const { activeModelId, prefillTokens, decodeTokens, gpuLayers, port, temperature } = state;
 
-    if (!activeModelId) throw new Error("INFERENCE_FAULT: No active model selected.");
+    if (!activeModelId) throw new Error("INFERENCE_FAULT: No active model loaded.");
 
-    if (Platform.OS === 'web') {
+    // Redirect to Web Proxy if environment is browser-based
+    if (OS_TARGET === 'web') {
         return runWebProxyInference(prompt, activeModelId, port || "1234", decodeTokens || 2048, temperature || 0.15);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await new Promise(resolve => setTimeout(resolve, 600));
     await activateKeepAwakeAsync();
 
     try {
@@ -333,17 +469,20 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         const combinedPrompt = `${systemInstruction}\n\n${userMessage}`;
 
         const formattedPrompt = template.json(combinedPrompt);
-        const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
-        if (estimatedPromptTokens >= prefillTokens) {
-            throw new Error(`CONTEXT_OVERFLOW_SLIDER: Prompt exceeds prefill limit.`);
+        // WATCHDOG: Ensure we stay within hardware fence
+        const safePrefillLimit = Math.min(prefillTokens, MOBILE_VRAM_SAFE_LIMIT);
+        const estimatedPromptTokens = estimateTokens(formattedPrompt, WATCHDOG_BUFFER);
+
+        if (estimatedPromptTokens >= safePrefillLimit) {
+            throw new Error(`CONTEXT_OVERFLOW: Input exceeds hardware safety fence.`);
         }
 
-        await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
+        await configureNativeEngine(activeModelId, { prefillTokens: safePrefillLimit, gpuLayers });
 
-        const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
-        if (safeDecodeLimit < 20) {
-            throw new Error("CONTEXT_OVERFLOW_SLIDER: Insufficient space for output.");
+        const safeDecodeLimit = Math.min(decodeTokens, safePrefillLimit - estimatedPromptTokens);
+        if (safeDecodeLimit <= 0) {
+            throw new Error("CONTEXT_OVERFLOW: Insufficient space for generated output.");
         }
 
         if (!engineState.context) throw new Error("ENGINE_NOT_READY");
@@ -353,7 +492,7 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
             {
                 prompt: formattedPrompt,
                 n_predict: safeDecodeLimit,
-                temperature: 0.15, // Force strict JSON determinism
+                temperature: 0.15,
                 top_k: 40,
                 top_p: 0.95,
                 stop: template.stop
@@ -371,6 +510,9 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
     }
 };
 
+/**
+ * Sequential Inference for Chat Sandbox
+ */
 export const runLocalChatInference = async (
     messages: { role: 'user' | 'ai'; content: string }[],
     onChunk?: (token: string) => void
@@ -378,28 +520,33 @@ export const runLocalChatInference = async (
     const state = useLocalAIStore.getState();
     const { activeModelId, temperature, prefillTokens, decodeTokens, gpuLayers } = state;
 
-    if (!activeModelId) throw new Error("FAULT: No model selected.");
+    if (!activeModelId) throw new Error("FAULT: No hardware engine selected.");
 
     await activateKeepAwakeAsync();
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 400));
 
     try {
         const template = TEMPLATES.gemma4;
         const formattedPrompt = template.chat(messages);
 
-        await configureNativeEngine(activeModelId, { prefillTokens, gpuLayers });
+        const safePrefillLimit = OS_TARGET === 'web' ? prefillTokens : Math.min(prefillTokens, MOBILE_VRAM_SAFE_LIMIT);
+        await configureNativeEngine(activeModelId, { prefillTokens: safePrefillLimit, gpuLayers });
 
         const estimatedPromptTokens = estimateTokens(formattedPrompt);
-        const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
+        const safeDecodeLimit = Math.min(decodeTokens, safePrefillLimit - estimatedPromptTokens);
 
-        if (!engineState.context) throw new Error("ENGINE_NOT_READY");
+        if (safeDecodeLimit <= 0) {
+            throw new Error("Context limits reached. Please clear history to continue.");
+        }
+
+        if (!engineState.context) throw new Error("ENGINE_OFFLINE");
 
         return await executeNativeCompletion(
             engineState.context,
             {
                 prompt: formattedPrompt,
                 n_predict: safeDecodeLimit,
-                temperature: Math.max(0.65, temperature), // Allow creativity in Sandbox
+                temperature: Math.max(0.65, temperature),
                 top_k: 40,
                 top_p: 0.9,
                 stop: template.stop
@@ -416,12 +563,20 @@ export const runLocalChatInference = async (
 };
 
 /**
- * WEB GATEWAY (Vercel Proxy / LM Studio)
+ * WEB GATEWAY PROXY
+ * ----------------------------------------------------------------------------
+ * Connects to local development runners (LM Studio, Ollama) when in Web mode.
  */
-async function runWebProxyInference(prompt: string, modelId: string, port: string, maxTokens: number, temperature: number): Promise<string> {
+async function runWebProxyInference(
+    prompt: string,
+    modelId: string,
+    port: string,
+    maxTokens: number,
+    temperature: number
+): Promise<string> {
     const endpoint = `http://127.0.0.1:${port}/v1/chat/completions`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
         const response = await fetch(endpoint, {
@@ -445,6 +600,6 @@ async function runWebProxyInference(prompt: string, modelId: string, port: strin
         return extractCleanJson(json.choices?.[0]?.message?.content || "{}");
 
     } catch (e: any) {
-        throw new Error(`GATEWAY_UNREACHABLE: Failed to connect to local runner on port ${port}.`);
+        throw new Error(`GATEWAY_UNREACHABLE: Ensure local runner is active on port ${port}.`);
     }
 }

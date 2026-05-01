@@ -2,13 +2,10 @@
  * @file hooks/mutations/useProcessVideo.ts
  * @description Pipeline Dispatcher — Universal Architecture
  * ----------------------------------------------------------------------------
- * DESIGN PRINCIPLES:
- * - TRUE HARDWARE AGNOSTIC: Zero artificial string truncation. 
- * - THE MASTER FALLBACK: If Local AI fails, hallucinates, or runs out of RAM, 
- *   it seamlessly aborts, frees RAM, and routes to Cloud Gemini. Zero failed videos.
- * - AGGRESSIVE JSON REPAIR: Extracts JSON arrays/objects safely even if the 
- *   model swallowed the opening bracket during forced generation.
- * - PROMPT DE-DUPLICATION: Defers prompt construction strictly to the Native Bridge.
+ * UPDATES (Post-April 22nd):
+ * - SAFE STRING EXTRACTION: Replaced backtick regex with index-based slicing.
+ * - MEMORY FENCING: Explicitly releases native engine before Cloud routing.
+ * - JSON REPAIR: Enhanced reconstruction for swallowed opening braces.
  * ----------------------------------------------------------------------------
  */
 
@@ -43,31 +40,27 @@ function maskErrorMessage(rawMsg: string): string {
 }
 
 function extractAndParseJSON(rawOutput: string) {
-    let sanitized = rawOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-    // AGGRESSIVE REPAIR: Reconstruct the opening bracket if it was swallowed
-    if (!sanitized.startsWith('{')) {
-        const firstProp = sanitized.indexOf('"summary"');
-        if (firstProp !== -1) {
-            sanitized = '{' + sanitized.substring(firstProp);
-        } else {
-            sanitized = '{' + sanitized;
-        }
-    }
-
-    const firstBrace = sanitized.indexOf('{');
-    const lastBrace = sanitized.lastIndexOf('}');
+    // AVOID REGEX BACKTICKS: Use safe string searching to prevent Metro crashes
+    const firstBrace = rawOutput.indexOf('{');
+    const lastBrace = rawOutput.lastIndexOf('}');
 
     if (firstBrace === -1 || lastBrace === -1) {
+        // Attempt aggressive reconstruction if the model swallowed the start
+        const summaryIndex = rawOutput.indexOf('"summary"');
+        if (summaryIndex !== -1) {
+            const reconstructed = '{' + rawOutput.substring(summaryIndex);
+            const finalBrace = reconstructed.lastIndexOf('}');
+            if (finalBrace !== -1) return JSON.parse(reconstructed.substring(0, finalBrace + 1));
+        }
         throw new Error("No JSON boundaries found.");
     }
 
-    const cleanJsonString = sanitized.substring(firstBrace, lastBrace + 1);
+    const cleanJsonString = rawOutput.substring(firstBrace, lastBrace + 1);
 
     try {
         return JSON.parse(cleanJsonString);
     } catch (e) {
-        // Strip trailing commas and invisible control characters common in Q4 quantizations
+        // Final cleanup for common Q4 quantization artifacts (trailing commas/control chars)
         const repaired = cleanJsonString
             .replace(/,\s*([\]}])/g, '$1')
             .replace(/[\u0000-\u001F]+/g, "");
@@ -120,7 +113,7 @@ export const useProcessVideo = () => {
                     status: 'queued',
                 }).select().single();
 
-                if (dbError || !videoRecord) return { success: false, errorMsg: `DB_INIT_FAILED: ${dbError?.message}` };
+                if (dbError || !videoRecord) return { success: false, errorMsg: `DB_INIT_FAILED: ${dbError?.message || 'Unknown Error'}` };
 
                 setActiveVideoId(videoUuid);
                 useVideoStore.setState((state) => ({ videos: [videoRecord, ...state.videos] }));
@@ -139,7 +132,8 @@ export const useProcessVideo = () => {
                 if (isLocalModelReady && clientTranscript) {
                     const estimatedTokens = Math.ceil(clientTranscript.length / 3.2) + 200;
                     if (estimatedTokens > localState.prefillTokens) {
-                        videoStore.recordEvent('CLOUD_MODE', 'warn', `Transcript (${estimatedTokens} tokens) exceeds Context slider limit (${localState.prefillTokens}). Auto-routing to Cloud API.`);
+                        videoStore.recordEvent('CLOUD_MODE', 'warn', `Transcript (${estimatedTokens} tokens) exceeds Context slider limit. Freeing VRAM and routing to Cloud...`);
+                        await releaseNativeEngine();
                         isLocalModelReady = false;
                     } else {
                         videoStore.recordEvent('LOCAL_MODE', 'success', `Local AI enabled (${activeModel}). Processing on-device.`);
@@ -183,9 +177,8 @@ export const useProcessVideo = () => {
                     const rawText = data.transcript || clientTranscript || '';
                     const estimatedServerTokens = Math.ceil(rawText.length / 3.2) + 200;
 
-                    // Final Safety Check before hitting the GPU
                     if (estimatedServerTokens > localState.prefillTokens) {
-                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Extracted transcript (${estimatedServerTokens} tokens) exceeds limit. Falling back to Cloud API...`);
+                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Extracted transcript exceeds limit. Falling back to Cloud API...`);
                         await releaseNativeEngine();
                         response = await dispatchToEdge(false);
                         data = await response.json();
@@ -194,27 +187,19 @@ export const useProcessVideo = () => {
                         return { success: true, videoId: videoUuid };
                     }
 
-                    videoStore.recordEvent('LOCAL_AI_START', 'info', `Starting Local Hardware AI analysis...`);
+                    videoStore.recordEvent('LOCAL_AI_START', 'info', `Starting Hardware Inference...`);
 
                     try {
-                        // Pass ONLY the raw transcript. localInference.ts builds the JSON-forcing prompt.
                         const rawLocalOutput = await runLocalInference(rawText);
 
                         if (!rawLocalOutput || rawLocalOutput.length < 20) {
-                            throw new Error("Local AI returned empty or insufficient output.");
+                            throw new Error("Local AI returned insufficient output.");
                         }
 
-                        videoStore.recordEvent('LOCAL_AI_SUCCESS', 'success', 'Local generation complete. Validating schema...');
+                        videoStore.recordEvent('LOCAL_AI_SUCCESS', 'success', 'Validating Schema...');
 
-                        let parsedInsights: Record<string, unknown>;
-                        try {
-                            parsedInsights = extractAndParseJSON(rawLocalOutput);
-                        } catch (jsonErr) {
-                            console.error("Local JSON Extraction Failure. Output:", rawLocalOutput);
-                            throw new Error("Local model hallucinated invalid JSON format.");
-                        }
+                        const parsedInsights = extractAndParseJSON(rawLocalOutput);
 
-                        // DB Upsert
                         const { error: insightError } = await supabase.from('ai_insights').upsert({
                             video_id: videoUuid,
                             summary: (parsedInsights.summary as string) || "Summary generation failed.",
@@ -247,22 +232,20 @@ export const useProcessVideo = () => {
                             processing_duration_ms: Date.now() - processStartTime
                         }).eq('id', videoUuid);
 
-                        videoStore.recordEvent('SUCCESS', 'success', 'Local insights saved successfully! Dashboard updated.');
+                        videoStore.recordEvent('SUCCESS', 'success', 'Insights generated successfully!');
                     } catch (localErr: any) {
-                        // ─── MASTER FALLBACK CIRCUIT BREAKER ───────────────────
-                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Local AI failed (${localErr.message}). Seamlessly falling back to Cloud API...`);
-                        await releaseNativeEngine(); // Free the RAM immediately
+                        videoStore.recordEvent('CLOUD_FALLBACK', 'warn', `Local AI failed: ${localErr.message}. Routing to Cloud API...`);
+                        await releaseNativeEngine();
 
-                        // Re-dispatch to Deno Edge, explicitly disabling local AI
                         response = await dispatchToEdge(false);
                         data = await response.json();
 
                         if (!data.success) return { success: false, errorMsg: data.error, videoId: videoUuid };
-                        videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated via Fallback successfully!');
+                        videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated successfully!');
                         return { success: true, videoId: videoUuid };
                     }
                 } else {
-                    videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated and saved successfully!');
+                    videoStore.recordEvent('SUCCESS', 'success', 'Cloud insights generated successfully!');
                 }
 
                 return { success: true, videoId: videoUuid };

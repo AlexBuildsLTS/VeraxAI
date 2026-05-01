@@ -49,6 +49,14 @@
         "autoIncrement": true,
         "resourceClass": "m1-medium"
       }
+    },
+    "local": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      }
     }
   },
   "submit": {
