@@ -64,7 +64,8 @@
         {
           "android": {
             "kotlinVersion": "2.1.20",
-            "kspVersion": "2.1.20-1.0.29"
+            "kspVersion": "2.1.20-1.0.29",
+            "largeHeap": true
           }
         }
       ],
@@ -85,7 +86,6 @@
     "updates": {
       "url": "https://u.expo.dev/c1d22081-046b-4228-afc5-35389f7d88a2"
     },
-
     "sdkVersion": "55.0.0"
   }
 }

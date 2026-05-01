@@ -6,7 +6,7 @@
  * - ADAPTIVE KEYBOARD: Uses explicit Keyboard.addListener to push the UI up
  *   perfectly without colliding with the Android Navigation Bar.
  * - STATE RECOVERY: Ensures `capturedStream` resolves gracefully to avoid
- *   showing "[Empty Response]" when the model finishes instantly.
+ *   showing "[Empty Response]" or "[Engine Ready]" when the model stalls.
  * ----------------------------------------------------------------------------
  */
 
@@ -375,12 +375,15 @@ export default function LocalChatSandbox() {
 
       const finalContent = response?.trim() || capturedStream.trim();
 
+      // FIX: Ensure we never just output raw [Engine Ready] if the local model stalls due to Q8 cache issues
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: 'ai',
-          content: finalContent || '[Engine Ready]',
+          content:
+            finalContent ||
+            '[Model Stalled: Decrease Context Limit and Reload]',
         },
       ]);
     } catch (e: unknown) {

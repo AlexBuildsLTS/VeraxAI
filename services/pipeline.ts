@@ -1,13 +1,13 @@
 /**
- * services/pipeline.ts
- * Upgraded Pipeline Orchestration Service (2026 Enterprise Tier)
- * ══════════════════════════════════════════════════════════════════════════════
- * PROTOCOLS:
- * 1. LOCAL-FIRST ROUTING: Checks useLocalAIStore to detect downloaded models.
- * 2. NATIVE EXECUTION: Routes prompts to localInference.ts for on-device processing.
- * 3. NO REGRESSION: 100% preservation of Batch processing, Chunking, and Retry logic.
- * 4. DB SYNC: Features Elite JSON Extraction for perfect schema alignment.
- * ══════════════════════════════════════════════════════════════════════════════
+ * @file services/pipeline.ts
+ * @description Client-Side Pipeline Orchestrator (Cloud / Local AI Handoff)
+ * ----------------------------------------------------------------------------
+ * DESIGN PRINCIPLES:
+ * - DUAL ROUTING: Seamlessly handles Cloud Gemini execution OR Local Gemma-4 handoff.
+ * - PROMPT DE-DUPLICATION: Stripped hardcoded prompts. Relies entirely on insights.ts.
+ * - ZERO-UI-LOCK: Ensures local inference runs asynchronously without blocking.
+ * - 100% REGRESSION FREE: Preserves chunking, batching, and retry algorithms.
+ * ----------------------------------------------------------------------------
  */
 
 import { supabase } from '../lib/supabase/client';
@@ -76,6 +76,7 @@ export class PipelineService {
         language: string = 'English',
         difficulty: string = 'standard',
         clientTranscript: string | null = null,
+        forceSkipAi: boolean = false // Explicit UI Hook parameter
     ): Promise<PipelineResult> {
         try {
             const parsed = parseVideoUrl(url);
@@ -106,36 +107,31 @@ export class PipelineService {
             const activeModel = localState.activeModelId;
             const isLocalReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
 
-            // FAST-PATH: If we already have the transcript natively AND local AI is ready, skip the Edge entirely!
-            if (isLocalReady && clientTranscript) {
+            // The pipeline should skip Cloud AI if the UI explicitly requested it, OR if local models are active
+            const shouldRunLocally = forceSkipAi || isLocalReady;
+
+            // ─── FAST-PATH: NATIVE TRANSCRIPT + LOCAL AI ────────────────────────
+            if (shouldRunLocally && clientTranscript) {
                 console.log(`[Pipeline] Fast-Path: Routing native transcript directly to Local Hardware: ${activeModel}`);
                 try {
-                    const structuredPrompt = `Analyze the following transcript. You MUST output ONLY a valid JSON object matching this exact schema:
-{
-  "summary": "A detailed paragraph summarizing the content",
-  "conclusion": "A brief 2-sentence final thought",
-  "chapters": [{"title": "String", "timestamp": "MM:SS", "description": "String"}],
-  "key_takeaways": ["Point 1", "Point 2"],
-  "seo_metadata": {"tags": ["tag1"], "description": "Meta desc"}
-}
-Do not include markdown blocks or conversational text. Output pure JSON.
+                    await supabase.from('videos').update({ status: 'ai_processing' }).eq('id', videoRecord.id);
 
-Transcript:
-${clientTranscript}`;
-
-                    const rawLocalOutput = await runLocalInference(structuredPrompt);
+                    // ARCHITECTURE FIX: Pass ONLY the transcript. localInference.ts handles prompt injection via insights.ts
+                    const rawLocalOutput = await runLocalInference(clientTranscript);
 
                     let parsedInsights: any;
                     try {
-                        const firstBrace = rawLocalOutput.indexOf('{');
-                        const lastBrace = rawLocalOutput.lastIndexOf('}');
-                        if (firstBrace === -1 || lastBrace === -1) {
-                            throw new Error("No JSON object bounds found in model output.");
+                        // Aggressive JSON extraction for local models
+                        let sanitized = rawLocalOutput.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+                        if (!sanitized.startsWith('{')) {
+                            const firstBrace = sanitized.indexOf('{');
+                            const lastBrace = sanitized.lastIndexOf('}');
+                            if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON boundaries found.");
+                            sanitized = sanitized.substring(firstBrace, lastBrace + 1);
                         }
-                        const cleanJsonString = rawLocalOutput.substring(firstBrace, lastBrace + 1);
-                        parsedInsights = JSON.parse(cleanJsonString);
+                        parsedInsights = JSON.parse(sanitized);
                     } catch (jsonErr) {
-                        console.error("Local Engine JSON Failure in Pipeline:", rawLocalOutput);
+                        console.error("[Pipeline] JSON Parse Failure. Raw Output:", rawLocalOutput);
                         throw new Error("LITERT_SCHEMA_FAULT: The local model failed to output a strictly formatted JSON object.");
                     }
 
@@ -145,7 +141,7 @@ ${clientTranscript}`;
                         conclusion: parsedInsights.conclusion || null,
                         chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
                         key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
-                        seo_metadata: parsedInsights.seo_metadata || {},
+                        seo_metadata: parsedInsights.seo_metadata || { tags: [], suggested_titles: [], description: '' },
                         ai_model: `Local: ${activeModel}`,
                         language,
                         processed_at: new Date().toISOString()
@@ -155,11 +151,11 @@ ${clientTranscript}`;
                     return { success: true, videoId: videoRecord.id };
                 } catch (localErr) {
                     console.warn('[Pipeline] Native Engine faulted on Fast-Path. Falling back to Edge Cloud.', localErr);
-                    // Do not return; let it fall through to the Edge function below
+                    // Fall through to Edge function
                 }
             }
 
-            // 3. Normal Path: Supabase Edge Function (Handles extraction + optional Cloud AI)
+            // ─── NORMAL PATH: EDGE FUNCTION (Cloud AI or Transcript Extraction) ───
             await withRetry(async () => {
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/process-video`, {
                     method: 'POST',
@@ -175,7 +171,7 @@ ${clientTranscript}`;
                         language,
                         difficulty,
                         transcript_text: clientTranscript,
-                        skip_ai: isLocalReady // Tell Edge to just grab the audio/transcript and give it back
+                        skip_ai: shouldRunLocally // Tell Edge to abort Cloud Gemini and just return the transcript
                     }),
                 });
 
@@ -184,30 +180,28 @@ ${clientTranscript}`;
                 const data = (await response.json()) as EdgeResponse;
                 if (!data.success) throw new Error(`EDGE_EXECUTION_ERROR: ${data.error ?? 'Unknown'}`);
 
-                // 4. Edge Handoff Path: Edge got the transcript, now run it locally
+                // ─── EDGE HANDOFF PATH: LOCAL EXECUTION ──────────────────────────
                 if (data.is_local_handoff && activeModel) {
                     console.log(`[Pipeline] Edge Handoff: Executing prompt locally...`);
-                    const structuredPrompt = `Analyze the following transcript. You MUST output ONLY a valid JSON object matching this exact schema:
-{
-  "summary": "A detailed paragraph summarizing the content",
-  "conclusion": "A brief 2-sentence final thought",
-  "chapters": [{"title": "String", "timestamp": "MM:SS", "description": "String"}],
-  "key_takeaways": ["Point 1", "Point 2"],
-  "seo_metadata": {"tags": ["tag1"], "description": "Meta desc"}
-}
-Do not include markdown blocks or conversational text. Output pure JSON.
 
-Transcript:
-${data.transcript || data.prompt || clientTranscript}`;
+                    const transcriptPayload = data.transcript || clientTranscript;
+                    if (!transcriptPayload) throw new Error("LOCAL_HANDOFF_FAULT: Edge failed to return transcript.");
 
-                    const rawLocalOutput = await runLocalInference(structuredPrompt);
+                    await supabase.from('videos').update({ status: 'ai_processing' }).eq('id', videoRecord.id);
+
+                    // ARCHITECTURE FIX: Pass ONLY the transcript.
+                    const rawLocalOutput = await runLocalInference(transcriptPayload);
 
                     let parsedInsights: any;
                     try {
-                        const firstBrace = rawLocalOutput.indexOf('{');
-                        const lastBrace = rawLocalOutput.lastIndexOf('}');
-                        if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON bounds found.");
-                        parsedInsights = JSON.parse(rawLocalOutput.substring(firstBrace, lastBrace + 1));
+                        let sanitized = rawLocalOutput.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+                        if (!sanitized.startsWith('{')) {
+                            const firstBrace = sanitized.indexOf('{');
+                            const lastBrace = sanitized.lastIndexOf('}');
+                            if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON boundaries found.");
+                            sanitized = sanitized.substring(firstBrace, lastBrace + 1);
+                        }
+                        parsedInsights = JSON.parse(sanitized);
                     } catch (jsonErr) {
                         throw new Error("LITERT_SCHEMA_FAULT: The local model failed to output a strictly formatted JSON object.");
                     }
@@ -218,7 +212,7 @@ ${data.transcript || data.prompt || clientTranscript}`;
                         conclusion: parsedInsights.conclusion || null,
                         chapters: Array.isArray(parsedInsights.chapters) ? parsedInsights.chapters : [],
                         key_takeaways: Array.isArray(parsedInsights.key_takeaways) ? parsedInsights.key_takeaways : [],
-                        seo_metadata: parsedInsights.seo_metadata || {},
+                        seo_metadata: parsedInsights.seo_metadata || { tags: [], suggested_titles: [], description: '' },
                         ai_model: `Local: ${activeModel}`,
                         language,
                         processed_at: new Date().toISOString()
@@ -240,10 +234,7 @@ ${data.transcript || data.prompt || clientTranscript}`;
     /**
      * Batch job orchestrator — Restored without regression.
      */
-    static async submitBatch(
-        urls: string[],
-        batchName: string,
-    ): Promise<PipelineResult> {
+    static async submitBatch(urls: string[], batchName: string): Promise<PipelineResult> {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.user) throw new Error('UNAUTHORIZED: Session expired.');
@@ -252,9 +243,7 @@ ${data.transcript || data.prompt || clientTranscript}`;
                 .map(url => parseVideoUrl(url))
                 .filter(p => p.isValid && p.normalizedUrl);
 
-            if (validVideos.length === 0) {
-                throw new Error('VALIDATION_FAILED: No valid video URLs found in batch.');
-            }
+            if (validVideos.length === 0) throw new Error('VALIDATION_FAILED: No valid URLs.');
 
             const { data: batch, error: batchError } = await supabase
                 .from('batch_jobs')
@@ -286,27 +275,19 @@ ${data.transcript || data.prompt || clientTranscript}`;
                 if (chunkError) throw new Error(`CHUNK_INSERT_FAILED: ${chunkError.message}`);
             }
 
-            console.log(`[PipelineService:Batch] Dispatched ${validVideos.length} videos to batch ${batch.id}`);
             return { success: true, batchId: batch.id };
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error('[PipelineService:Batch] Critical Failure:', msg);
             return { success: false, error: msg };
         }
     }
 
-    /**
-     * Hard-delete a video record and terminate its processing.
-     */
     static async killProcess(videoId: string): Promise<boolean> {
         try {
             const { error } = await supabase.from('videos').delete().eq('id', videoId);
             if (error) throw error;
-            console.log(`[PipelineService:Kill] Terminated process: ${videoId}`);
             return true;
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[PipelineService:Kill] Failed to terminate: ${msg}`);
             return false;
         }
     }

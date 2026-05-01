@@ -11,7 +11,7 @@
  * ----------------------------------------------------------------------------
  */
 
-import { GoogleGenerativeAI, SchemaType, ResponseSchema } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, ResponseSchema } from '@google/generative-ai';
 import { createClient } from "@supabase/supabase-js";
 
 // ─── INTELLIGENCE SCHEMA DEFINITION ──────────────────────────────────────────
@@ -154,7 +154,7 @@ async function getCascadingKeys(userCustomKey?: string): Promise<{ id: string | 
   return keys;
 }
 
-// ─── MAIN GENERATION PIPELINE ────────────────────────────────────────────────
+// ─── MAIN GENERATION PIPELINE (CLOUD GEMINI) ─────────────────────────────────
 
 export async function generateInsights(
   transcript: string,

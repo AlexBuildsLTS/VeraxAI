@@ -33,7 +33,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useRouter } from 'expo-router';
 
-// THE ULTIMATE TS-ERROR KILLER: We import legacy, but cast it to 'any' internally.
+// Legacy FS with bypass for TS compiler errors
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 const FS: any = FileSystemLegacy;
 
@@ -65,7 +65,10 @@ import { GlassCard } from '../../../components/ui/GlassCard';
 import { FadeIn } from '../../../components/animations/FadeIn';
 import { useLocalAIStore } from '../../../store/useLocalAIStore';
 import { cn } from '../../../lib/utils';
-import { runLocalInference } from '../../../services/localInference';
+import {
+  runLocalInference,
+  releaseNativeEngine,
+} from '../../../services/localInference';
 import { AVAILABLE_MODELS, type LocalModel } from '../../../constants/models';
 import Animated, {
   useSharedValue,
@@ -89,7 +92,6 @@ const THEME = {
   amber: '#F59E0B',
   primary: '#6366F1',
 } as const;
-
 
 // --- Sub-components ---
 interface OrganicOrbProps {
@@ -788,9 +790,6 @@ export default function LocalModelsScreen() {
     pushLog(`[SYSTEM] Ejecting engine from memory...`);
     try {
       if (!IS_WEB) {
-        const {
-          releaseNativeEngine,
-        } = require('../../../services/localInference');
         if (releaseNativeEngine) await releaseNativeEngine();
       }
       setActiveModel(null as unknown as string);
@@ -916,7 +915,7 @@ export default function LocalModelsScreen() {
       if (e.message.includes('OOM') || e.message.includes('allocate')) {
         showToast(
           'Memory Error',
-          'GPU VRAM exhausted. Lower GPU layers and try again.',
+          'GPU VRAM exhausted. Lower Context Window and try again.',
           'error',
         );
       } else {
@@ -1082,9 +1081,9 @@ export default function LocalModelsScreen() {
   );
 
   const renderHardwareTab = () => {
-    const safeTemp = temperature ?? 0.2;
-    const safeLayers = gpuLayers ?? 20;
-    const prefill = prefillTokens ?? 4096;
+    const safeTemp = temperature ?? 0.15;
+    const safeLayers = gpuLayers ?? -1;
+    const prefill = prefillTokens ?? 8192;
     const decode = decodeTokens ?? 2048;
 
     const availableBackends = IS_WEB
@@ -1095,8 +1094,6 @@ export default function LocalModelsScreen() {
 
     return (
       <FadeIn delay={100} className="w-full pb-20 gap-y-6">
-        {/* FIX: TS Compiler bypass for route typing */}
-
         <View className="mb-2">
           <Text className="mb-2 text-[13px] font-bold text-white/90 ml-1 tracking-wide">
             Local Gateway API
@@ -1230,23 +1227,20 @@ export default function LocalModelsScreen() {
             <TouchableOpacity
               onPress={() => {
                 setComputeBackend('vulkan');
-                setHardwareState('temperature', 0.2);
+                setHardwareState('temperature', 0.15);
 
-                // TRUE HARDWARE AGNOSTIC MATH (128K UNLOCKED)
-                const availableRam = Math.max(0, deviceStats.ramGb - 3); // OS Reservation
+                // HARDWARE AGNOSTIC MATH: Gemma 4 April Engine Fixes
+                const availableRam = Math.max(0, deviceStats.ramGb - 3);
 
-                // 4 GPU Layers per GB of Free RAM. Maxes at 99.
-                const recLayers = Math.min(
-                  99,
-                  Math.max(4, Math.floor(availableRam * 4)),
-                );
+                // Lock GPU Layers to -1 so llama.rn dynamically handles offloading without OOM crashing
+                const recLayers = -1;
 
-                // 4096 Context Tokens per GB of Free RAM. Maxes at 131,072 (128K)
+                // Dynamically scale context up to 128k based on RAM
                 let recPrefill = Math.min(
                   131072,
                   Math.max(4096, Math.floor(availableRam * 4096)),
                 );
-                recPrefill = Math.floor(recPrefill / 256) * 256; // Align KV cache for Vulkan
+                recPrefill = Math.floor(recPrefill / 256) * 256;
 
                 const recDecode = availableRam < 4 ? 1024 : 2048;
 
@@ -1255,7 +1249,7 @@ export default function LocalModelsScreen() {
                 setHardwareState('gpuLayers', recLayers);
 
                 pushLog(
-                  `[OPTIMIZATION] Dynamic Calibration: Vulkan, ${recLayers} Layers, ${recPrefill} Context.`,
+                  `[OPTIMIZATION] Dynamic Calibration: Vulkan, MAX Layers, ${recPrefill} Context.`,
                 );
                 showToast(
                   'Hardware Calibrated',
@@ -1282,6 +1276,7 @@ export default function LocalModelsScreen() {
                       setHardwareState('gpuLayers', 0);
                       pushLog(`[HARDWARE] Switched to pure CPU processing.`);
                     } else {
+                      setHardwareState('gpuLayers', -1);
                       pushLog(
                         `[HARDWARE] Switched backend API to ${backend.toUpperCase()}.`,
                       );
@@ -1308,9 +1303,9 @@ export default function LocalModelsScreen() {
               ))}
             </View>
             <HardwareSlider
-              label="GPU Offload Layers"
+              label="GPU Offload Layers (-1 for Max)"
               value={safeLayers}
-              min={0}
+              min={-1}
               max={99}
               step={1}
               onChange={(val) => setHardwareState('gpuLayers', Math.round(val))}
@@ -1340,13 +1335,13 @@ export default function LocalModelsScreen() {
             }
           />
           <HardwareSlider
-            label="Temperature (0.2 recommended)"
+            label="Temperature (0.15 recommended)"
             value={safeTemp}
             min={0.1}
             max={1.0}
             step={0.1}
             onChange={(val) =>
-              setHardwareState('temperature', parseFloat(val.toFixed(1)))
+              setHardwareState('temperature', parseFloat(val.toFixed(2)))
             }
             icon={<Flame size={18} color={THEME.slate} />}
           />

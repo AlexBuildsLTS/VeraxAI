@@ -61,16 +61,16 @@ interface LocalAIState {
 
 export const useLocalAIStore = create<LocalAIState>()(
     persist(
-        (set, get) => ({
+        (set) => ({
             isLocalServerEnabled: false,
             port: '4891',
             allowExternalConnections: false,
 
             computeBackend: 'auto',
             threads: 4,
-            gpuLayers: 24, // Increased for 2026 mobile GPUs
-            temperature: 0.2,
-            prefillTokens: 8192, // Increased default for longer videos
+            gpuLayers: -1, // -1 Forces llama.rn to offload maximum possible layers to VRAM
+            temperature: 0.15, // Lowered for strict JSON transcription accuracy
+            prefillTokens: 8192,
             decodeTokens: 2048,
 
             activeModelId: null,
@@ -82,23 +82,8 @@ export const useLocalAIStore = create<LocalAIState>()(
             toggleExternalConnections: (enabled) => set({ allowExternalConnections: enabled }),
             setComputeBackend: (backend) => set({ computeBackend: backend }),
 
-            setHardwareState: async (key, value) => {
+            setHardwareState: (key, value) => {
                 set((state) => ({ ...state, [key]: value }));
-
-                // HARDWARE SYNC: Actively flush the native engine when limits change
-                if (key === 'prefillTokens' || key === 'decodeTokens' || key === 'gpuLayers') {
-                    if (Platform.OS !== 'web') {
-                        try {
-                            const { releaseNativeEngine } = require('../services/localInference');
-                            if (releaseNativeEngine) {
-                                await releaseNativeEngine();
-                                console.log(`[Local AI Store] Flushed native engine due to ${key} reconfiguration.`);
-                            }
-                        } catch (e) {
-                            // Non-fatal, module might not be loaded yet
-                        }
-                    }
-                }
             },
 
             setActiveModel: (id) => set({ activeModelId: id }),
