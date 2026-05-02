@@ -1,12 +1,14 @@
 /**
- * app/(dashboard)/settings/models.tsx
- * Hardware Interface & Local Model Management
+ * @file app/(dashboard)/settings/models.tsx
+ * @description Hardware Interface & Local Model Management
  * ----------------------------------------------------------------------------
  * DESIGN PRINCIPLES:
- * - MATHEMATICAL AUTO-SCALER: Dynamic VRAM allocation based on device RAM
- * - UX PARITY: Animated diagnostic logs and graceful state transitions
- * - LIQUID NEON: Adheres to the glassmorphism design system
- * - INTEGRATED SANDBOX: Direct access to local AI chat
+ * - MATHEMATICAL AUTO-SCALER: Dynamic VRAM allocation based on device RAM.
+ * - BYOE WEB GATEWAY: Allows arbitrary HTTPS tunnel URLs (Ngrok/Cloudflare)
+ *   for Vercel deployments to route inference to desktop hardware.
+ * - UX PARITY: Animated diagnostic logs and graceful state transitions.
+ * - LIQUID NEON: Adheres strictly to the glassmorphism design system.
+ * - INTEGRATED SANDBOX: Direct access to the standalone local AI chat.
  * ----------------------------------------------------------------------------
  */
 
@@ -29,11 +31,12 @@ import {
   Dimensions,
   StyleSheet,
   KeyboardAvoidingView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useRouter } from 'expo-router';
 
-// Legacy FS with bypass for TS compiler errors
+// Legacy FS with bypass for TS compiler errors on Android Native compilation
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 const FS: any = FileSystemLegacy;
 
@@ -66,7 +69,7 @@ import { FadeIn } from '../../../components/animations/FadeIn';
 import { useLocalAIStore } from '../../../store/useLocalAIStore';
 import { cn } from '../../../lib/utils';
 import {
-  runLocalInference,
+  runLocalChatInference,
   releaseNativeEngine,
 } from '../../../services/localInference';
 import { AVAILABLE_MODELS, type LocalModel } from '../../../constants/models';
@@ -94,6 +97,7 @@ const THEME = {
 } as const;
 
 // --- Sub-components ---
+
 interface OrganicOrbProps {
   color: string;
   size: number;
@@ -395,7 +399,7 @@ const ModelCard = memo(
                     style={{ marginRight: 8 }}
                   />
                   <Text className="text-[10px] font-black text-[#32FF00] uppercase tracking-[2px]">
-                    {IS_WEB ? 'Testing Port...' : 'Configuring...'}
+                    {IS_WEB ? 'Testing Connection...' : 'Configuring...'}
                   </Text>
                 </>
               ) : (
@@ -553,12 +557,14 @@ export default function LocalModelsScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const {
+    isHardwareCalibrated,
+    autoCalibrateHardware,
     isLocalServerEnabled,
     toggleServer,
     allowExternalConnections,
     toggleExternalConnections,
-    port,
-    setPort,
+    gatewayUrl,
+    setGatewayUrl,
     computeBackend,
     setComputeBackend,
     gpuLayers,
@@ -574,17 +580,20 @@ export default function LocalModelsScreen() {
     markDownloaded,
     removeModel,
     clearDownloadProgress,
+    calibrateHardwareEngine,
   } = useLocalAIStore();
 
   const [activeTab, setActiveTab] = useState<'models' | 'hardware'>('models');
   const [modelFilter, setModelFilter] = useState<'catalog' | 'device'>(
     'catalog',
   );
+
   const [deviceStats, setDeviceStats] = useState<{
     cores: number;
     ramGb: number;
     name: string;
   }>({ cores: 8, ramGb: 8, name: 'Generic' });
+
   const [isConnecting, setIsConnecting] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -622,7 +631,7 @@ export default function LocalModelsScreen() {
     } else {
       logsHeight.value = withTiming(0, { duration: 200 });
     }
-  }, [showLogs]);
+  }, [showLogs, logsHeight]);
 
   const animatedLogStyle = useAnimatedStyle(() => {
     const progress = Math.min(Math.max(logsHeight.value / 250, 0), 1);
@@ -639,6 +648,15 @@ export default function LocalModelsScreen() {
     if (scrollViewRef.current && showLogs)
       scrollViewRef.current.scrollToEnd({ animated: true });
   }, [appLogs, showLogs]);
+
+  // INITIALIZE HARDWARE AUTO-SCALER ON MOUNT
+  useEffect(() => {
+    if (!isHardwareCalibrated) {
+      autoCalibrateHardware().then(() => {
+        pushLog(`[SYSTEM] Hardware auto-calibration sequence completed.`);
+      });
+    }
+  }, [isHardwareCalibrated, autoCalibrateHardware, pushLog]);
 
   useEffect(() => {
     if (!IS_WEB && Platform.OS === 'android') {
@@ -689,7 +707,9 @@ export default function LocalModelsScreen() {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          markDownloaded(model.id, `edge_routed://${model.id}`);
+
+          markDownloaded(model.id);
+
           pushLog(`[NETWORK] Browser download triggered successfully.`);
           showToast(
             'Download Triggered',
@@ -747,7 +767,8 @@ export default function LocalModelsScreen() {
         pushLog(`[NETWORK] Streaming binary via HTTP 200...`);
         const result = await downloadResumable.downloadAsync();
         if (result && result.status === 200 && result.uri) {
-          markDownloaded(model.id, result.uri);
+          markDownloaded(model.id);
+
           pushLog(
             `[STORAGE] Binary secured in sandbox. Ready for configuration.`,
           );
@@ -836,9 +857,9 @@ export default function LocalModelsScreen() {
     async (id: string) => {
       setIsConnecting(true);
       if (IS_WEB) {
-        pushLog(`[NETWORK] Pinging local gateway at 127.0.0.1:${port}...`);
+        pushLog(`[NETWORK] Pinging web gateway at ${gatewayUrl}...`);
         try {
-          const endpoint = `http://127.0.0.1:${port}/v1/models`;
+          const endpoint = `${gatewayUrl.replace(/\/$/, '')}/api/tags`;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
           const response = await fetch(endpoint, {
@@ -853,18 +874,20 @@ export default function LocalModelsScreen() {
             );
           setActiveModel(id);
           pushLog(
-            `[SUCCESS] Handshake established. Cloud inference routed to Local port ${port}.`,
+            `[SUCCESS] Handshake established. Cloud inference routed to gateway ${gatewayUrl}.`,
           );
           showToast(
             'Endpoint Connected',
-            `Successfully linked to desktop gateway on port ${port}.`,
+            `Successfully linked to desktop gateway.`,
             'success',
           );
-        } catch (err: any) {
-          pushLog(`[ERROR] Connection Refused. Is LM Studio running?`);
+        } catch (err: unknown) {
+          pushLog(
+            `[ERROR] Connection Refused. Ensure CORS is enabled and tunnel is active.`,
+          );
           showToast(
             'Connection Refused',
-            `Could not detect active server on port ${port}.`,
+            `Could not reach ${gatewayUrl}.`,
             'error',
           );
         } finally {
@@ -884,7 +907,7 @@ export default function LocalModelsScreen() {
         );
       }
     },
-    [setActiveModel, port, pushLog, showToast],
+    [setActiveModel, gatewayUrl, pushLog, showToast],
   );
 
   const handleTestEngine = useCallback(async () => {
@@ -895,8 +918,8 @@ export default function LocalModelsScreen() {
     );
     try {
       const startTime = Date.now();
-      await runLocalInference(
-        "Respond with exactly one word: 'Online'.",
+      await runLocalChatInference(
+        [{ role: 'user', content: "Respond with exactly one word: 'Online'." }],
         (token) => {
           pushLog(`[STREAM] ${token}`);
         },
@@ -912,7 +935,11 @@ export default function LocalModelsScreen() {
       );
     } catch (e: any) {
       pushLog(`[ERROR] Diagnostics failed: ${e.message}`);
-      if (e.message.includes('OOM') || e.message.includes('allocate')) {
+      if (
+        e.message.includes('OOM') ||
+        e.message.includes('allocate') ||
+        e.message.includes('Stalled')
+      ) {
         showToast(
           'Memory Error',
           'GPU VRAM exhausted. Lower Context Window and try again.',
@@ -927,13 +954,17 @@ export default function LocalModelsScreen() {
   }, [pushLog, showToast]);
 
   const testWebGateway = useCallback(async () => {
+    if (!gatewayUrl.trim()) {
+      showToast('Invalid URL', 'Please enter a valid Endpoint URL.', 'error');
+      return;
+    }
     setIsTesting(true);
     setShowLogs(true);
-    pushLog(`[NETWORK] Pinging web gateway on port ${port}...`);
+    pushLog(`[NETWORK] Pinging web gateway at ${gatewayUrl}...`);
     try {
-      const endpoint = `http://127.0.0.1:${port}/v1/models`;
+      const endpoint = `${gatewayUrl.replace(/\/$/, '')}/api/tags`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       const response = await fetch(endpoint, {
         method: 'GET',
         headers: { Accept: 'application/json' },
@@ -944,18 +975,19 @@ export default function LocalModelsScreen() {
       pushLog(`[SUCCESS] Gateway is active and responding.`);
       showToast(
         'Gateway Online',
-        `LM Studio / Ollama is broadcasting successfully.`,
+        `Connection established successfully.`,
         'success',
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       pushLog(
-        `[ERROR] Gateway Offline. Verify desktop application is running.`,
+        `[ERROR] Gateway Offline. If using Vercel, ensure you provide an HTTPS Ngrok/Cloudflare URL.`,
       );
-      showToast('Gateway Offline', `Cannot reach 127.0.0.1:${port}`, 'error');
+      showToast('Gateway Offline', `Connection failed: ${errMsg}`, 'error');
     } finally {
       setIsTesting(false);
     }
-  }, [port, pushLog, showToast]);
+  }, [gatewayUrl, pushLog, showToast]);
 
   const handleReturn = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -969,6 +1001,7 @@ export default function LocalModelsScreen() {
         : false,
     [downloadedModels],
   );
+
   const displayedModels = useMemo(
     () =>
       AVAILABLE_MODELS.filter((m) =>
@@ -989,12 +1022,12 @@ export default function LocalModelsScreen() {
           </View>
           <Text className="text-[12px] text-white/80 leading-5 mb-3">
             Browsers cannot run AI models directly in memory. Route inference
-            through desktop hardware.
+            through desktop hardware via a secure tunnel.
           </Text>
           <View className="gap-y-2">
             <Text className="text-[11px] text-white/60">
               <Text className="font-bold text-[#F59E0B]">Step 1:</Text> Download
-              the GGUF model file from this catalog.
+              the GGUF model file from this catalog to your PC.
             </Text>
             <Text className="text-[11px] text-white/60">
               <Text className="font-bold text-[#F59E0B]">Step 2:</Text> Open{' '}
@@ -1003,13 +1036,12 @@ export default function LocalModelsScreen() {
               and load the file.
             </Text>
             <Text className="text-[11px] text-white/60">
-              <Text className="font-bold text-[#F59E0B]">Step 3:</Text> Start
-              the Local Inference Server (default port 1234 or 11434).
+              <Text className="font-bold text-[#F59E0B]">Step 3:</Text> Start a
+              secure HTTPS tunnel (e.g., ngrok http 11434).
             </Text>
             <Text className="text-[11px] text-white/60">
-              <Text className="font-bold text-[#F59E0B]">Step 4:</Text> Click
-              "Connect Endpoint" to securely link this web app to your local
-              hardware.
+              <Text className="font-bold text-[#F59E0B]">Step 4:</Text> Paste
+              the tunnel URL into the Hardware tab and click "Connect Endpoint".
             </Text>
           </View>
         </GlassCard>
@@ -1096,11 +1128,11 @@ export default function LocalModelsScreen() {
       <FadeIn delay={100} className="w-full pb-20 gap-y-6">
         <View className="mb-2">
           <Text className="mb-2 text-[13px] font-bold text-white/90 ml-1 tracking-wide">
-            Local Gateway API
+            {IS_WEB ? 'Web Gateway API' : 'Local Gateway API'}
           </Text>
           <Text className="text-[11px] text-[#94A3B8] mb-4 ml-1">
             {IS_WEB
-              ? 'Configure the port matching your desktop inference software.'
+              ? 'Configure the HTTPS tunnel URL (Ngrok/Cloudflare) matching your desktop inference software.'
               : 'Advanced: Expose the loaded model to external local clients.'}
           </Text>
           <GlassCard className="p-5 border-white/5 bg-[#12121A]/80 rounded-[24px]">
@@ -1116,7 +1148,7 @@ export default function LocalModelsScreen() {
                         Local API Server
                       </Text>
                       <Text className="text-[10px] text-white/40 mt-1 font-mono">
-                        http://127.0.0.1:{port}/v1
+                        http://127.0.0.1:4891/v1
                       </Text>
                     </View>
                   </View>
@@ -1150,12 +1182,18 @@ export default function LocalModelsScreen() {
                 </View>
               </>
             )}
+
             <View className="flex-row items-center px-4 mb-4 overflow-hidden border h-11 bg-black/60 border-white/10 rounded-xl">
-              <Text className="mr-3 text-xs font-bold text-white/50">PORT</Text>
+              <Text className="mr-3 text-xs font-bold text-white/50">
+                ENDPOINT URL
+              </Text>
               <TextInput
-                value={port}
-                onChangeText={setPort}
-                keyboardType="number-pad"
+                value={gatewayUrl}
+                onChangeText={setGatewayUrl}
+                placeholder="https://your-tunnel.ngrok.app"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                autoCapitalize="none"
+                autoCorrect={false}
                 className="flex-1 font-mono text-sm text-white"
                 style={
                   IS_WEB
@@ -1169,7 +1207,7 @@ export default function LocalModelsScreen() {
               <View className="mt-2 gap-y-3">
                 <View className="flex-row gap-2">
                   <TouchableOpacity
-                    onPress={() => setPort('1234')}
+                    onPress={() => setGatewayUrl('http://127.0.0.1:1234')}
                     activeOpacity={0.7}
                     className="flex-1 py-2.5 items-center justify-center border rounded-lg bg-white/5 border-white/10"
                   >
@@ -1178,7 +1216,7 @@ export default function LocalModelsScreen() {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => setPort('11434')}
+                    onPress={() => setGatewayUrl('http://127.0.0.1:11434')}
                     activeOpacity={0.7}
                     className="flex-1 py-2.5 items-center justify-center border rounded-lg bg-white/5 border-white/10"
                   >
@@ -1224,36 +1262,21 @@ export default function LocalModelsScreen() {
               Utilizing internal {deviceStats.name} compute.
             </Text>
 
+            {/* RESTORED: Apply Recommended Settings Button */}
             <TouchableOpacity
               onPress={() => {
                 setComputeBackend('vulkan');
                 setHardwareState('temperature', 0.15);
 
-                // HARDWARE AGNOSTIC MATH: Gemma 4 April Engine Fixes
-                const availableRam = Math.max(0, deviceStats.ramGb - 3);
-
-                // Lock GPU Layers to -1 so llama.rn dynamically handles offloading without OOM crashing
-                const recLayers = -1;
-
-                // Dynamically scale context up to 128k based on RAM
-                let recPrefill = Math.min(
-                  131072,
-                  Math.max(4096, Math.floor(availableRam * 4096)),
-                );
-                recPrefill = Math.floor(recPrefill / 256) * 256;
-
-                const recDecode = availableRam < 4 ? 1024 : 2048;
-
-                setHardwareState('prefillTokens', recPrefill);
-                setHardwareState('decodeTokens', recDecode);
-                setHardwareState('gpuLayers', recLayers);
+                // Triggers the store's hardware calibrator with probed device RAM
+                calibrateHardwareEngine(deviceStats.ramGb);
 
                 pushLog(
-                  `[OPTIMIZATION] Dynamic Calibration: Vulkan, MAX Layers, ${recPrefill} Context.`,
+                  `[OPTIMIZATION] Dynamic Calibration Executed based on ${deviceStats.ramGb}GB RAM profile.`,
                 );
                 showToast(
                   'Hardware Calibrated',
-                  `Optimized for ${deviceStats.ramGb}GB RAM (up to 128K context).`,
+                  `Optimized for ${deviceStats.ramGb}GB RAM (Safe context locked).`,
                   'success',
                 );
               }}
