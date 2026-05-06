@@ -6,6 +6,7 @@
  * - SAFE STRING EXTRACTION: Replaced backtick regex with index-based slicing.
  * - MEMORY FENCING: Explicitly releases native engine before Cloud routing.
  * - JSON REPAIR: Enhanced reconstruction for swallowed opening braces.
+ * - GEMMA-4 INTEGRATION: Fully integrated native inference fallback tier.
  * ----------------------------------------------------------------------------
  */
 
@@ -126,7 +127,7 @@ export const useProcessVideo = () => {
 
                 const localState = useLocalAIStore.getState();
                 const activeModel = localState.activeModelId;
-                let isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel));
+                let isLocalModelReady = Boolean(activeModel && localState.downloadedModels.includes(activeModel) && localState.isHardwareCalibrated);
 
                 // Context size calculation for routing
                 if (isLocalModelReady && clientTranscript) {

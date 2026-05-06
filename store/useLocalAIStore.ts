@@ -1,14 +1,7 @@
 /**
  * @file store/useLocalAIStore.ts
- * @description Enhanced Local Engine State Management for Gemma 4 & Web Gateway
- * ----------------------------------------------------------------------------
- * DESIGN PRINCIPLES:
- * - FULL PARITY: Merges the April 22nd Android Hardware Protocols (KV Cache, 
- *   Flash Attention) with the Web Gateway HTTPS Tunneling logic.
- * - DYNAMIC AUTO-CALIBRATION: Automatically probes physical memory using expo-device
- *   to establish safe boundaries for context windows and GPU layers.
- * - STRICT TYPING: Complete TS Interface mapping to prevent compiler regressions.
- * ----------------------------------------------------------------------------
+ * @description Local Engine State Management specifically calibrated for Gemma-4 (E2B/E4B).
+ * Enforces strict VRAM clamping to prevent Android OS heap exhaustion.
  */
 
 import { create } from 'zustand';
@@ -26,7 +19,7 @@ export interface LocalModel {
     tags: string[];
     downloadUrl: string;
     fileName: string;
-    architecture: 'gemma4' | 'phi3';
+    architecture: string;
     benchmarks: {
         expectedTokSec: number;
         promptEvalMs: number;
@@ -36,15 +29,11 @@ export interface LocalModel {
 }
 
 interface LocalAIState {
-    // Initialization State
     isHardwareCalibrated: boolean;
-
-    // Networking & Web Gateway
     isLocalServerEnabled: boolean;
     gatewayUrl: string;
     allowExternalConnections: boolean;
 
-    // Hardware & Inference Tuning
     computeBackend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu';
     threads: number;
     gpuLayers: number;
@@ -52,19 +41,16 @@ interface LocalAIState {
     prefillTokens: number;
     decodeTokens: number;
 
-    // KV Cache & Performance Protocols
     cacheTypeK: 'f16' | 'q8_0' | 'q4_0';
     cacheTypeV: 'f16' | 'q8_0' | 'q4_0';
     flashAttn: boolean;
     useMmap: boolean;
     useMlock: boolean;
 
-    // Model Lifecycle State
     activeModelId: string | null;
     downloadedModels: string[];
     downloadProgress: Record<string, number>;
 
-    // Management Actions
     toggleServer: (enabled: boolean) => void;
     setGatewayUrl: (url: string) => void;
     toggleExternalConnections: (enabled: boolean) => void;
@@ -72,13 +58,11 @@ interface LocalAIState {
     setHardwareState: (key: keyof LocalAIState, value: any) => Promise<void>;
     setActiveModel: (id: string | null) => void;
 
-    // Storage Actions
     setDownloadProgress: (id: string, progress: number) => void;
     markDownloaded: (id: string) => void;
     removeModel: (id: string) => void;
     clearDownloadProgress: (id: string) => void;
 
-    // Hardware Auto-Calibration
     calibrateHardwareEngine: (deviceRamGb: number) => void;
     autoCalibrateHardware: () => Promise<void>;
     resetHardwareToDefaults: () => void;
@@ -88,22 +72,19 @@ export const useLocalAIStore = create<LocalAIState>()(
     persist(
         (set, get) => ({
             isHardwareCalibrated: false,
-
-            // Networking Defaults
             isLocalServerEnabled: false,
             gatewayUrl: 'http://127.0.0.1:11434',
             allowExternalConnections: false,
 
-            // Failsafe Hardware Defaults (Overwritten by autoCalibrate)
             computeBackend: 'auto',
             threads: 8,
             gpuLayers: -1,
             temperature: 0.15,
-            prefillTokens: 8192,
+            prefillTokens: 3584,
             decodeTokens: 2048,
 
-            cacheTypeK: 'q8_0',
-            cacheTypeV: 'q8_0',
+            cacheTypeK: 'q4_0',
+            cacheTypeV: 'q4_0',
             flashAttn: true,
             useMmap: true,
             useMlock: false,
@@ -119,7 +100,6 @@ export const useLocalAIStore = create<LocalAIState>()(
 
             setHardwareState: async (key, value) => {
                 set((state) => ({ ...state, [key]: value }));
-
                 const criticalKeys = ['prefillTokens', 'decodeTokens', 'gpuLayers', 'cacheTypeK', 'cacheTypeV', 'flashAttn'];
 
                 if (criticalKeys.includes(key as string)) {
@@ -128,10 +108,9 @@ export const useLocalAIStore = create<LocalAIState>()(
                             const { releaseNativeEngine } = require('../services/localInference');
                             if (releaseNativeEngine) {
                                 await releaseNativeEngine();
-                                console.log(`[Local AI Store] Hardware flush triggered by ${key} modification.`);
                             }
                         } catch (error) {
-                            // Interface not yet mounted; safe to ignore
+                            // Interface not mounted yet
                         }
                     }
                 }
@@ -167,18 +146,16 @@ export const useLocalAIStore = create<LocalAIState>()(
                 gpuLayers: -1,
                 threads: 8,
                 temperature: 0.15,
-                prefillTokens: 8192,
+                prefillTokens: 3584,
                 decodeTokens: 2048,
-                cacheTypeK: 'q8_0',
-                cacheTypeV: 'q8_0',
+                cacheTypeK: 'q4_0',
+                cacheTypeV: 'q4_0',
                 flashAttn: true,
                 isHardwareCalibrated: false
             }),
 
-            // DIRECT CALIBRATION: Scales parameters purely off RAM threshold logic
             calibrateHardwareEngine: (deviceRamGb: number) => {
                 if (Platform.OS === 'web') {
-                    // Web gateway delegates to desktop host hardware. Maximum parameters safe.
                     set({
                         computeBackend: 'auto',
                         prefillTokens: 32768,
@@ -190,35 +167,31 @@ export const useLocalAIStore = create<LocalAIState>()(
                     return;
                 }
 
-                // Native Android Hardware Matrix
                 if (deviceRamGb >= 10) {
-                    // Flagship (e.g., Pixel 7/8 Pro, S24 Ultra)
                     set({
                         computeBackend: 'vulkan',
-                        prefillTokens: 32768,
-                        cacheTypeK: 'q8_0',
-                        cacheTypeV: 'q8_0',
+                        prefillTokens: 3584,
+                        cacheTypeK: 'q4_0',
+                        cacheTypeV: 'q4_0',
                         flashAttn: true,
                         gpuLayers: -1,
                         isHardwareCalibrated: true
                     });
                 } else if (deviceRamGb >= 6) {
-                    // Mid-Range
                     set({
                         computeBackend: 'vulkan',
-                        prefillTokens: 16384,
-                        cacheTypeK: 'q8_0',
-                        cacheTypeV: 'q8_0',
+                        prefillTokens: 2048,
+                        cacheTypeK: 'q4_0',
+                        cacheTypeV: 'q4_0',
                         flashAttn: true,
                         gpuLayers: -1,
                         isHardwareCalibrated: true
                     });
                 } else {
-                    // Budget/Constrained
                     set({
-                        computeBackend: 'cpu', // Fallback to CPU to prevent Vulkan pipeline crashes
-                        prefillTokens: 8192,
-                        cacheTypeK: 'q4_0', // Heavy compression to prevent VRAM allocation fail
+                        computeBackend: 'cpu',
+                        prefillTokens: 1024,
+                        cacheTypeK: 'q4_0',
                         cacheTypeV: 'q4_0',
                         flashAttn: false,
                         gpuLayers: 0,
@@ -227,31 +200,20 @@ export const useLocalAIStore = create<LocalAIState>()(
                 }
             },
 
-            // AUTO-PROBE: Automatically fetches hardware specs and passes them to the calibrator
             autoCalibrateHardware: async () => {
                 if (get().isHardwareCalibrated) return;
 
-                console.log("[Hardware Watchdog] Initiating dynamic calibration sequence...");
-
                 if (Platform.OS === 'web') {
-                    console.log("[Hardware Watchdog] Web Gateway detected. Max context unlocked.");
-                    get().calibrateHardwareEngine(32); // Pass arbitrary large RAM for web
+                    get().calibrateHardwareEngine(32);
                     return;
                 }
-
                 try {
-                    // Extract exact physical RAM
                     const totalMemoryBytes = await Device.totalMemory;
-                    // Fallback to 8GB if undefined
                     const ramInBytes = totalMemoryBytes || 8589934592;
                     const ramInGb = ramInBytes / (1024 * 1024 * 1024);
-
-                    console.log(`[Hardware Watchdog] Native Device Probe: ~${ramInGb.toFixed(1)}GB RAM Detected.`);
                     get().calibrateHardwareEngine(ramInGb);
-
                 } catch (error) {
-                    console.error("[Hardware Watchdog] Probe failed. Applying safe defaults.", error);
-                    get().calibrateHardwareEngine(8); // Fallback to 8GB standard profile
+                    get().calibrateHardwareEngine(8);
                 }
             }
         }),
