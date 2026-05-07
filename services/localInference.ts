@@ -1,8 +1,7 @@
 /**
  * @file services/localInference.ts
  * @description Native Llama.rn Bridge tailored for Gemma-4.
- * CRITICAL FIX: Utilizes exact C++ JNI keys (n_ctx) to prevent Android LMKD stalls.
- * Restored missing TOKEN_BUFFER constant.
+ * CRITICAL FIX: Web proxy updated to strict OpenAI-compatible API format (/v1/chat/completions).
  */
 
 import { Platform } from 'react-native';
@@ -32,9 +31,8 @@ interface LlamaInstance {
     release: () => Promise<void>;
 }
 
-// Strictly Typed API mapped exactly to llama.cpp/llama.rn C++ requirements
 type InitLlamaFn = (options: {
-    n_ctx: number; // CORRECT NATIVE FLAG (Previously incorrect 'contextSize')
+    n_ctx: number;
     model: string;
     n_gpu_layers: number;
     flash_attn?: boolean;
@@ -49,7 +47,7 @@ type InitLlamaFn = (options: {
 const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
 const APK_SAFETY_CLAMP = 65536;
 const TOKEN_ESTIMATION_FACTOR = 3.2;
-const TOKEN_BUFFER = 100; // RESTORED: Required for safety buffer in token estimation
+const TOKEN_BUFFER = 100;
 
 let initLlama: InitLlamaFn | null = null;
 
@@ -193,16 +191,16 @@ export const configureNativeEngine = async (modelId: string) => {
 
     try {
         engineState.context = await initLlama({
-            n_ctx: optimalContext, // Fixed: This dictates memory allocation properly to llama.cpp
+            n_ctx: optimalContext,
             model: modelPath,
-            n_gpu_layers: gpuLayers, // Handled properly (28+ layers for Pixel)
+            n_gpu_layers: gpuLayers,
             flash_attn: flashAttn,
             cache_type_k: cacheTypeK,
             cache_type_v: cacheTypeV,
             use_mmap: useMmap,
             use_mlock: useMlock,
             n_threads: threads,
-            n_batch: nBatch // Fixes the compute buffer spike on Android LMKD
+            n_batch: nBatch
         });
 
         engineState.modelId = modelId;
@@ -226,8 +224,10 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
 
     if (Platform.OS === 'web') {
         const { systemInstruction, userMessage } = buildAgentPrompt(prompt, "English");
-        const combinedPrompt = `${systemInstruction}\n\n${userMessage}`;
-        const mappedMessages = [{ role: 'user', content: combinedPrompt }];
+        const mappedMessages = [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: userMessage }
+        ];
         return runWebProxyInference(mappedMessages, activeModelId, gatewayUrl || "http://127.0.0.1:11434", decodeTokens || 2048, temperature || 0.15, 60000);
     }
 
@@ -331,35 +331,39 @@ export const runLocalChatInference = async (
     }
 };
 
+// ─── STRICT OPENAI-COMPATIBLE WEB PROXY ──────────────────────────────────────
+
 async function runWebProxyInference(
     messages: { role: string, content: string }[],
     modelId: string,
     portOrUrl: string,
     maxTokens: number,
     temperature: number,
-    timeoutMs: number = 3000
+    timeoutMs: number = 60000
 ): Promise<string> {
-    const isRemoteTunnel = portOrUrl.startsWith('http://') || portOrUrl.startsWith('https://');
-    const baseEndpoint = isRemoteTunnel ? portOrUrl : `http://127.0.0.1:${portOrUrl}`;
-    const endpoint = `${baseEndpoint.replace(/\/$/, '')}/api/chat`;
+    const baseEndpoint = portOrUrl.startsWith('http') ? portOrUrl : `http://127.0.0.1:${portOrUrl}`;
+
+    // CRITICAL FIX: Strict OpenAI standard endpoint
+    const endpoint = `${baseEndpoint.replace(/\/$/, '')}/v1/chat/completions`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+        // Strict OpenAI Payload Schema
+        const payload = {
+            model: modelId, // Ensure Ollama model name exactly matches this ID (e.g. gemma:2b)
+            messages: messages,
+            temperature: temperature,
+            max_tokens: maxTokens,
+            stream: false
+        };
+
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
-            body: JSON.stringify({
-                model: modelId,
-                messages: messages,
-                stream: false,
-                options: {
-                    temperature: temperature,
-                    num_predict: maxTokens,
-                }
-            }),
+            body: JSON.stringify(payload),
         });
 
         clearTimeout(timeoutId);
@@ -370,13 +374,16 @@ async function runWebProxyInference(
         }
 
         const json = await response.json();
-        const content = json.message?.content || "";
-        return messages.length === 1 && messages[0].content.includes('VERBATIM TRANSCRIPT:')
+
+        // Strict OpenAI Response Parser
+        const content = json.choices?.[0]?.message?.content || "";
+
+        return messages.length === 2 && messages[0].role === 'system'
             ? extractCleanJson(content)
             : content;
 
     } catch (e: any) {
         clearTimeout(timeoutId);
-        throw new Error(`GATEWAY_UNREACHABLE: No local engine found.`);
+        throw new Error(`GATEWAY_REJECTED: Protocol mismatch or daemon offline. ${e.message}`);
     }
 }
