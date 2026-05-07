@@ -1,7 +1,7 @@
 /**
  * @file services/localInference.ts
  * @description Native Llama.rn Bridge tailored for Gemma-4.
- * CRITICAL FIX: Web proxy updated to strict OpenAI-compatible API format (/v1/chat/completions).
+ * CRITICAL FIX: Deterministic Web Proxy routing using VERBATIM TRANSCRIPT signature.
  */
 
 import { Platform } from 'react-native';
@@ -300,7 +300,7 @@ export const runLocalChatInference = async (
         })) as { role: 'system' | 'user' | 'assistant'; content: string }[];
 
         const formattedPrompt = TEMPLATES.gemma4.chat(mappedForTemplate);
-        const estimatedPromptTokens = estimateTokens(formattedPrompt);
+        const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
         await configureNativeEngine(activeModelId);
 
@@ -342,17 +342,14 @@ async function runWebProxyInference(
     timeoutMs: number = 60000
 ): Promise<string> {
     const baseEndpoint = portOrUrl.startsWith('http') ? portOrUrl : `http://127.0.0.1:${portOrUrl}`;
-
-    // CRITICAL FIX: Strict OpenAI standard endpoint
     const endpoint = `${baseEndpoint.replace(/\/$/, '')}/v1/chat/completions`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        // Strict OpenAI Payload Schema
         const payload = {
-            model: modelId, // Ensure Ollama model name exactly matches this ID (e.g. gemma:2b)
+            model: modelId,
             messages: messages,
             temperature: temperature,
             max_tokens: maxTokens,
@@ -374,11 +371,10 @@ async function runWebProxyInference(
         }
 
         const json = await response.json();
-
-        // Strict OpenAI Response Parser
         const content = json.choices?.[0]?.message?.content || "";
 
-        return messages.length === 2 && messages[0].role === 'system'
+        // CRITICAL FIX: Deterministic routing for Transcriber vs Chat Sandbox
+        return messages.length > 1 && messages[0].role === 'system' && messages[1].content.includes('VERBATIM TRANSCRIPT:')
             ? extractCleanJson(content)
             : content;
 
