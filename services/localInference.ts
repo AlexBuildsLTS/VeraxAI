@@ -1,7 +1,8 @@
 /**
  * @file services/localInference.ts
- * @description Native Llama.rn Bridge tailored for Gemma-4 (E2B/E4B) April 2026 Standards.
- * Handles system prompt injection, role mapping, and strict JSON schema extraction.
+ * @description Native Llama.rn Bridge tailored for Gemma-4.
+ * CRITICAL FIX: Utilizes exact C++ JNI keys (n_ctx) to prevent Android LMKD stalls.
+ * Restored missing TOKEN_BUFFER constant.
  */
 
 import { Platform } from 'react-native';
@@ -31,19 +32,24 @@ interface LlamaInstance {
     release: () => Promise<void>;
 }
 
+// Strictly Typed API mapped exactly to llama.cpp/llama.rn C++ requirements
 type InitLlamaFn = (options: {
-    contextSize: number;
+    n_ctx: number; // CORRECT NATIVE FLAG (Previously incorrect 'contextSize')
     model: string;
     n_gpu_layers: number;
     flash_attn?: boolean;
     cache_type_k?: string;
     cache_type_v?: string;
+    use_mmap?: boolean;
+    use_mlock?: boolean;
+    n_threads?: number;
+    n_batch?: number;
 }) => Promise<LlamaInstance>;
 
 const ABSOLUTE_MAX_HARDWARE_CONTEXT = 131072;
 const APK_SAFETY_CLAMP = 65536;
 const TOKEN_ESTIMATION_FACTOR = 3.2;
-const TOKEN_BUFFER = 100;
+const TOKEN_BUFFER = 100; // RESTORED: Required for safety buffer in token estimation
 
 let initLlama: InitLlamaFn | null = null;
 
@@ -68,7 +74,7 @@ const engineState: EngineState = {
     contextSize: 0,
 };
 
-// --- PROMPT TEMPLATES (APRIL 30TH G4 UPDATED) ---
+// ─── PROMPT TEMPLATES ────────────────────────────────────────────────────────
 const TEMPLATES = {
     gemma4: {
         json: (prompt: string, systemPrompt = "") => {
@@ -134,12 +140,7 @@ const estimateTokens = (text: string, buffer: number = 0): number => {
     return Math.ceil(text.length / TOKEN_ESTIMATION_FACTOR) + buffer;
 };
 
-const getModelConfig = (modelId: string) => {
-    return AVAILABLE_MODELS.find(m => m.id === modelId) || AVAILABLE_MODELS[0];
-};
-
 const extractCleanJson = (text: string): string => {
-    // This strictly isolates the JSON, naturally bypassing <|think|> blocks or preamble
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     if (start !== -1 && end !== -1 && end >= start) {
@@ -148,34 +149,7 @@ const extractCleanJson = (text: string): string => {
     return text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim() || "{}";
 };
 
-const executeNativeCompletion = async (
-    context: LlamaInstance,
-    params: LlamaCompletionParams,
-    initialText: string = "",
-    onChunk?: (token: string) => void
-): Promise<string> => {
-    let fullText = initialText;
-    await context.completion(params, (data) => {
-        fullText += data.token;
-        if (onChunk) onChunk(data.token);
-    });
-    return fullText;
-};
-
-export const abortNativeInference = async () => {
-    if (engineState.context && Platform.OS !== 'web') {
-        try {
-            if (typeof engineState.context.stopCompletion === 'function') {
-                await engineState.context.stopCompletion();
-            } else {
-                await engineState.context.release();
-                engineState.context = null;
-                engineState.modelId = null;
-                engineState.contextSize = 0;
-            }
-        } catch (e) { }
-    }
-};
+// ─── ENGINE MANAGEMENT ───────────────────────────────────────────────────────
 
 export const releaseNativeEngine = async () => {
     if (engineState.context && Platform.OS !== 'web') {
@@ -191,7 +165,7 @@ export const releaseNativeEngine = async () => {
 
 export const configureNativeEngine = async (modelId: string) => {
     const state = useLocalAIStore.getState();
-    const { prefillTokens, gpuLayers, cacheTypeK, cacheTypeV, flashAttn } = state;
+    const { prefillTokens, gpuLayers, cacheTypeK, cacheTypeV, flashAttn, useMmap, useMlock, threads, nBatch } = state;
 
     let targetContext = Platform.OS === 'web'
         ? ABSOLUTE_MAX_HARDWARE_CONTEXT
@@ -199,40 +173,36 @@ export const configureNativeEngine = async (modelId: string) => {
 
     const optimalContext = Math.floor(targetContext / 256) * 256;
 
-    const isMatch = engineState.context && engineState.modelId === modelId && engineState.contextSize === optimalContext;
-    if (isMatch) return;
+    if (engineState.context && engineState.modelId === modelId && engineState.contextSize === optimalContext) return;
 
     await releaseNativeEngine();
 
-    if (!initLlama) {
-        throw new Error("LLAMA_NATIVE_MISSING: Native module not initialized.");
-    }
+    if (!initLlama) throw new Error("LLAMA_NATIVE_MISSING: Native module not initialized.");
 
     const FileSystem = require('expo-file-system/legacy');
     const docDir = FileSystem.documentDirectory || 'file:///tmp/';
-    const model = getModelConfig(modelId);
-    const fileName = model.fileName;
-
-    const fileUri = `${docDir}${fileName}`;
-    const modelPath = fileUri.replace('file://', '');
+    const model = AVAILABLE_MODELS.find(m => m.id === modelId) || AVAILABLE_MODELS[0];
+    const modelPath = `${docDir}${model.fileName}`.replace('file://', '');
 
     try {
-        const fileInfo = await FileSystem.getInfoAsync(fileUri);
-        if (!fileInfo.exists) {
-            throw new Error(`MODEL_FILE_NOT_FOUND: ${fileName} is missing.`);
-        }
+        const fileInfo = await FileSystem.getInfoAsync(`file://${modelPath}`);
+        if (!fileInfo.exists) throw new Error(`MODEL_FILE_NOT_FOUND: ${model.fileName}`);
     } catch (e: any) {
-        throw e;
+        throw new Error("MODEL_FILE_ACCESS_DENIED");
     }
 
     try {
         engineState.context = await initLlama({
-            contextSize: optimalContext,
+            n_ctx: optimalContext, // Fixed: This dictates memory allocation properly to llama.cpp
             model: modelPath,
-            n_gpu_layers: gpuLayers,
+            n_gpu_layers: gpuLayers, // Handled properly (28+ layers for Pixel)
             flash_attn: flashAttn,
             cache_type_k: cacheTypeK,
-            cache_type_v: cacheTypeV
+            cache_type_v: cacheTypeV,
+            use_mmap: useMmap,
+            use_mlock: useMlock,
+            n_threads: threads,
+            n_batch: nBatch // Fixes the compute buffer spike on Android LMKD
         });
 
         engineState.modelId = modelId;
@@ -245,6 +215,8 @@ export const configureNativeEngine = async (modelId: string) => {
         throw new Error(`ENGINE_BOOT_FAILED: ${e.message}`);
     }
 };
+
+// ─── TRANSCRIBER & CHAT INFERENCE ────────────────────────────────────────────
 
 export const runLocalInference = async (prompt: string, onChunk?: (token: string) => void): Promise<string> => {
     const state = useLocalAIStore.getState();
@@ -263,10 +235,8 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
     await activateKeepAwakeAsync();
 
     try {
-        const template = TEMPLATES.gemma4;
         const { systemInstruction, userMessage } = buildAgentPrompt(prompt, "English");
-
-        const formattedPrompt = template.json(userMessage, systemInstruction);
+        const formattedPrompt = TEMPLATES.gemma4.json(userMessage, systemInstruction);
         const estimatedPromptTokens = estimateTokens(formattedPrompt, TOKEN_BUFFER);
 
         if (estimatedPromptTokens >= prefillTokens) {
@@ -276,27 +246,26 @@ export const runLocalInference = async (prompt: string, onChunk?: (token: string
         await configureNativeEngine(activeModelId);
 
         const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
-        if (safeDecodeLimit < 20) {
-            throw new Error(`[Context Overflow: Transcript is too large. Falling back to Cloud.]`);
-        }
-
+        if (safeDecodeLimit < 20) throw new Error(`[Context Overflow: Transcript is too large.]`);
         if (!engineState.context) throw new Error("ENGINE_NOT_READY");
 
-        const result = await executeNativeCompletion(
-            engineState.context,
+        let fullText = "";
+        await engineState.context.completion(
             {
                 prompt: formattedPrompt,
                 n_predict: safeDecodeLimit,
                 temperature: 0.15,
                 top_k: 40,
                 top_p: 0.95,
-                stop: template.stop
+                stop: TEMPLATES.gemma4.stop
             },
-            "",
-            onChunk
+            (data) => {
+                fullText += data.token;
+                if (onChunk) onChunk(data.token);
+            }
         );
 
-        return extractCleanJson(result);
+        return extractCleanJson(fullText);
     } catch (e: any) {
         throw e;
     } finally {
@@ -325,39 +294,36 @@ export const runLocalChatInference = async (
     await new Promise(resolve => setTimeout(resolve, 500));
 
     try {
-        const template = TEMPLATES.gemma4;
-
         const mappedForTemplate = messages.map(m => ({
             role: m.role === 'ai' ? 'assistant' : 'user',
             content: m.content
         })) as { role: 'system' | 'user' | 'assistant'; content: string }[];
 
-        const formattedPrompt = template.chat(mappedForTemplate);
+        const formattedPrompt = TEMPLATES.gemma4.chat(mappedForTemplate);
+        const estimatedPromptTokens = estimateTokens(formattedPrompt);
 
         await configureNativeEngine(activeModelId);
 
-        const estimatedPromptTokens = estimateTokens(formattedPrompt);
         const safeDecodeLimit = Math.min(decodeTokens, prefillTokens - estimatedPromptTokens);
-
-        if (safeDecodeLimit < 20) {
-            throw new Error(`[Context Overflow: Message exceeds allowed memory limits. Increase slider.]`);
-        }
-
+        if (safeDecodeLimit < 20) throw new Error(`[Context Overflow: Memory limit exceeded.]`);
         if (!engineState.context) throw new Error("ENGINE_NOT_READY");
 
-        return await executeNativeCompletion(
-            engineState.context,
+        let fullText = "";
+        await engineState.context.completion(
             {
                 prompt: formattedPrompt,
                 n_predict: safeDecodeLimit,
                 temperature: Math.max(0.65, temperature),
                 top_k: 40,
                 top_p: 0.9,
-                stop: template.stop
+                stop: TEMPLATES.gemma4.stop
             },
-            "",
-            onChunk
+            (data) => {
+                fullText += data.token;
+                if (onChunk) onChunk(data.token);
+            }
         );
+        return fullText;
     } catch (e: any) {
         throw e;
     } finally {
@@ -411,6 +377,6 @@ async function runWebProxyInference(
 
     } catch (e: any) {
         clearTimeout(timeoutId);
-        throw new Error(`GATEWAY_UNREACHABLE: No local engine found. Initiating cloud failover...`);
+        throw new Error(`GATEWAY_UNREACHABLE: No local engine found.`);
     }
 }

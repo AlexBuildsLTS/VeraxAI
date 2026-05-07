@@ -1,243 +1,158 @@
 /**
  * @file store/useLocalAIStore.ts
- * @description Local Engine State Management specifically calibrated for Gemma-4 (E2B/E4B).
- * Enforces strict VRAM clamping to prevent Android OS heap exhaustion.
+ * @description Local Engine State Management calibrated for Gemma-4 (E2B/E4B).
+ * Enforces strict VRAM clamping and optimal GPU layer offloading.
  */
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import * as Device from 'expo-device';
-
-export interface LocalModel {
-    id: string;
-    name: string;
-    sizeGb: number;
-    minRamGb: number;
-    isUncensored: boolean;
-    tags: string[];
-    downloadUrl: string;
-    fileName: string;
-    architecture: string;
-    benchmarks: {
-        expectedTokSec: number;
-        promptEvalMs: number;
-        memoryBandwidth: string;
-    };
-    description?: string;
-}
+import DeviceInfo from 'react-native-device-info';
 
 interface LocalAIState {
-    isHardwareCalibrated: boolean;
-    isLocalServerEnabled: boolean;
-    gatewayUrl: string;
-    allowExternalConnections: boolean;
-
-    computeBackend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu';
-    threads: number;
-    gpuLayers: number;
-    temperature: number;
-    prefillTokens: number;
-    decodeTokens: number;
-
-    cacheTypeK: 'f16' | 'q8_0' | 'q4_0';
-    cacheTypeV: 'f16' | 'q8_0' | 'q4_0';
-    flashAttn: boolean;
-    useMmap: boolean;
-    useMlock: boolean;
-
     activeModelId: string | null;
     downloadedModels: string[];
-    downloadProgress: Record<string, number>;
+    isHardwareCalibrated: boolean;
 
-    toggleServer: (enabled: boolean) => void;
-    setGatewayUrl: (url: string) => void;
-    toggleExternalConnections: (enabled: boolean) => void;
-    setComputeBackend: (backend: 'auto' | 'metal' | 'vulkan' | 'opencl' | 'cpu') => void;
-    setHardwareState: (key: keyof LocalAIState, value: any) => Promise<void>;
+    // Hardware Settings
+    prefillTokens: number;
+    decodeTokens: number;
+    gpuLayers: number;
+    threads: number;
+    nBatch: number;
+    useMmap: boolean;
+    useMlock: boolean;
+    flashAttn: boolean;
+    cacheTypeK: 'f16' | 'q4_0' | 'q8_0';
+    cacheTypeV: 'f16' | 'q4_0' | 'q8_0';
+    temperature: number;
+    gatewayUrl: string;
+
+    // Actions
+    calibrateHardware: () => Promise<void>;
     setActiveModel: (id: string | null) => void;
-
-    setDownloadProgress: (id: string, progress: number) => void;
-    markDownloaded: (id: string) => void;
+    addDownloadedModel: (id: string) => void;
     removeModel: (id: string) => void;
-    clearDownloadProgress: (id: string) => void;
-
-    calibrateHardwareEngine: (deviceRamGb: number) => void;
-    autoCalibrateHardware: () => Promise<void>;
-    resetHardwareToDefaults: () => void;
+    updateSettings: (settings: Partial<LocalAIState>) => void;
 }
 
 export const useLocalAIStore = create<LocalAIState>()(
     persist(
         (set, get) => ({
-            isHardwareCalibrated: false,
-            isLocalServerEnabled: false,
-            gatewayUrl: 'http://127.0.0.1:11434',
-            allowExternalConnections: false,
-
-            computeBackend: 'auto',
-            threads: 8,
-            gpuLayers: -1,
-            temperature: 0.15,
-            prefillTokens: 3584,
-            decodeTokens: 2048,
-
-            cacheTypeK: 'q4_0',
-            cacheTypeV: 'q4_0',
-            flashAttn: true,
-            useMmap: true,
-            useMlock: false,
-
             activeModelId: null,
             downloadedModels: [],
-            downloadProgress: {},
+            isHardwareCalibrated: false,
 
-            toggleServer: (enabled) => set({ isLocalServerEnabled: enabled }),
-            setGatewayUrl: (url) => set({ gatewayUrl: url }),
-            toggleExternalConnections: (enabled) => set({ allowExternalConnections: enabled }),
-            setComputeBackend: (backend) => set({ computeBackend: backend }),
+            // Default values optimized for mobile edge
+            prefillTokens: 3584,
+            decodeTokens: 2048,
+            gpuLayers: 28, // Correct target for Gemma 2B/4B on Pixel/Snapdragon GPUs
+            threads: 4,
+            nBatch: 128, // Throttles allocation spikes to prevent Android OOM
+            useMmap: true,
+            useMlock: false,
+            flashAttn: false, // Disabled by default for Vulkan stability on Tensor G2
+            cacheTypeK: 'q4_0',
+            cacheTypeV: 'q4_0',
+            temperature: 0.15,
+            gatewayUrl: 'http://127.0.0.1:11434',
 
-            setHardwareState: async (key, value) => {
-                set((state) => ({ ...state, [key]: value }));
-                const criticalKeys = ['prefillTokens', 'decodeTokens', 'gpuLayers', 'cacheTypeK', 'cacheTypeV', 'flashAttn'];
+            calibrateHardware: async () => {
+                if (get().isHardwareCalibrated) return;
 
-                if (criticalKeys.includes(key as string)) {
-                    if (Platform.OS !== 'web') {
-                        try {
-                            const { releaseNativeEngine } = require('../services/localInference');
-                            if (releaseNativeEngine) {
-                                await releaseNativeEngine();
-                            }
-                        } catch (error) {
-                            // Interface not mounted yet
-                        }
-                    }
+                const totalRam = await DeviceInfo.getTotalMemory();
+                const ramGB = totalRam / (1024 * 1024 * 1024);
+
+                let safePrefill = 3584;
+                let safeThreads = 4;
+                let safeLayers = 28;
+
+                if (Platform.OS === 'web') {
+                    set({
+                        prefillTokens: 32768,
+                        threads: 8,
+                        gpuLayers: -1,
+                        nBatch: 1024,
+                        isHardwareCalibrated: true
+                    });
+                    return;
                 }
+
+                if (ramGB >= 10) {
+                    safePrefill = 8192;
+                    safeThreads = 6;
+                    safeLayers = 32;
+                } else if (ramGB >= 6) {
+                    safePrefill = 3584;
+                    safeThreads = 4;
+                    safeLayers = 28; // Target for 8GB devices like Pixel 7
+                } else {
+                    safePrefill = 1024;
+                    safeThreads = 2;
+                    safeLayers = 0;
+                }
+
+                set({
+                    prefillTokens: safePrefill,
+                    threads: safeThreads,
+                    gpuLayers: safeLayers,
+                    nBatch: 128,
+                    isHardwareCalibrated: true,
+                    useMmap: true,
+                    cacheTypeK: 'q4_0',
+                    cacheTypeV: 'q4_0'
+                });
             },
 
             setActiveModel: (id) => set({ activeModelId: id }),
 
-            setDownloadProgress: (id, progress) => set((state) => ({
-                downloadProgress: { ...state.downloadProgress, [id]: progress }
-            })),
-
-            markDownloaded: (id) => set((state) => {
-                const newProgress = { ...state.downloadProgress };
-                delete newProgress[id];
-                return {
-                    downloadedModels: Array.from(new Set([...state.downloadedModels, id])),
-                    downloadProgress: newProgress
-                };
-            }),
-
-            removeModel: (id) => set((state) => ({
-                downloadedModels: state.downloadedModels.filter(mId => mId !== id),
-                activeModelId: state.activeModelId === id ? null : state.activeModelId
-            })),
-
-            clearDownloadProgress: (id) => set((state) => {
-                const newProgress = { ...state.downloadProgress };
-                delete newProgress[id];
-                return { downloadProgress: newProgress };
-            }),
-
-            resetHardwareToDefaults: () => set({
-                gpuLayers: -1,
-                threads: 8,
-                temperature: 0.15,
-                prefillTokens: 3584,
-                decodeTokens: 2048,
-                cacheTypeK: 'q4_0',
-                cacheTypeV: 'q4_0',
-                flashAttn: true,
-                isHardwareCalibrated: false
-            }),
-
-            calibrateHardwareEngine: (deviceRamGb: number) => {
-                if (Platform.OS === 'web') {
-                    set({
-                        computeBackend: 'auto',
-                        prefillTokens: 32768,
-                        cacheTypeK: 'f16',
-                        cacheTypeV: 'f16',
-                        flashAttn: true,
-                        isHardwareCalibrated: true
-                    });
-                    return;
-                }
-
-                if (deviceRamGb >= 10) {
-                    set({
-                        computeBackend: 'vulkan',
-                        prefillTokens: 3584,
-                        cacheTypeK: 'q4_0',
-                        cacheTypeV: 'q4_0',
-                        flashAttn: true,
-                        gpuLayers: -1,
-                        isHardwareCalibrated: true
-                    });
-                } else if (deviceRamGb >= 6) {
-                    set({
-                        computeBackend: 'vulkan',
-                        prefillTokens: 2048,
-                        cacheTypeK: 'q4_0',
-                        cacheTypeV: 'q4_0',
-                        flashAttn: true,
-                        gpuLayers: -1,
-                        isHardwareCalibrated: true
-                    });
-                } else {
-                    set({
-                        computeBackend: 'cpu',
-                        prefillTokens: 1024,
-                        cacheTypeK: 'q4_0',
-                        cacheTypeV: 'q4_0',
-                        flashAttn: false,
-                        gpuLayers: 0,
-                        isHardwareCalibrated: true
-                    });
+            addDownloadedModel: (id) => {
+                const current = get().downloadedModels;
+                if (!current.includes(id)) {
+                    set({ downloadedModels: [...current, id] });
                 }
             },
 
-            autoCalibrateHardware: async () => {
-                if (get().isHardwareCalibrated) return;
+            removeModel: (id) => {
+                set((state) => ({
+                    downloadedModels: state.downloadedModels.filter((m) => m !== id),
+                    activeModelId: state.activeModelId === id ? null : state.activeModelId,
+                }));
+            },
 
-                if (Platform.OS === 'web') {
-                    get().calibrateHardwareEngine(32);
-                    return;
+            updateSettings: (settings) => {
+                const criticalKeys = ['prefillTokens', 'gpuLayers', 'cacheTypeK', 'cacheTypeV', 'flashAttn', 'nBatch'];
+                const shouldRelease = Object.keys(settings).some(k => criticalKeys.includes(k));
+
+                set((state) => ({ ...state, ...settings }));
+
+                if (shouldRelease && Platform.OS !== 'web') {
+                    try {
+                        const { releaseNativeEngine } = require('../services/localInference');
+                        releaseNativeEngine();
+                    } catch (e) { }
                 }
-                try {
-                    const totalMemoryBytes = await Device.totalMemory;
-                    const ramInBytes = totalMemoryBytes || 8589934592;
-                    const ramInGb = ramInBytes / (1024 * 1024 * 1024);
-                    get().calibrateHardwareEngine(ramInGb);
-                } catch (error) {
-                    get().calibrateHardwareEngine(8);
-                }
-            }
+            },
         }),
         {
             name: 'verax-local-ai-storage',
             storage: createJSONStorage(() => AsyncStorage),
             partialize: (state) => ({
-                isHardwareCalibrated: state.isHardwareCalibrated,
-                isLocalServerEnabled: state.isLocalServerEnabled,
                 activeModelId: state.activeModelId,
-                gatewayUrl: state.gatewayUrl,
-                allowExternalConnections: state.allowExternalConnections,
-                computeBackend: state.computeBackend,
-                threads: state.threads,
-                gpuLayers: state.gpuLayers,
-                temperature: state.temperature,
+                downloadedModels: state.downloadedModels,
+                isHardwareCalibrated: state.isHardwareCalibrated,
                 prefillTokens: state.prefillTokens,
                 decodeTokens: state.decodeTokens,
+                gpuLayers: state.gpuLayers,
+                threads: state.threads,
+                nBatch: state.nBatch,
+                useMmap: state.useMmap,
                 cacheTypeK: state.cacheTypeK,
                 cacheTypeV: state.cacheTypeV,
                 flashAttn: state.flashAttn,
-                useMmap: state.useMmap,
-                useMlock: state.useMlock,
-                downloadedModels: state.downloadedModels,
+                temperature: state.temperature,
+                gatewayUrl: state.gatewayUrl,
             }),
         }
     )
